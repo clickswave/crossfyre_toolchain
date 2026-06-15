@@ -1,0 +1,25 @@
+[package]
+name = "voyage"
+version = "0.0.1"
+edition = "2024"
+homepage = "https://clickswave.org"
+repository = "https://github.com/clickswave/voyage"
+keywords = ["subdomain", "enumeration", "security", "recon", "stateful"]
+authors = ["Clickswave <hi@clickswave.org>"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "chrono"] }
+reqwest = { version = "0.12", features = ["json"] }
+hickory-resolver = "0.25"
+ratatui = { version = "0.30.0-alpha.5", features = ["crossterm"] }
+crossterm = "0.29"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+toml = "0.8"
+dirs = "5"
+rand = "0.9"
+dialoguer = "0.11"

@@ -1,0 +1,45 @@
+import targets
+import extensions
+import cfxs
+
+def run():
+    server = cfxs.connect()
+    mach = extensions.get("mach")
+
+    for t in targets.get_all():
+        if t.type != "url":
+            server.log(f"Skipping non-URL target: {t.value} ({t.type})")
+            continue
+
+        server.log(f"Starting content discovery on {t.value}")
+
+        # Run a streamed scan via the mach daemon.
+        # The endpoint should contain ::FUZZ:: where the wordlist entry goes.
+        # If the target URL doesn't have it, append it.
+        endpoint = t.value
+        if "::FUZZ::" not in endpoint:
+            endpoint = endpoint.rstrip("/") + "/::FUZZ::"
+
+        events = mach.scan({
+            "endpoint": endpoint,
+            "wordlist": "/opt/crossfyre/wordlists/common.txt",
+            "method": "GET",
+            "tasks": 10,
+            "success_status_codes": [200, 201, 301, 302, 403],
+        })
+
+        found_count = 0
+        for event in events:
+            if event.get("type") == "result" and event.get("status") == "found":
+                found_count += 1
+                server.send_result({
+                    "target": event.get("url", t.value),
+                    "type": "endpoint",
+                    "status_code": event.get("code"),
+                    "body_length": event.get("body_length"),
+                    "source": "mach",
+                })
+
+        server.log(f"Finished {t.value}: {found_count} endpoint(s) found")
+
+    server.signal.completed(0)
