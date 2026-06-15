@@ -853,6 +853,12 @@ pub async fn run_init(
         }
     };
 
+    // Ensure the `node` worker binary is installed next to crossfyre, so the
+    // node service's ExecStart (/opt/crossfyre/bin/node) resolves.
+    if let Err(e) = toolchain::install::ensure_node_installed().await {
+        eprintln!("[install] WARN could not install the node worker binary: {e}");
+    }
+
     // Write the default toolchain config (postgres connection for the
     // extension daemons) if this host doesn't have one yet.
     if let Err(e) = toolchain::config::load_or_create_config() {

@@ -236,6 +236,10 @@ pub async fn update(target: Option<&str>) -> Result<bool, Box<dyn std::error::Er
 
     if do_self {
         self_updated = self_update(&manifest).await?;
+        // The node worker is part of "self": keep it in lockstep with the CLI.
+        if let Err(e) = download_node(&manifest).await {
+            eprintln!("[update] WARN could not update the node worker binary: {e}");
+        }
     }
 
     Ok(self_updated)
@@ -297,4 +301,46 @@ pub fn ensure_self_installed() -> Result<std::path::PathBuf, Box<dyn std::error:
     place_binary(&exe, &stable)?;
     println!("[+] Installed crossfyre binary to {}", stable.display());
     Ok(stable)
+}
+
+/// Download + install the `node` worker binary to the stable bin dir. The
+/// crossfyre CLI and the OS service exec it (ExecStart=/opt/crossfyre/bin/node),
+/// so it must sit next to crossfyre.
+pub async fn download_node(manifest: &Manifest) -> Result<(), Box<dyn std::error::Error>> {
+    let (comp, artifact) = resolve_artifact(manifest, "node")?;
+    let tmp_dir = tempfile::tempdir()?;
+    let zip_path = tmp_dir.path().join(&artifact.file);
+    download_verified(artifact, &zip_path).await?;
+    let extract_dir = tmp_dir.path().join("extracted");
+    extract_zip(&zip_path, &extract_dir)?;
+    let extracted = extract_dir.join(ext_file_name("node"));
+    if !extracted.exists() {
+        return Err("node binary not found inside the node zip".into());
+    }
+    let stable = get_bin_dir().join(ext_file_name("node"));
+    place_binary(&extracted, &stable)?;
+    println!("[+] node worker installed at {} ({})", stable.display(), comp.version);
+    Ok(())
+}
+
+/// Ensure the `node` worker binary is present next to crossfyre. Prefers a
+/// sibling of the running binary (fresh install / dev checkout) and falls back
+/// to downloading it from the release manifest. Called during `node init` so
+/// the service's ExecStart resolves.
+pub async fn ensure_node_installed() -> Result<(), Box<dyn std::error::Error>> {
+    let stable = get_bin_dir().join(ext_file_name("node"));
+    if stable.exists() {
+        return Ok(());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(sib) = exe.parent().map(|d| d.join(ext_file_name("node"))) {
+            if sib.exists() && sib != stable {
+                place_binary(&sib, &stable)?;
+                println!("[+] Installed node binary to {}", stable.display());
+                return Ok(());
+            }
+        }
+    }
+    let manifest = fetch_manifest().await?;
+    download_node(&manifest).await
 }
