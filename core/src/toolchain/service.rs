@@ -182,6 +182,10 @@ mod node {
             Some((_, _, _, name)) => format!("Environment=SUDO_USER={}\n", name),
             None => String::new(),
         };
+        // The supervisor is the separate `node` worker binary, installed
+        // alongside `crossfyre` (e.g. /opt/crossfyre/bin/node). Derive its path
+        // from the crossfyre binary path we were given.
+        let node_exe = exe.with_file_name("node");
         let body = format!(
             "[Unit]\n\
              Description=Crossfyre node supervisor\n\
@@ -190,14 +194,14 @@ mod node {
              \n\
              [Service]\n\
              Type=simple\n\
-             ExecStart={exe} node supervise --data-dir {data_dir}\n\
+             ExecStart={node_exe} supervise --data-dir {data_dir}\n\
              {sudo_env}\
              Restart=on-failure\n\
              RestartSec=5\n\
              \n\
              [Install]\n\
              WantedBy=multi-user.target\n",
-            exe = exe.display(),
+            node_exe = node_exe.display(),
             data_dir = data_dir.display(),
             sudo_env = sudo_env,
         );

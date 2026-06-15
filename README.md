@@ -81,7 +81,7 @@ You need a recent stable [Rust toolchain](https://rustup.rs).
 git clone https://github.com/clickswave/crossfyre_toolchain.git
 cd crossfyre_toolchain
 cargo build --release
-# binaries land in ./target/release/{crossfyre,mach,voyage,pulse}
+# binaries land in ./target/release/{crossfyre,node,mach,voyage,pulse}
 ```
 
 To install a single tool straight from the repo:

@@ -1,10 +1,10 @@
 [package]
-name = "crossfyre"
+name = "node"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "crossfyre"
+name = "node"
 path = "src/main.rs"
 
 [dependencies]
