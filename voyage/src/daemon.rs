@@ -67,6 +67,10 @@ struct EnumParams {
     active_user_agent: String,
     #[serde(default = "default_passive_ua")]
     passive_user_agent: String,
+    /// Explicit DNS server IP to resolve against. Empty = use the node's
+    /// default resolver config.
+    #[serde(default)]
+    dns_server: String,
 }
 
 fn default_tasks() -> usize {
@@ -92,6 +96,8 @@ struct ProbeParams {
     /// 0 = don't store; 1-8766 = store and delete after this many hours
     #[serde(default)]
     volatility: u32,
+    #[serde(default)]
+    dns_server: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +516,7 @@ async fn prepare_enum(
         active_user_agent: params.active_user_agent.clone(),
         passive_user_agent: params.passive_user_agent.clone(),
         active_random_user_agent: false,
+        dns_server: params.dns_server.clone(),
     };
 
     let scanner = Scanner::new(config, Arc::clone(db));
@@ -543,7 +550,7 @@ async fn run_enum_instant(
 // ---------------------------------------------------------------------------
 
 async fn run_probe(params: ProbeParams, db: Arc<VoyageDb>) -> DaemonResponse {
-    let resolver = match crate::libs::dns::create_resolver() {
+    let resolver = match crate::libs::dns::create_resolver(Some(params.dns_server.as_str())) {
         Ok(r) => r,
         Err(e) => {
             return DaemonResponse {

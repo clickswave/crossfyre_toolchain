@@ -311,6 +311,11 @@ async fn probe_port(host: &str, port: u16, timeout_dur: Duration, detect_service
         match timeout(timeout_dur, TcpStream::connect(addr)).await {
             Ok(Ok(stream)) => {
                 let latency = start.elapsed().as_millis() as u64;
+                // RST-close instead of a graceful FIN so the socket doesn't sit
+                // in TIME_WAIT. A full-range scan opens tens of thousands of
+                // connections; without this the local ephemeral-port pool is
+                // exhausted partway through and connect() stalls (slow tail).
+                let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                 if detect_service {
                     let service = identify_service(port);
                     let banner = grab_banner(&stream, timeout_dur).await;

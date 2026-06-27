@@ -93,7 +93,13 @@ struct ProbeParams {
     /// 0 = don't store; 1-8766 = store and delete after this many hours
     #[serde(default)]
     volatility: u32,
+    /// Whether to follow HTTP redirects (wizard toggle). Defaults to true to
+    /// preserve the daemon's historical behaviour for direct callers.
+    #[serde(default = "default_follow_redirects")]
+    follow_redirects: bool,
 }
+
+fn default_follow_redirects() -> bool { true }
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -108,6 +114,15 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
         Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::limited(10))
+            .user_agent(format!("mach/{}", env!("CARGO_PKG_VERSION")))
+            .build()?,
+    );
+    // Second client that does NOT follow redirects, for the wizard's
+    // "Follow Redirects = off" probes (reqwest sets redirect policy per-client).
+    let probe_client_noredirect = Arc::new(
+        Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent(format!("mach/{}", env!("CARGO_PKG_VERSION")))
             .build()?,
     );
@@ -133,8 +148,9 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
         let _ = stream.set_nodelay(true);
         let db_clone = Arc::clone(&db);
         let client_clone = Arc::clone(&probe_client);
+        let client_noredir_clone = Arc::clone(&probe_client_noredirect);
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, db_clone, client_clone).await {
+            if let Err(e) = handle_connection(stream, db_clone, client_clone, client_noredir_clone).await {
                 eprintln!("Connection error from {}: {}", addr, e);
             }
         });
@@ -149,6 +165,7 @@ async fn handle_connection(
     stream: TcpStream,
     db: Arc<MachDb>,
     probe_client: Arc<Client>,
+    probe_client_noredirect: Arc<Client>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -178,7 +195,7 @@ async fn handle_connection(
             return Ok(());
         }
 
-        let response = dispatch(req, Arc::clone(&db), Arc::clone(&probe_client)).await;
+        let response = dispatch(req, Arc::clone(&db), Arc::clone(&probe_client), Arc::clone(&probe_client_noredirect)).await;
         write_json(&mut writer, &response).await?;
     }
 
@@ -285,7 +302,7 @@ async fn handle_stream_scan(
 // Regular (non-stream) dispatch
 // ---------------------------------------------------------------------------
 
-async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>) -> DaemonResponse {
+async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>, probe_client_noredirect: Arc<Client>) -> DaemonResponse {
     let operation_id = Uuid::new_v4().to_string();
 
     match req.operation.as_str() {
@@ -335,7 +352,9 @@ async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>
                     message: Some(format!("Invalid probe params: {}", e)),
                 },
             };
-            run_probe(probe_params, probe_client, db).await
+            // Pick the client whose redirect policy matches the request.
+            let client = if probe_params.follow_redirects { probe_client } else { probe_client_noredirect };
+            run_probe(probe_params, client, db).await
         }
         "db_reset" => {
             match db.truncate_tables().await {

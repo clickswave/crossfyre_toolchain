@@ -77,6 +77,22 @@ pub fn resume_workflow(id: &str) {
     if let Ok(mut s) = cancelled_workflows().lock() { s.remove(id); }
 }
 
+/// Operations this node has already COMPLETED, so a re-dispatch of the same op
+/// (e.g. after pause/resume, which re-sprays still-pending ops and can overlap
+/// with tasks still draining from the first dispatch) is skipped instead of
+/// probing the target a second time. Only completed ops are recorded, so an op
+/// that was dropped mid-flight by a pause is still free to re-run on resume.
+static DONE_OPS: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+fn done_ops() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    DONE_OPS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+pub fn op_is_done(op_id: &str) -> bool {
+    done_ops().lock().map(|s| s.contains(op_id)).unwrap_or(false)
+}
+pub fn mark_op_done(op_id: &str) {
+    if let Ok(mut s) = done_ops().lock() { s.insert(op_id.to_string()); }
+}
+
 /// Per-workflow semaphore registry. Each workflow is sized at the user's
 /// configured `tasks` value (from step 5 of the wizard) - so a DS port scan
 /// with tasks=2 keeps exactly 2 probes in flight at any moment, picking up
@@ -2204,6 +2220,27 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                         return;
                                     }
 
+                                    // Already completed this op (a pause/resume or the
+                                    // server's stuck-op watchdog can re-dispatch an op
+                                    // whose first copy already ran). Don't probe twice -
+                                    // but DO re-publish the completion ack, because a
+                                    // re-dispatch usually means the original ack was
+                                    // dropped by NATS Core. Silently returning is what
+                                    // leaves a scan parked at 9x% on lost acks.
+                                    if op_is_done(&op_id) {
+                                        let reack = serde_json::json!({
+                                            "type": "operation_completed",
+                                            "operation_id": op_id,
+                                            "workflow_id": workflow_id,
+                                            "found_count": 0,
+                                            "node_id": node_id,
+                                        });
+                                        let _ = pub_clone
+                                            .publish(status_subj.clone(), reack.to_string().into())
+                                            .await;
+                                        return;
+                                    }
+
                                     // Track in-flight count through the rest of the
                                     // closure. Print a stat line on every claim so
                                     // the operator can see the throttle in action -
@@ -2284,6 +2321,8 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                 "success_codes": codes,
                                                 "volatility": 0,
                                                 "operation_id": op_id,
+                                                // Wizard "Follow Redirects" toggle (default off).
+                                                "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(false),
                                             });
 
                                             let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
@@ -2296,7 +2335,17 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                     let _ = writer.write_all(req_str.as_bytes()).await;
 
                                                     let mut lines = BufReader::new(reader).lines();
-                                                    if let Ok(Some(line)) = lines.next_line().await {
+                                                    // Bound the wait. If mach connects but never
+                                                    // answers (target stopped responding, or mach
+                                                    // wedged on this URL), don't deadlock the op
+                                                    // forever - time out and fall through to the
+                                                    // completion ack below so the scan advances.
+                                                    let read = tokio::time::timeout(
+                                                        std::time::Duration::from_secs(30),
+                                                        lines.next_line(),
+                                                    )
+                                                    .await;
+                                                    if let Ok(Ok(Some(line))) = read {
                                                         if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
                                                             let status = resp["status"].as_str().unwrap_or("");
                                                             let code = resp["code"].as_i64().unwrap_or(0);
@@ -2342,6 +2391,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                             });
                                             let _ = pub_clone.publish(result_subj, done_msg.to_string().into()).await;
 
+                                            mark_op_done(&op_id);
                                             let status_msg = serde_json::json!({
                                                 "type": "operation_completed",
                                                 "operation_id": op_id,
@@ -2514,6 +2564,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                 let _ = pub_clone.publish(result_subj, done_msg.to_string().into()).await;
 
                                                 // Report on status channel
+                                                mark_op_done(&op_id);
                                                 let status_msg = serde_json::json!({
                                                     "type": "operation_completed",
                                                     "operation_id": op_id,
@@ -2583,6 +2634,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                             "fresh_start": true,
                                             "disable_passive": disable_passive,
                                             "disable_active": disable_active,
+                                            "dns_server": data["dns_server"].as_str().unwrap_or(""),
                                         });
 
                                         let conn = tokio::net::TcpStream::connect("127.0.0.1:4442").await;
@@ -2597,9 +2649,39 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                 let mut lines = BufReader::new(reader).lines();
                                                 let mut found_count = 0;
                                                 let mut total_events = 0;
+                                                // Phase + progress: voyage's "ack" carries the total candidate count
+                                                // (active = wordlist size); each "result" is one processed candidate.
+                                                // Forward a throttled progress signal for "Active: 1,234 / 5,000".
+                                                let phase = data["phase"].as_str().or_else(|| data["mode"].as_str()).unwrap_or("active").to_string();
+                                                let mut total: i64 = 0;
+                                                let mut processed: i64 = 0;
+                                                let mut last_prog = std::time::Instant::now();
+                                                let emit_progress = |processed: i64, total: i64, found: i64| {
+                                                    let p = pub_clone.clone();
+                                                    let subj = status_subj.clone();
+                                                    let oid = op_id.clone();
+                                                    let wid = workflow_id.to_string();
+                                                    let ph = phase.clone();
+                                                    let nid = node_id.clone();
+                                                    async move {
+                                                        let msg = serde_json::json!({
+                                                            "type": "operation_progress", "operation_id": oid, "workflow_id": wid,
+                                                            "phase": ph, "processed": processed, "total": total,
+                                                            "found_count": found, "node_id": nid,
+                                                        });
+                                                        let _ = p.publish(subj, msg.to_string().into()).await;
+                                                    }
+                                                };
 
                                                 while let Ok(Some(line)) = lines.next_line().await {
                                                     if line.trim().is_empty() { continue; }
+                                                    // Operator paused/stopped the workflow: quit forwarding so
+                                                    // results stop appearing. The op stays 'running' (not marked
+                                                    // done), so resume re-dispatches and re-runs it.
+                                                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+                                                        println!("[op] subdomain enum cancelled (workflow paused) - stopping stream");
+                                                        return;
+                                                    }
                                                     total_events += 1;
                                                     if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
                                                         let evt_type = event["type"].as_str().unwrap_or("");
@@ -2611,30 +2693,40 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                         }
 
                                                         match evt_type {
-                                                            "result" if event["status"].as_str() == Some("found") => {
-                                                                found_count += 1;
-                                                                let subdomain = event["subdomain"].as_str().unwrap_or("");
-                                                                let source = event["source"].as_str().unwrap_or("unknown");
-
-                                                                let result_msg = serde_json::json!({
-                                                                    "type": "result",
-                                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                    "workflow_id": workflow_id,
-                                                                    "data": {
-                                                                        "target": subdomain,
-                                                                        "type": "subdomain",
-                                                                        "source": source,
-                                                                        "domain": domain,
-                                                                        "operation_id": op_id,
-                                                                    }
-                                                                });
-                                                                let _ = pub_clone.publish(
-                                                                    result_subj.clone(),
-                                                                    result_msg.to_string().into()
-                                                                ).await;
+                                                            "ack" => {
+                                                                total = event["total"].as_i64().unwrap_or(0);
+                                                                println!("[progress] phase={} total={} (voyage ack) - emitting operation_progress", phase, total);
+                                                                emit_progress(0, total, 0).await;
+                                                            }
+                                                            "result" => {
+                                                                processed += 1;
+                                                                if event["status"].as_str() == Some("found") {
+                                                                    found_count += 1;
+                                                                    let subdomain = event["subdomain"].as_str().unwrap_or("");
+                                                                    let source = event["source"].as_str().unwrap_or("unknown");
+                                                                    let result_msg = serde_json::json!({
+                                                                        "type": "result",
+                                                                        "job_id": format!("{}-{}", workflow_id, op_id),
+                                                                        "workflow_id": workflow_id,
+                                                                        "data": {
+                                                                            "target": subdomain,
+                                                                            "type": "subdomain",
+                                                                            "source": source,
+                                                                            "domain": domain,
+                                                                            "operation_id": op_id,
+                                                                        }
+                                                                    });
+                                                                    let _ = pub_clone.publish(result_subj.clone(), result_msg.to_string().into()).await;
+                                                                }
+                                                                if last_prog.elapsed() >= std::time::Duration::from_millis(1500) {
+                                                                    println!("[progress] phase={} {}/{} processed", phase, processed, total);
+                                                                    emit_progress(processed, total, found_count).await;
+                                                                    last_prog = std::time::Instant::now();
+                                                                }
                                                             }
                                                             "done" => {
                                                                 println!("[op] OK Enum complete: {} subdomains found ({} events)", found_count, total_events);
+                                                                emit_progress(if total > 0 { total } else { processed }, total, found_count).await;
                                                                 break;
                                                             }
                                                             "error" => {
@@ -2655,6 +2747,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                 });
                                                 let _ = pub_clone.publish(result_subj, done_msg.to_string().into()).await;
 
+                                                mark_op_done(&op_id);
                                                 let status_msg = serde_json::json!({
                                                     "type": "operation_completed",
                                                     "operation_id": op_id,
@@ -2722,6 +2815,9 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                             match conn {
                                                 Ok(stream) => {
                                                     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                                                    // RST-close so this per-op connection to pulse doesn't pile
+                                                    // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
+                                                    let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                                                     let (reader, mut writer) = stream.into_split();
                                                     let mut req_str = serde_json::to_string(&pulse_req).unwrap();
                                                     req_str.push('\n');
@@ -2803,6 +2899,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                         println!("[ds {} {}:{}] -> completed published (found={})", short_op, host, port, found_count);
                                                     }
 
+                                                    mark_op_done(&op_id);
                                                     let status_msg = serde_json::json!({
                                                         "type": "operation_completed",
                                                         "operation_id": op_id,
@@ -2869,6 +2966,9 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                         match conn {
                                             Ok(stream) => {
                                                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                                                // RST-close so this per-op connection to pulse doesn't pile
+                                                // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
+                                                let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                                                 let (reader, mut writer) = stream.into_split();
                                                 let mut req_str = serde_json::to_string(&pulse_req).unwrap();
                                                 req_str.push('\n');
@@ -2929,6 +3029,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                                 });
                                                 let _ = pub_clone.publish(result_subj, done_msg.to_string().into()).await;
 
+                                                mark_op_done(&op_id);
                                                 let status_msg = serde_json::json!({
                                                     "type": "operation_completed",
                                                     "operation_id": op_id,

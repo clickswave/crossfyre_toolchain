@@ -20,6 +20,7 @@ pub struct EnumConfig {
     pub active_user_agent: String,
     pub passive_user_agent: String,
     pub active_random_user_agent: bool,
+    pub dns_server: String,
 }
 
 /// Events streamed from the daemon to the enum client over TCP.
@@ -137,7 +138,7 @@ async fn task_handle(
     db: Arc<VoyageDb>,
     event_tx: Arc<mpsc::UnboundedSender<StreamEvent>>,
 ) -> Result<(), sqlx::Error> {
-    let resolver = match crate::libs::dns::create_resolver() {
+    let resolver = match crate::libs::dns::create_resolver(Some(config.dns_server.as_str())) {
         Ok(r) => r,
         Err(e) => {
             emit_log(

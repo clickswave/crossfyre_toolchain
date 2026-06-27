@@ -9,7 +9,7 @@ pub async fn handle(
     is_paused: Arc<AtomicBool>,
     args: Args,
 ) {
-    let resolver = match libs::dns::create_resolver() {
+    let resolver = match libs::dns::create_resolver(None) {
         Ok(resolver) => resolver,
         Err(e) => {
             let _ = libs::sqlite::insert_log(

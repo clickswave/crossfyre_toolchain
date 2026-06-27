@@ -19,15 +19,21 @@ pub async fn fetch(
     if response.status().is_success() {
         let body: Vec<Response> = response.json().await?;
         let mut unique_subdomains = HashSet::new();
+        // crt.sh packs every SAN of a cert into one newline-separated
+        // name_value, so split it into individual hostnames before parsing.
+        let dot_suffix = format!(".{}", domain);
         for entry in body {
-            let subdomain = entry.name_value;
-            if subdomain.ends_with(domain) {
-                let stripped = subdomain
-                    .strip_suffix(domain)
-                    .unwrap_or("")
-                    .trim_end_matches('.');
-                if !stripped.is_empty() && stripped != "*" {
-                    unique_subdomains.insert(stripped.to_string());
+            for raw in entry.name_value.split(['\n', '\r']) {
+                let host = raw.trim().trim_start_matches("*.").to_lowercase();
+                if host.is_empty() {
+                    continue;
+                }
+                // Keep only real subdomains of the target (skip the apex and
+                // unrelated names like "notgoogle.com" that merely end in it).
+                if let Some(stripped) = host.strip_suffix(&dot_suffix) {
+                    if !stripped.is_empty() && stripped != "*" {
+                        unique_subdomains.insert(stripped.to_string());
+                    }
                 }
             }
         }

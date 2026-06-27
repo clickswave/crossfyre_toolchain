@@ -237,11 +237,16 @@ pub async fn update(target: Option<&str>) -> Result<bool, Box<dyn std::error::Er
     if do_self {
         self_updated = self_update(&manifest).await?;
         // The node worker is part of "self": keep it in lockstep with the CLI.
-        if let Err(e) = download_node(&manifest).await {
-            eprintln!("[update] WARN could not update the node worker binary: {e}");
+        // A node-only bump (CLI version unchanged) must still trigger a service
+        // restart, so fold the node refresh into the restart signal.
+        match download_node(&manifest).await {
+            Ok(node_changed) => self_updated = self_updated || node_changed,
+            Err(e) => eprintln!("[update] WARN could not update the node worker binary: {e}"),
         }
     }
 
+    // Returns true when the node service should be restarted (CLI and/or node
+    // worker binary changed).
     Ok(self_updated)
 }
 
@@ -306,8 +311,18 @@ pub fn ensure_self_installed() -> Result<std::path::PathBuf, Box<dyn std::error:
 /// Download + install the `node` worker binary to the stable bin dir. The
 /// crossfyre CLI and the OS service exec it (ExecStart=/opt/crossfyre/bin/node),
 /// so it must sit next to crossfyre.
-pub async fn download_node(manifest: &Manifest) -> Result<(), Box<dyn std::error::Error>> {
+/// Returns true when the node binary was (re)written, i.e. the caller should
+/// restart the node service. Skips the download when the installed version
+/// already matches the manifest (tracked via a sidecar version file).
+pub async fn download_node(manifest: &Manifest) -> Result<bool, Box<dyn std::error::Error>> {
     let (comp, artifact) = resolve_artifact(manifest, "node")?;
+    let stable = get_bin_dir().join(ext_file_name("node"));
+    let ver_file = get_bin_dir().join("node.version");
+    let installed = std::fs::read_to_string(&ver_file).ok().map(|s| s.trim().to_string());
+    if stable.exists() && installed.as_deref() == Some(comp.version.as_str()) {
+        return Ok(false); // already current
+    }
+
     let tmp_dir = tempfile::tempdir()?;
     let zip_path = tmp_dir.path().join(&artifact.file);
     download_verified(artifact, &zip_path).await?;
@@ -317,10 +332,10 @@ pub async fn download_node(manifest: &Manifest) -> Result<(), Box<dyn std::error
     if !extracted.exists() {
         return Err("node binary not found inside the node zip".into());
     }
-    let stable = get_bin_dir().join(ext_file_name("node"));
     place_binary(&extracted, &stable)?;
-    println!("[+] node worker installed at {} ({})", stable.display(), comp.version);
-    Ok(())
+    let _ = std::fs::write(&ver_file, &comp.version);
+    println!("[+] node worker updated to {} at {}", comp.version, stable.display());
+    Ok(true)
 }
 
 /// Ensure the `node` worker binary is present next to crossfyre. Prefers a
@@ -342,5 +357,6 @@ pub async fn ensure_node_installed() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let manifest = fetch_manifest().await?;
-    download_node(&manifest).await
+    download_node(&manifest).await?;
+    Ok(())
 }

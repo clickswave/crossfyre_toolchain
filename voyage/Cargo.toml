@@ -1,6 +1,6 @@
 [package]
 name = "voyage"
-version = "0.0.1"
+version = "0.0.3"
 edition = "2024"
 homepage = "https://clickswave.org"
 repository = "https://github.com/clickswave/voyage"
