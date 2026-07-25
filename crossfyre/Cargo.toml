@@ -1,0 +1,17 @@
+[package]
+name = "crossfyre"
+version = "0.1.11"
+edition = "2024"
+homepage = "https://clickswave.org"
+repository = "https://github.com/clickswave/crossfyre_toolchain"
+authors = ["Clickswave <team@clickswave.org>"]
+
+[[bin]]
+name = "crossfyre"
+path = "src/main.rs"
+
+[dependencies]
+cfx_core = { path = "../core" }
+oast = { path = "../oast" }
+clap = { version = "4.5.60", features = ["derive"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time", "signal"] }
