@@ -1,0 +1,66 @@
+import targets
+import extensions
+import cfxs
+import silo
+import nodes
+
+def run():
+    print("=== CFX Runtime Test ===")
+    print()
+
+    # 1. Test targets module
+    print("[*] Testing targets.get_all()...")
+    all_targets = targets.get_all()
+    print(f"    Got {len(all_targets)} target(s)")
+    for t in all_targets:
+        print(f"    -> {t.type} = {t.value}")
+    print()
+
+    # 2. Test nodes module
+    print("[*] Testing nodes...")
+    me = nodes.current()
+    print(f"    Current node: {me.id} ({me.name})")
+    print()
+
+    # 3. Test extensions registry
+    print("[*] Testing extensions registry...")
+    available = extensions.list_all()
+    print(f"    {len(available)} extensions registered: {', '.join(sorted(available))}")
+
+    # Register a custom extension (echo, guaranteed to exist)
+    extensions.register("echo_test", "echo")
+    ext = extensions.get("echo_test")
+    result = ext.run(["hello", "from", "cfx"])
+    print(f"    echo_test.run() -> {result.strip()}")
+
+    # Show daemon extensions
+    mach = extensions.get("mach")
+    print(f"    mach extension: {mach} (port={mach.port})")
+    voyage = extensions.get("voyage")
+    print(f"    voyage extension: {voyage} (port={voyage.port})")
+    print()
+
+    # 4. Test cfxs module
+    print("[*] Testing cfxs.connect()...")
+    server = cfxs.connect()
+    print(f"    Connected: node_id={server.node_id}, job_id={server.job_id}")
+
+    server.log("Test log message from .cfx script")
+
+    # Send some mock results
+    for t in all_targets:
+        server.send_result({
+            "target": t.value,
+            "type": t.type,
+            "status": "discovered",
+            "source": "test_script"
+        })
+        print(f"    Sent result for {t.value}")
+
+    print()
+
+    # 5. Signal completion
+    print("[*] Signalling completion...")
+    server.signal.completed(0)
+    print()
+    print("=== Test Complete ===")
