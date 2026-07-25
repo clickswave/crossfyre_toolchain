@@ -1,0 +1,37 @@
+[package]
+name = "oast"
+version = "0.1.0"
+edition = "2021"
+homepage = "https://clickswave.org"
+repository = "https://github.com/clickswave/crossfyre_toolchain"
+description = "Self-hosted OAST (out-of-band application security testing) interaction server for Crossfyre: captures HTTP(S)/DNS callbacks and exposes an encrypted, token-scoped poll API so cortex can confirm blind vulnerabilities."
+authors = ["Clickswave <team@clickswave.org>"]
+license = "Apache-2.0"
+
+# Built as both a library (so `crossfyre oast serve` can run it in-process) and a
+# standalone `oast` binary. Self-hosters bring their own domain + box; cortex reaches
+# the server via the same encrypted register/poll protocol the managed pool uses.
+
+[lib]
+name = "oast"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oast"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+axum = "0.8.8"
+axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.148"
+tracing = "0.1.41"
+tracing-subscriber = "0.3"
+rsa = "0.9"
+aes-gcm = "0.10"
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
