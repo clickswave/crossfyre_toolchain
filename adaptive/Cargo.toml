@@ -1,0 +1,11 @@
+[package]
+name = "adaptive"
+version = "0.0.1"
+edition = "2024"
+homepage = "https://clickswave.org"
+description = "Reusable adaptive rate-limiting and resilience control for Crossfyre workflows"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
