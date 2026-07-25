@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+members = ["core", "node", "crossfyre", "mach", "voyage", "pulse", "scout", "cortex", "oast"]
+# `adaptive` is a path dependency of the engines, not a workspace member: the
+# .cargo/config.toml `paths` override swaps it for the git-ignored tuned drop-in
+# `adaptive-private` in first-party builds, and Cargo cannot override a member.
+# Both are excluded so a member (the stub or the drop-in, same package name) is
+# still built as a dependency but not as a standalone member.
+exclude = ["adaptive", "adaptive-private"]

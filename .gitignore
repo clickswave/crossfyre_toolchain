@@ -1,0 +1,38 @@
+# Rust build artifacts (the whole workspace builds into the root target/)
+/target
+**/target
+**/*.rs.bk
+
+# Redundant per-member lockfiles: a workspace only uses the root Cargo.lock.
+/*/Cargo.lock
+
+# sqlx offline cache (these crates don't use sqlx; kept as a safety net)
+.sqlx/
+
+# Local scan state / databases the tools write at runtime
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets / local environment. NEVER commit these, especially in a public repo.
+.env
+.env.*
+*.env
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Private tuned drop-in for the `adaptive` crate + its local paths-override.
+# NEVER commit these: the committed `adaptive/` is the open baseline that ships.
+/adaptive-private/
+/.cargo/
+
+# Private isolated-egress drop-in (netns/tunnel/tor). NEVER commit: the committed
+# baseline.rs is the open direct-egress build. build.rs compiles this if present.
+/core/src/egress/private.rs
