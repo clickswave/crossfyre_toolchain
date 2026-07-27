@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 adaptive = { path = "../adaptive" }
-async-nats = "0.46.0"
+async-nats = "0.50.0"
 base64 = "0.21.0"
 clap = { version = "4.5.60", features = ["derive"] }
 dialoguer = { version = "0.12.0", features = ["password"] }
@@ -29,5 +29,5 @@ tempfile = "3"
 sysinfo = "0.33"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time", "signal"] }
 toml = "1.0.3"
-pyo3 = { version = "0.28", features = ["auto-initialize"] }
-pythonize = "0.28"
+pyo3 = { version = "0.29", features = ["auto-initialize"] }
+pythonize = "0.29"
