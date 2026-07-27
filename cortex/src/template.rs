@@ -48,8 +48,8 @@ pub struct HttpReq {
     pub payloads: std::collections::HashMap<String, Vec<String>>,
     /// nuclei attack mode (informational here; we always do a capped cartesian).
     #[serde(default)]
-    #[allow(dead_code)]
     // populated but not read yet; kept so the struct still mirrors its config
+    #[allow(dead_code)]
     pub attack: String,
     /// Request headers (name -> value). Payload/OOB placeholders in values are
     /// substituted like the path, so header-based checks (a forged Authorization,

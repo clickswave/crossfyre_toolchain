@@ -62,8 +62,8 @@ pub struct CrawlParams {
     pub exclude: Vec<String>,
     /// Controller posture (reserved for adaptive pacing): stealth|balanced|throughput.
     #[serde(default = "d_posture")]
-    #[allow(dead_code)]
     // populated but not read yet; kept so the struct still mirrors its config
+    #[allow(dead_code)]
     pub posture: String,
     /// Optional request auth (headers + cookie) resolved from a credential by the
     /// node. Applied as default headers so every fetched page is authenticated.

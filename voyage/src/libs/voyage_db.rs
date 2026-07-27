@@ -375,26 +375,6 @@ impl VoyageDb {
         .await
     }
 
-    // --- Logs ---
-
-    // NOTE: duplicates libs::sqlite::insert_log, which is the one actually called
-    // (10 call sites). Two implementations of the same write is a trap; pick one.
-    #[allow(dead_code)]
-    pub async fn insert_log(
-        &self,
-        scan_id: Option<&str>,
-        level: &str,
-        message: &str,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO logs (scan_id, level, message) VALUES ($1, $2, $3)")
-            .bind(scan_id)
-            .bind(level)
-            .bind(message)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
     // --- Operations ---
 
     pub async fn create_operation(
