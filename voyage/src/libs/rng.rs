@@ -1,15 +1,5 @@
 use rand::Rng;
 
-#[allow(dead_code)] // kept in step with the sibling crates' rng module
-pub fn uuid() -> String {
-    String::from(uuid::Uuid::new_v4())
-}
-
-#[allow(dead_code)] // kept in step with the sibling crates' rng module
-pub fn scan_id() -> String {
-    format!("v_{}", uuid().replace('-', "_"))
-}
-
 pub fn user_agent() -> String {
     let user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

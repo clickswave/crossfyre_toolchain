@@ -182,8 +182,8 @@ pub struct ScanParams {
     #[serde(deserialize_with = "deserialize_ports")]
     pub ports: Vec<u16>,
     #[serde(default = "default_technique")]
-    #[allow(dead_code)]
     // populated but not read yet; kept so the struct still mirrors its config
+    #[allow(dead_code)]
     pub technique: String,
     #[serde(default = "default_tasks")]
     pub tasks: u32,

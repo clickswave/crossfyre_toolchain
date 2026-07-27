@@ -1,4 +1,3 @@
-pub(crate) mod banner;
 pub(crate) mod cli_args;
 pub(crate) mod dns;
 pub(crate) mod rng;
