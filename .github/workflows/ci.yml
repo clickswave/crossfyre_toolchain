@@ -14,11 +14,9 @@ name: CI
 #      the tuned pacing crate and the isolated-egress implementation. The
 #      open-core job fails the build if any of them appear.
 #
-# Style and lint run as a separate, non-blocking job on purpose: there are
-# currently ~319 rustfmt hunks and ~140 clippy warnings, and turning either into
-# a hard gate would mean either a 64-file reformat commit or a red badge from day
-# one. They are reported so the drift is visible and can be paid down
-# deliberately. Promote them to `needs`/required once they are clean.
+# rustfmt is REQUIRED (the workspace has been formatted). clippy stays advisory
+# until its ~140 warnings are worked through; making it a gate today would just
+# get bypassed.
 
 on:
   push:
@@ -36,11 +34,10 @@ env:
   CARGO_TERM_COLOR: always
   # Fewer debug symbols; CI never runs a debugger and this is a big workspace.
   CARGO_PROFILE_DEV_DEBUG: 0
-  # Deliberately NOT `-D warnings`. The required job answers one question, "does
-  # this compile and pass its tests", and an unused import is not a broken build.
-  # Warnings (currently 6, plus ~140 from clippy) are surfaced by the advisory
-  # lint job instead. Turn this on here once that job is clean, not before, or
-  # the gate just gets bypassed.
+  # Deliberately NOT `-D warnings`. The build job answers one question, "does this
+  # compile and pass its tests", and an unused import is not a broken build. The
+  # 6 compiler warnings and ~140 clippy warnings surface in the advisory clippy
+  # job instead. Turn this on once that job is clean, not before.
 
 permissions:
   contents: read
@@ -121,10 +118,28 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked --no-fail-fast
 
-  lint:
-    name: fmt and clippy (advisory)
+  fmt:
+    name: rustfmt
     runs-on: ubuntu-latest
-    # Reports drift without blocking. See the note at the top of this file.
+    # Required. This is green as of the workspace-wide rustfmt pass, and it also
+    # guards the fix that made `cargo fmt` work on a public checkout at all: the
+    # egress module used to declare two cfg-gated `mod imp;` arms, and rustfmt
+    # resolves module paths without evaluating cfg, so it hard-errored on the
+    # private path that only exists in first-party clones.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust with rustfmt
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.88.0
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy (advisory)
+    runs-on: ubuntu-latest
+    # Still advisory: ~140 warnings to work through. Flip continue-on-error to
+    # false once that reaches zero.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -144,9 +159,6 @@ jobs:
             target
           key: lint-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: lint-${{ runner.os }}-
-
-      - name: rustfmt
-        run: cargo fmt --all --check
 
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked
