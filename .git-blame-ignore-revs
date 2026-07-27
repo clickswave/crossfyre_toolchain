@@ -1,0 +1,9 @@
+# Revisions that only moved whitespace. `git blame` skips these so it points at
+# whoever last changed the logic, not at the reformat.
+#
+# GitHub honours this file automatically. Locally, enable it once per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply rustfmt across the workspace (85 files, formatting only)
+1252e18237b949cb4ee2f48cb6722559e59857a4
