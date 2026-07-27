@@ -485,6 +485,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cfx_tui"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+]
+
+[[package]]
 name = "chacha20"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2223,6 +2231,7 @@ version = "0.0.5"
 dependencies = [
  "adaptive",
  "base64 0.22.1",
+ "cfx_tui",
  "clap",
  "crossterm",
  "csv",
