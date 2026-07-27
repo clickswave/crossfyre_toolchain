@@ -322,43 +322,38 @@ fn run_blocking(
     let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         loop {
             // Drain all pending events before drawing
-            loop {
-                match rx.try_recv() {
-                    Ok(ev) => state.apply_event(ev),
-                    Err(_) => break,
-                }
+            while let Ok(ev) = rx.try_recv() {
+                state.apply_event(ev);
             }
 
             terminal.draw(|f| render(f, &mut state))?;
 
             if state.done {
                 loop {
-                    if event::poll(std::time::Duration::from_millis(200))? {
-                        if let Event::Key(key) = event::read()? {
-                            if key.kind == KeyEventKind::Press {
-                                match key.code {
-                                    KeyCode::Char('q') => return Ok(()),
-                                    KeyCode::Char('h') => state.screen = Screen::Home,
-                                    KeyCode::Char('l') => state.screen = Screen::Logs,
-                                    _ => {}
-                                }
-                                terminal.draw(|f| render(f, &mut state))?;
-                            }
-                        }
-                    }
-                }
-            }
-
-            if event::poll(tick)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
+                    if event::poll(std::time::Duration::from_millis(200))?
+                        && let Event::Key(key) = event::read()?
+                        && key.kind == KeyEventKind::Press
+                    {
                         match key.code {
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Char('h') => state.screen = Screen::Home,
                             KeyCode::Char('l') => state.screen = Screen::Logs,
                             _ => {}
                         }
+                        terminal.draw(|f| render(f, &mut state))?;
                     }
+                }
+            }
+
+            if event::poll(tick)?
+                && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Char('h') => state.screen = Screen::Home,
+                    KeyCode::Char('l') => state.screen = Screen::Logs,
+                    _ => {}
                 }
             }
         }

@@ -130,10 +130,10 @@ pub async fn run(port: u16, db: VoyageDb) -> Result<(), Box<dyn std::error::Erro
             let interval = std::time::Duration::from_secs(300);
             loop {
                 tokio::time::sleep(interval).await;
-                if let Ok(n) = db_cleanup.delete_expired_probe_results().await {
-                    if n > 0 {
-                        println!("Cleaned up {} expired probe result(s)", n);
-                    }
+                if let Ok(n) = db_cleanup.delete_expired_probe_results().await
+                    && n > 0
+                {
+                    println!("Cleaned up {} expired probe result(s)", n);
                 }
             }
         });
@@ -558,7 +558,7 @@ async fn run_enum_instant(
     });
 
     // Drain until channel closes (after "done" is sent)
-    while let Some(_) = rx.recv().await {}
+    while rx.recv().await.is_some() {}
 
     db2.get_found_subdomains(&scan_id)
         .await

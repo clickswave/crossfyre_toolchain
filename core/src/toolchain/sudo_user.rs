@@ -125,11 +125,11 @@ fn chown_recursive(path: &std::path::Path, uid: u32, gid: u32) {
             }
         }
     }
-    if path.is_dir() {
-        if let Ok(rd) = std::fs::read_dir(path) {
-            for entry in rd.flatten() {
-                chown_recursive(&entry.path(), uid, gid);
-            }
+    if path.is_dir()
+        && let Ok(rd) = std::fs::read_dir(path)
+    {
+        for entry in rd.flatten() {
+            chown_recursive(&entry.path(), uid, gid);
         }
     }
 }

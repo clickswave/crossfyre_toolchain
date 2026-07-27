@@ -13,7 +13,7 @@ use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::Engine as _;
 use reqwest::Client;
-use rsa::pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey};
+use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
 use serde_json::{Value, json};
 use sha2::Sha256;
@@ -143,10 +143,10 @@ impl OastClient {
         let mut n = 0u64;
         if let Some(items) = body["interactions"].as_array() {
             for it in items {
-                if let Some(enc) = it["enc"].as_str() {
-                    if self.decrypt(enc).is_some() {
-                        n += 1;
-                    }
+                if let Some(enc) = it["enc"].as_str()
+                    && self.decrypt(enc).is_some()
+                {
+                    n += 1;
                 }
             }
         }

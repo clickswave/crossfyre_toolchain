@@ -219,6 +219,9 @@ impl MachDb {
         })
     }
 
+    // Column-for-column mirror of the table it writes; splitting it into a struct
+    // would add a type whose only job is to be destructured immediately.
+    #[allow(clippy::too_many_arguments)]
     pub async fn save_probe_result(
         &self,
         operation_id: &str,
@@ -409,7 +412,7 @@ impl MachDb {
     pub async fn create_words(
         &self,
         wordlist_id: &i64,
-        words: &Vec<String>,
+        words: &[String],
     ) -> Result<Vec<Word>, sqlx::Error> {
         const BATCH_SIZE: usize = 1000;
         for chunk in words.chunks(BATCH_SIZE) {
@@ -729,6 +732,9 @@ impl MachDb {
         })
     }
 
+    // Column-for-column mirror of the table it writes; splitting it into a struct
+    // would add a type whose only job is to be destructured immediately.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_work_status(
         &self,
         entry_id: i64,
@@ -775,7 +781,7 @@ impl MachDb {
     pub async fn create_urls(
         &self,
         scan_id: &i64,
-        urls: &Vec<String>,
+        urls: &[String],
     ) -> Result<Vec<Url>, sqlx::Error> {
         let mut qb: QueryBuilder<sqlx::Postgres> =
             QueryBuilder::new("INSERT INTO urls (url, scan_id) ");
@@ -855,7 +861,7 @@ impl MachDb {
         &self,
         urls: &Vec<Url>,
         scan: &Scan,
-        words: &Vec<Word>,
+        words: &[Word],
     ) -> Result<(), sqlx::Error> {
         const BATCH_SIZE: usize = 1000;
         for url in urls {

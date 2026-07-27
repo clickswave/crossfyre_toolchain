@@ -62,6 +62,8 @@ pub struct CrawlParams {
     pub exclude: Vec<String>,
     /// Controller posture (reserved for adaptive pacing): stealth|balanced|throughput.
     #[serde(default = "d_posture")]
+    #[allow(dead_code)]
+    // populated but not read yet; kept so the struct still mirrors its config
     pub posture: String,
     /// Optional request auth (headers + cookie) resolved from a credential by the
     /// node. Applied as default headers so every fetched page is authenticated.
@@ -91,10 +93,10 @@ impl AuthSpec {
                 hm.insert(name, val);
             }
         }
-        if !self.cookies.is_empty() {
-            if let Ok(val) = HeaderValue::from_str(&self.cookies) {
-                hm.insert(COOKIE, val);
-            }
+        if !self.cookies.is_empty()
+            && let Ok(val) = HeaderValue::from_str(&self.cookies)
+        {
+            hm.insert(COOKIE, val);
         }
         hm
     }
@@ -421,18 +423,16 @@ async fn fetch_page(
                 || page.content_type.contains("xml")
                 || page.content_type.contains("text");
 
-            if is_texty {
-                if let Ok(body) = resp.text().await {
-                    if is_html {
-                        extract_html(&body, &mut page.links);
-                        extract_input_names(&body, &mut page.params);
-                        if parse_js {
-                            extract_js(&body, &mut page.links);
-                        }
-                    } else if parse_js {
-                        // js / json / xml / text: harvest URL-like strings
+            if is_texty && let Ok(body) = resp.text().await {
+                if is_html {
+                    extract_html(&body, &mut page.links);
+                    extract_input_names(&body, &mut page.params);
+                    if parse_js {
                         extract_js(&body, &mut page.links);
                     }
+                } else if parse_js {
+                    // js / json / xml / text: harvest URL-like strings
+                    extract_js(&body, &mut page.links);
                 }
             }
         }
@@ -518,18 +518,16 @@ fn resolve_and_scope(raw: &str, base: &Url, params: &CrawlParams, seed_host: &st
     url.set_fragment(None);
 
     let host = url.host_str()?.to_lowercase();
-    let in_scope = if params.follow_external {
-        true
-    } else if host == seed_host {
-        true
-    } else if params.include_subdomains && host.ends_with(&format!(".{seed_host}")) {
-        true
-    } else {
-        params.scope_hosts.iter().any(|s| {
+    // `||` short-circuits left to right, so this evaluates exactly as the
+    // previous if/else-if chain did: the scope_hosts scan only runs when every
+    // cheaper check has already failed.
+    let in_scope = params.follow_external
+        || host == seed_host
+        || (params.include_subdomains && host.ends_with(&format!(".{seed_host}")))
+        || params.scope_hosts.iter().any(|s| {
             let s = s.to_lowercase();
             host == s || host.ends_with(&format!(".{s}"))
-        })
-    };
+        });
     if !in_scope {
         return None;
     }

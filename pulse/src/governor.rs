@@ -172,6 +172,7 @@ impl Governor {
         self.shutdown.notify_one();
     }
 
+    #[allow(dead_code)] // accessor kept alongside the other governor getters
     pub fn concurrency(&self) -> usize {
         self.limiter.current()
     }

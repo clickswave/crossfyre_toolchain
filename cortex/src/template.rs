@@ -48,6 +48,8 @@ pub struct HttpReq {
     pub payloads: std::collections::HashMap<String, Vec<String>>,
     /// nuclei attack mode (informational here; we always do a capped cartesian).
     #[serde(default)]
+    #[allow(dead_code)]
+    // populated but not read yet; kept so the struct still mirrors its config
     pub attack: String,
     /// Request headers (name -> value). Payload/OOB placeholders in values are
     /// substituted like the path, so header-based checks (a forged Authorization,
@@ -773,6 +775,34 @@ pub static BUILTIN: LazyLock<Vec<Template>> = LazyLock::new(|| {
         .collect()
 });
 
+/// Load external nuclei templates (*.yaml / *.yml) from a directory, skipping
+/// any that fail to parse against the supported subset.
+pub fn load_dir(dir: &str) -> Vec<Template> {
+    let mut out = Vec::new();
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return out,
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let is_yaml = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e == "yaml" || e == "yml")
+            .unwrap_or(false);
+        if !is_yaml {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&path)
+            && let Ok(t) = serde_yaml::from_str::<Template>(&text)
+            && !t.http.is_empty()
+        {
+            out.push(t);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -813,33 +843,4 @@ mod tests {
         };
         assert!(super::matches_one(&m, &resp));
     }
-}
-
-/// Load external nuclei templates (*.yaml / *.yml) from a directory, skipping
-/// any that fail to parse against the supported subset.
-pub fn load_dir(dir: &str) -> Vec<Template> {
-    let mut out = Vec::new();
-    let rd = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(_) => return out,
-    };
-    for entry in rd.flatten() {
-        let path = entry.path();
-        let is_yaml = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e == "yaml" || e == "yml")
-            .unwrap_or(false);
-        if !is_yaml {
-            continue;
-        }
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Ok(t) = serde_yaml::from_str::<Template>(&text) {
-                if !t.http.is_empty() {
-                    out.push(t);
-                }
-            }
-        }
-    }
-    out
 }

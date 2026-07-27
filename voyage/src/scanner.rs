@@ -11,14 +11,17 @@ use tokio::time::sleep;
 #[derive(Clone)]
 pub struct EnumConfig {
     pub scan_id: String,
+    #[allow(dead_code)] // populated but not read yet; kept so the struct still mirrors its config
     pub domain: String,
     pub tasks: usize,
     pub interval_ms: u64,
+    #[allow(dead_code)] // populated but not read yet; kept so the struct still mirrors its config
     pub exclude_passive_sources: Vec<String>,
     pub exclude_active_techniques: Vec<String>,
     pub http_probing_ports: Vec<u16>,
     pub https_probing_ports: Vec<u16>,
     pub active_user_agent: String,
+    #[allow(dead_code)] // populated but not read yet; kept so the struct still mirrors its config
     pub passive_user_agent: String,
     pub active_random_user_agent: bool,
     pub dns_server: String,

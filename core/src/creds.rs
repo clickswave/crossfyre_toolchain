@@ -543,10 +543,10 @@ fn extract_json_path(body: &str, path: &str) -> Option<String> {
 /// Pull a named cookie's value out of Set-Cookie headers.
 fn cookie_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
     for hv in headers.get_all(reqwest::header::SET_COOKIE).iter() {
-        if let Ok(s) = hv.to_str() {
-            if let Some(rest) = s.strip_prefix(&format!("{name}=")) {
-                return Some(rest.split(';').next().unwrap_or("").to_string());
-            }
+        if let Ok(s) = hv.to_str()
+            && let Some(rest) = s.strip_prefix(&format!("{name}="))
+        {
+            return Some(rest.split(';').next().unwrap_or("").to_string());
         }
     }
     None

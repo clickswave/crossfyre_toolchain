@@ -71,7 +71,10 @@ impl Prober {
                     .map_err(|e| format!("Invalid header value '{}': {}", value, e))?;
                 headers_map.insert(header_name, header_value);
             } else {
-                return Err(format!("Invalid header format '{}'. Use 'Key: Value'", header).into());
+                return Err(format!(
+                    "Invalid header format '{}'. Use 'Key: Value'",
+                    header
+                ));
             }
         }
 
@@ -107,8 +110,7 @@ impl Prober {
                 return Err(format!(
                     "Invalid basic_auth format '{}'. Use 'username:password'",
                     config.basic_auth
-                )
-                .into());
+                ));
             }
         }
 
@@ -186,7 +188,7 @@ impl Prober {
                         format!("{}: {}", name.as_str(), value.to_str().unwrap_or(""))
                     })
                     .collect::<Vec<String>>();
-                let headers_length = headers.len().clone();
+                let headers_length = headers.len();
                 (Some(headers), headers_length as i64)
             }
             false => {

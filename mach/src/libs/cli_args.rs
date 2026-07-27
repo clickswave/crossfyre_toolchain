@@ -97,6 +97,10 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+// clap subcommand enum: the large variant is the fully-populated scan config,
+// constructed once per process. Boxing it would only move an allocation that
+// never happens in a hot path.
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Scan URLs using a wordlist
     Scan(ScanArgs),
@@ -360,7 +364,7 @@ impl ScanArgs {
         // --- Tasks ---
         let tasks_input: String = Input::with_theme(&theme)
             .with_prompt("Number of concurrent tasks")
-            .with_initial_text(&self.tasks.to_string())
+            .with_initial_text(self.tasks.to_string())
             .validate_with(|input: &String| {
                 input
                     .trim()

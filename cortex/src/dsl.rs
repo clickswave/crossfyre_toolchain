@@ -35,6 +35,7 @@ pub fn eval_bool(expr: &str, ctx: &Ctx) -> bool {
 }
 
 /// Evaluate an expression to its string form (the extractor use), or None.
+#[allow(dead_code)] // DSL helper, no current caller
 pub fn eval_string(expr: &str, ctx: &Ctx) -> Option<String> {
     eval_value(expr, ctx).map(|v| to_str(&v))
 }
@@ -267,15 +268,15 @@ impl Parser {
     }
     fn parse_cmp(&mut self) -> Option<Node> {
         let left = self.parse_add()?;
-        if let Some(op) = self.peek().cloned() {
-            if matches!(
+        if let Some(op) = self.peek().cloned()
+            && matches!(
                 op,
                 Tok::EqEq | Tok::NotEq | Tok::Lt | Tok::Le | Tok::Gt | Tok::Ge
-            ) {
-                self.eat();
-                let right = self.parse_add()?;
-                return Some(Node::Binary(op, Box::new(left), Box::new(right)));
-            }
+            )
+        {
+            self.eat();
+            let right = self.parse_add()?;
+            return Some(Node::Binary(op, Box::new(left), Box::new(right)));
         }
         Some(left)
     }

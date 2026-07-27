@@ -377,6 +377,9 @@ impl VoyageDb {
 
     // --- Logs ---
 
+    // NOTE: duplicates libs::sqlite::insert_log, which is the one actually called
+    // (10 call sites). Two implementations of the same write is a trap; pick one.
+    #[allow(dead_code)]
     pub async fn insert_log(
         &self,
         scan_id: Option<&str>,

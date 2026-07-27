@@ -56,6 +56,8 @@ impl Tui {
         Ok(())
     }
 
+    // Constructor taking the full initial render state.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<Args>,
         scan_results: Arc<Mutex<ScanResults>>,
@@ -90,7 +92,7 @@ impl Tui {
     pub async fn run(&mut self, mut terminal: ratatui::DefaultTerminal) -> Result<(), sqlx::Error> {
         while !self.halt {
             if !self.config.output_path.is_empty()
-                && self.output_written == false
+                && !self.output_written
                 && self.status == "Completed"
             {
                 self.status = "Writing Output".to_string();
@@ -106,10 +108,10 @@ impl Tui {
                         self.output_written = true;
                     }
                     Err(e) => {
-                        return Err(sqlx::Error::Io(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("Failed to export results: {}", e),
-                        )));
+                        return Err(sqlx::Error::Io(io::Error::other(format!(
+                            "Failed to export results: {}",
+                            e
+                        ))));
                     }
                 }
             }
@@ -267,10 +269,10 @@ impl Tui {
         let visible_items = area.height - 4;
         let logs = { self.logs.lock().unwrap() };
         let mut displayed_list = vec![];
-        let log_levels = vec!["debug", "info", "warn", "error"];
+        let log_levels = ["debug", "info", "warn", "error"];
         let min_log_level_index = log_levels
             .iter()
-            .position(|&x| x == &self.log_level)
+            .position(|&x| x == self.log_level)
             .unwrap_or(0);
 
         let logs_offset = self.logs_offset.lock().unwrap().value;
@@ -279,7 +281,7 @@ impl Tui {
             .logs
             .iter()
             .filter(|l| {
-                let log_level_index = log_levels.iter().position(|&x| x == &l.level).unwrap_or(0);
+                let log_level_index = log_levels.iter().position(|&x| x == l.level).unwrap_or(0);
                 log_level_index >= min_log_level_index
             })
             .enumerate()
@@ -351,126 +353,124 @@ impl Tui {
     }
 
     async fn handle_events(&mut self) -> io::Result<()> {
-        if event::poll(Duration::from_millis(self.config.event_poll_timeout))? {
-            if let Event::Key(key_event) = event::read()? {
-                match key_event.code {
-                    KeyCode::Char('q') | KeyCode::Char('Q') => self.halt = true,
-                    KeyCode::Char('p') | KeyCode::Char('P') => {
-                        // allow pausing only if status is not "Completed"
-                        if &self.status != "Completed" {
-                            self.paused.store(
-                                !self.paused.load(core::sync::atomic::Ordering::Relaxed),
-                                core::sync::atomic::Ordering::Relaxed,
-                            );
+        if event::poll(Duration::from_millis(self.config.event_poll_timeout))?
+            && let Event::Key(key_event) = event::read()?
+        {
+            match key_event.code {
+                KeyCode::Char('q') | KeyCode::Char('Q') => self.halt = true,
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    // allow pausing only if status is not "Completed"
+                    if &self.status != "Completed" {
+                        self.paused.store(
+                            !self.paused.load(core::sync::atomic::Ordering::Relaxed),
+                            core::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
+                }
+                KeyCode::Char('h') | KeyCode::Char('H') => self.current_tab = Tab::Home,
+                KeyCode::Char('l') | KeyCode::Char('L') => self.current_tab = Tab::Logs,
+                KeyCode::Up => match self.current_tab {
+                    Tab::Home => {
+                        // update scan results offset
+                        let scan_results_offset =
+                            { self.scan_results_offset.lock().unwrap().value };
+                        if scan_results_offset > 0 {
+                            self.scan_results_offset
+                                .lock()
+                                .unwrap()
+                                .set(scan_results_offset - 1)
                         }
                     }
-                    KeyCode::Char('h') | KeyCode::Char('H') => self.current_tab = Tab::Home,
-                    KeyCode::Char('l') | KeyCode::Char('L') => self.current_tab = Tab::Logs,
-                    KeyCode::Up => match self.current_tab {
-                        Tab::Home => {
-                            // update scan results offset
-                            let scan_results_offset =
-                                { self.scan_results_offset.lock().unwrap().value };
-                            if scan_results_offset > 0 {
+                    Tab::Logs => {
+                        // update logs offset
+                        let logs_offset = { self.logs_offset.lock().unwrap().value };
+                        if logs_offset > 0 {
+                            self.logs_offset.lock().unwrap().set(logs_offset - 1);
+                        }
+                    }
+                },
+                KeyCode::Down => match self.current_tab {
+                    Tab::Home => {
+                        let scan_results_offset =
+                            { self.scan_results_offset.lock().unwrap().value };
+
+                        let results_length = {
+                            match self.probe_status_filter.as_str() {
+                                "found" => self.scan_results.lock().unwrap().found.len(),
+                                "not_found" => self.scan_results.lock().unwrap().not_found.len(),
+                                "error" => self.scan_results.lock().unwrap().error.len(),
+                                _ => 0,
+                            }
+                        };
+
+                        if self.config.enable_offset_pagination {
+                            if results_length > 1 {
                                 self.scan_results_offset
                                     .lock()
                                     .unwrap()
-                                    .set(scan_results_offset - 1)
+                                    .set(scan_results_offset + 1);
+                            }
+                        } else {
+                            if scan_results_offset + 1 < results_length {
+                                self.scan_results_offset
+                                    .lock()
+                                    .unwrap()
+                                    .set(scan_results_offset + 1);
                             }
                         }
-                        Tab::Logs => {
-                            // update logs offset
-                            let logs_offset = { self.logs_offset.lock().unwrap().value };
-                            if logs_offset > 0 {
-                                self.logs_offset.lock().unwrap().set(logs_offset - 1);
+                    }
+                    Tab::Logs => {
+                        let logs_offset = { self.logs_offset.lock().unwrap().value };
+
+                        let logs_length = self.logs.lock().unwrap().logs.len();
+
+                        if self.config.enable_offset_pagination {
+                            if logs_length > 1 {
+                                self.logs_offset.lock().unwrap().set(logs_offset + 1);
+                            }
+                        } else {
+                            if logs_offset + 1 < logs_length {
+                                self.logs_offset.lock().unwrap().set(logs_offset + 1);
                             }
                         }
-                    },
-                    KeyCode::Down => match self.current_tab {
-                        Tab::Home => {
-                            let scan_results_offset =
-                                { self.scan_results_offset.lock().unwrap().value };
+                    }
+                },
 
-                            let results_length = {
-                                match self.probe_status_filter.as_str() {
-                                    "found" => self.scan_results.lock().unwrap().found.len(),
-                                    "not_found" => {
-                                        self.scan_results.lock().unwrap().not_found.len()
-                                    }
-                                    "error" => self.scan_results.lock().unwrap().error.len(),
-                                    _ => 0,
-                                }
-                            };
-
-                            if self.config.enable_offset_pagination {
-                                if results_length > 1 {
-                                    self.scan_results_offset
-                                        .lock()
-                                        .unwrap()
-                                        .set(scan_results_offset + 1);
-                                }
-                            } else {
-                                if scan_results_offset + 1 < results_length {
-                                    self.scan_results_offset
-                                        .lock()
-                                        .unwrap()
-                                        .set(scan_results_offset + 1);
-                                }
-                            }
-                        }
-                        Tab::Logs => {
-                            let logs_offset = { self.logs_offset.lock().unwrap().value };
-
-                            let logs_length = self.logs.lock().unwrap().logs.len();
-
-                            if self.config.enable_offset_pagination {
-                                if logs_length > 1 {
-                                    self.logs_offset.lock().unwrap().set(logs_offset + 1);
-                                }
-                            } else {
-                                if logs_offset + 1 < logs_length {
-                                    self.logs_offset.lock().unwrap().set(logs_offset + 1);
-                                }
-                            }
-                        }
-                    },
-
-                    KeyCode::Left => match self.current_tab {
-                        Tab::Home => {
-                            self.probe_status_filter = match self.probe_status_filter.as_str() {
-                                "error" => "not_found".to_string(),
-                                "not_found" => "found".to_string(),
-                                _ => "found".to_string(),
-                            };
-                        }
-                        Tab::Logs => {
-                            self.log_level = match self.log_level.as_str() {
-                                "debug" => "info".to_string(),
-                                "info" => "warn".to_string(),
-                                "warn" => "error".to_string(),
-                                _ => "error".to_string(),
-                            };
-                        }
-                    },
-                    KeyCode::Right => match self.current_tab {
-                        Tab::Home => {
-                            self.probe_status_filter = match self.probe_status_filter.as_str() {
-                                "found" => "not_found".to_string(),
-                                "not_found" => "error".to_string(),
-                                _ => "error".to_string(),
-                            };
-                        }
-                        Tab::Logs => {
-                            self.log_level = match self.log_level.as_str() {
-                                "error" => "warn".to_string(),
-                                "warn" => "info".to_string(),
-                                "info" => "debug".to_string(),
-                                _ => "debug".to_string(),
-                            };
-                        }
-                    },
-                    _ => {}
-                }
+                KeyCode::Left => match self.current_tab {
+                    Tab::Home => {
+                        self.probe_status_filter = match self.probe_status_filter.as_str() {
+                            "error" => "not_found".to_string(),
+                            "not_found" => "found".to_string(),
+                            _ => "found".to_string(),
+                        };
+                    }
+                    Tab::Logs => {
+                        self.log_level = match self.log_level.as_str() {
+                            "debug" => "info".to_string(),
+                            "info" => "warn".to_string(),
+                            "warn" => "error".to_string(),
+                            _ => "error".to_string(),
+                        };
+                    }
+                },
+                KeyCode::Right => match self.current_tab {
+                    Tab::Home => {
+                        self.probe_status_filter = match self.probe_status_filter.as_str() {
+                            "found" => "not_found".to_string(),
+                            "not_found" => "error".to_string(),
+                            _ => "error".to_string(),
+                        };
+                    }
+                    Tab::Logs => {
+                        self.log_level = match self.log_level.as_str() {
+                            "error" => "warn".to_string(),
+                            "warn" => "info".to_string(),
+                            "info" => "debug".to_string(),
+                            _ => "debug".to_string(),
+                        };
+                    }
+                },
+                _ => {}
             }
         }
         Ok(())

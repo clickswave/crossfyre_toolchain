@@ -247,13 +247,13 @@ async fn install_one(
         ok(&format!("{ext} {} installed", comp.version));
     }
 
-    if let Err(e) = service::create_service_file(ext) {
-        if !quiet {
-            fail(&format!(
-                "Failed to create service: {}",
-                dim(&e.to_string())
-            ));
-        }
+    if let Err(e) = service::create_service_file(ext)
+        && !quiet
+    {
+        fail(&format!(
+            "Failed to create service: {}",
+            dim(&e.to_string())
+        ));
     }
 
     if !quiet {
@@ -654,14 +654,14 @@ pub async fn ensure_node_installed() -> Result<(), Box<dyn std::error::Error>> {
     if stable.exists() {
         return Ok(());
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(sib) = exe.parent().map(|d| d.join(ext_file_name("node"))) {
-            if sib.exists() && sib != stable {
-                place_binary(&sib, &stable)?;
-                println!("[+] Installed node binary to {}", stable.display());
-                return Ok(());
-            }
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(sib) = exe.parent().map(|d| d.join(ext_file_name("node")))
+        && sib.exists()
+        && sib != stable
+    {
+        place_binary(&sib, &stable)?;
+        println!("[+] Installed node binary to {}", stable.display());
+        return Ok(());
     }
     let manifest = fetch_manifest().await?;
     download_node(&manifest, false).await?;

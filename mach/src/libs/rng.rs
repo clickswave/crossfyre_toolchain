@@ -7,10 +7,10 @@ pub fn uuid() -> String {
 
 pub fn user_agent(user_agents: Option<Vec<String>>) -> String {
     let mut rng = rand::rng();
-    if let Some(agents) = user_agents {
-        if !agents.is_empty() {
-            return agents.choose(&mut rng).unwrap().clone();
-        }
+    if let Some(agents) = user_agents
+        && !agents.is_empty()
+    {
+        return agents.choose(&mut rng).unwrap().clone();
     }
 
     uuid()

@@ -193,7 +193,7 @@ impl ScanArgs {
         // --- Tasks ---
         let tasks_input: String = Input::with_theme(&theme)
             .with_prompt("Concurrent tasks")
-            .with_initial_text(&self.tasks.to_string())
+            .with_initial_text(self.tasks.to_string())
             .validate_with(|input: &String| {
                 input
                     .trim()

@@ -102,10 +102,10 @@ pub fn cancel_workflow(id: &str) {
         s.insert(id.to_string());
     }
     // Drop this workflow's per-target pace state so the map doesn't accumulate.
-    if let Some(map) = WORKFLOW_TARGET_PACE.get() {
-        if let Ok(mut m) = map.lock() {
-            m.retain(|(wf, _host), _| wf != id);
-        }
+    if let Some(map) = WORKFLOW_TARGET_PACE.get()
+        && let Ok(mut m) = map.lock()
+    {
+        m.retain(|(wf, _host), _| wf != id);
     }
 }
 pub fn resume_workflow(id: &str) {
@@ -229,9 +229,11 @@ impl TargetPace {
     }
 }
 
-static WORKFLOW_TARGET_PACE: OnceLock<
-    std::sync::Mutex<std::collections::HashMap<(String, String), Arc<TargetPace>>>,
-> = OnceLock::new();
+/// `(workflow_id, host)` -> the pace controller shared by every task hitting
+/// that host in that workflow.
+type TargetPaceMap = std::sync::Mutex<std::collections::HashMap<(String, String), Arc<TargetPace>>>;
+
+static WORKFLOW_TARGET_PACE: OnceLock<TargetPaceMap> = OnceLock::new();
 
 /// Get (or create) the coordinated pace for one `(workflow, host)`. `posture`
 /// and `base_delay` seed a fresh controller; existing paces are reused so
@@ -406,7 +408,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
     // race to win, so we skip the HTTP round-trip).
     if consumption == "single" && !pre_claimed {
         let claim_res = http
-            .post(&format!("{}/api/v1/claim-operation", api_url))
+            .post(format!("{}/api/v1/claim-operation", api_url))
             .json(&serde_json::json!({
                 "operation_id": op_id,
                 "node_id": node_id,
@@ -488,34 +490,34 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                     let read =
                         tokio::time::timeout(std::time::Duration::from_secs(30), lines.next_line())
                             .await;
-                    if let Ok(Ok(Some(line))) = read {
-                        if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
-                            let status = resp["status"].as_str().unwrap_or("");
-                            let code = resp["code"].as_i64().unwrap_or(0);
-                            let body_len = resp["body_length"].as_i64().unwrap_or(0);
+                    if let Ok(Ok(Some(line))) = read
+                        && let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line)
+                    {
+                        let status = resp["status"].as_str().unwrap_or("");
+                        let code = resp["code"].as_i64().unwrap_or(0);
+                        let body_len = resp["body_length"].as_i64().unwrap_or(0);
 
-                            if status == "found" {
-                                let result_msg = serde_json::json!({
-                                    "type": "result",
-                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                    "workflow_id": workflow_id,
-                                    "data": {
-                                        "target": probe_url,
-                                        "type": "endpoint",
-                                        "status_code": code,
-                                        "body_length": body_len,
-                                        "source": "mach",
-                                        "operation_id": op_id,
-                                        "word": data["word"].as_str().unwrap_or(""),
-                                    }
-                                });
-                                let _ = pub_clone
-                                    .publish(result_subj.clone(), result_msg.to_string().into())
-                                    .await;
-                                println!("[op] OK FOUND {} [{}]", probe_url, code);
-                            } else {
-                                // Not found - no result published
-                            }
+                        if status == "found" {
+                            let result_msg = serde_json::json!({
+                                "type": "result",
+                                "job_id": format!("{}-{}", workflow_id, op_id),
+                                "workflow_id": workflow_id,
+                                "data": {
+                                    "target": probe_url,
+                                    "type": "endpoint",
+                                    "status_code": code,
+                                    "body_length": body_len,
+                                    "source": "mach",
+                                    "operation_id": op_id,
+                                    "word": data["word"].as_str().unwrap_or(""),
+                                }
+                            });
+                            let _ = pub_clone
+                                .publish(result_subj.clone(), result_msg.to_string().into())
+                                .await;
+                            println!("[op] OK FOUND {} [{}]", probe_url, code);
+                        } else {
+                            // Not found - no result published
                         }
                     }
                 }
@@ -567,17 +569,17 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             if !wl_url.is_empty() {
                 let tmp = format!("/tmp/cfx-wl-chunk-{}.txt", op_id);
                 println!("[op] Downloading wordlist chunk...");
-                if let Ok(resp) = reqwest::get(wl_url).await {
-                    if let Ok(body) = resp.text().await {
-                        let _ = std::fs::write(&tmp, &body);
-                        wordlist_path = tmp;
-                        let lines = body.lines().count();
-                        println!(
-                            "[op] OK Chunk downloaded ({} lines, {} bytes)",
-                            lines,
-                            body.len()
-                        );
-                    }
+                if let Ok(resp) = reqwest::get(wl_url).await
+                    && let Ok(body) = resp.text().await
+                {
+                    let _ = std::fs::write(&tmp, &body);
+                    wordlist_path = tmp;
+                    let lines = body.lines().count();
+                    println!(
+                        "[op] OK Chunk downloaded ({} lines, {} bytes)",
+                        lines,
+                        body.len()
+                    );
                 }
             }
         } else if let Some(wls) = data["wordlists"].as_array() {
@@ -588,12 +590,12 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                     let wl_id = first["id"].as_str().unwrap_or("wordlist");
                     let tmp = format!("/tmp/cfx-wl-{}.txt", wl_id);
                     println!("[op] Downloading wordlist: {}", wl_id);
-                    if let Ok(resp) = reqwest::get(dl_url).await {
-                        if let Ok(body) = resp.text().await {
-                            let _ = std::fs::write(&tmp, &body);
-                            wordlist_path = tmp;
-                            println!("[op] OK Wordlist downloaded ({} bytes)", body.len());
-                        }
+                    if let Ok(resp) = reqwest::get(dl_url).await
+                        && let Ok(body) = resp.text().await
+                    {
+                        let _ = std::fs::write(&tmp, &body);
+                        wordlist_path = tmp;
+                        println!("[op] OK Wordlist downloaded ({} bytes)", body.len());
                     }
                 }
             }
@@ -684,23 +686,21 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         // level-0 wordlist.
         let mut recurse_wordlist_path = wordlist_path.clone();
         let mut recurse_wl_lines: i64 = chunk_total; // per-directory probe count at deeper levels
-        if recurse {
-            if let Some(rw_url) = data["recurse_wordlist_url"].as_str() {
-                if !rw_url.is_empty() {
-                    let tmp = format!("/tmp/cfx-wl-recurse-{}.txt", op_id);
-                    if let Ok(resp) = reqwest::get(rw_url).await {
-                        if let Ok(body) = resp.text().await {
-                            let _ = std::fs::write(&tmp, &body);
-                            recurse_wordlist_path = tmp;
-                            recurse_wl_lines =
-                                body.lines().filter(|l| !l.trim().is_empty()).count() as i64;
-                            println!(
-                                "[op] recursion wordlist downloaded ({} lines)",
-                                recurse_wl_lines
-                            );
-                        }
-                    }
-                }
+        if recurse
+            && let Some(rw_url) = data["recurse_wordlist_url"].as_str()
+            && !rw_url.is_empty()
+        {
+            let tmp = format!("/tmp/cfx-wl-recurse-{}.txt", op_id);
+            if let Ok(resp) = reqwest::get(rw_url).await
+                && let Ok(body) = resp.text().await
+            {
+                let _ = std::fs::write(&tmp, &body);
+                recurse_wordlist_path = tmp;
+                recurse_wl_lines = body.lines().filter(|l| !l.trim().is_empty()).count() as i64;
+                println!(
+                    "[op] recursion wordlist downloaded ({} lines)",
+                    recurse_wl_lines
+                );
             }
         }
 
@@ -801,30 +801,29 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                             // Seed the total from it when the op didn't pre-set
                             // wordlist_lines, so the progress
                             // bar shows real probes instead of a 0/1 op fallback.
-                            if evt_type == "ack" {
-                                if let Some(t) = event["total"].as_i64() {
-                                    if t > probes_total {
-                                        probes_total = t;
-                                    }
-                                }
+                            if evt_type == "ack"
+                                && let Some(t) = event["total"].as_i64()
+                                && t > probes_total
+                            {
+                                probes_total = t;
                             }
 
                             // Feed the shared pace from each probe. A probe that
                             // needed retries hit raw stress even if it finally
                             // recovered - that's the signal the final status/code
                             // hides, and the one that must drive the backoff.
-                            if let Some(ref p) = pace {
-                                if evt_type == "result" {
-                                    let st = event["status"].as_str().unwrap_or("");
-                                    let cd = event["code"].as_i64().unwrap_or(0);
-                                    let retried = event["retries"].as_i64().unwrap_or(0) > 0;
-                                    let class = if retried {
-                                        adaptive::ProbeClass::RateLimited
-                                    } else {
-                                        classify_event(st, cd)
-                                    };
-                                    p.observe(class);
-                                }
+                            if let Some(ref p) = pace
+                                && evt_type == "result"
+                            {
+                                let st = event["status"].as_str().unwrap_or("");
+                                let cd = event["code"].as_i64().unwrap_or(0);
+                                let retried = event["retries"].as_i64().unwrap_or(0) > 0;
+                                let class = if retried {
+                                    adaptive::ProbeClass::RateLimited
+                                } else {
+                                    classify_event(st, cd)
+                                };
+                                p.observe(class);
                             }
 
                             match evt_type {
@@ -1063,10 +1062,10 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                     };
                     match event["type"].as_str().unwrap_or("") {
                         "ack" => {
-                            if let Some(t) = event["total"].as_i64() {
-                                if t > total {
-                                    total = t;
-                                }
+                            if let Some(t) = event["total"].as_i64()
+                                && t > total
+                            {
+                                total = t;
                             }
                         }
                         "url" => {
@@ -1101,10 +1100,10 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                             if let Some(p) = event["processed"].as_i64() {
                                 processed = p;
                             }
-                            if let Some(t) = event["total"].as_i64() {
-                                if t > total {
-                                    total = t;
-                                }
+                            if let Some(t) = event["total"].as_i64()
+                                && t > total
+                            {
+                                total = t;
                             }
                         }
                         "done" => break,
@@ -1198,27 +1197,27 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             if let Some(wl_url) = data["wordlist_url"].as_str() {
                 if !wl_url.is_empty() {
                     let tmp = format!("/tmp/cfx-wl-sub-{}.txt", op_id);
-                    if let Ok(resp) = reqwest::get(wl_url).await {
-                        if let Ok(body) = resp.text().await {
-                            let _ = std::fs::write(&tmp, &body);
-                            wordlist_path = tmp;
-                        }
+                    if let Ok(resp) = reqwest::get(wl_url).await
+                        && let Ok(body) = resp.text().await
+                    {
+                        let _ = std::fs::write(&tmp, &body);
+                        wordlist_path = tmp;
                     }
                 }
-            } else if let Some(wls) = data["wordlists"].as_array() {
-                if let Some(first) = wls.first() {
-                    let dl_url = first["url"].as_str().unwrap_or("");
-                    if !dl_url.is_empty() {
-                        let tmp = format!(
-                            "/tmp/cfx-wl-sub-{}.txt",
-                            first["id"].as_str().unwrap_or("wl")
-                        );
-                        if let Ok(resp) = reqwest::get(dl_url).await {
-                            if let Ok(body) = resp.text().await {
-                                let _ = std::fs::write(&tmp, &body);
-                                wordlist_path = tmp;
-                            }
-                        }
+            } else if let Some(wls) = data["wordlists"].as_array()
+                && let Some(first) = wls.first()
+            {
+                let dl_url = first["url"].as_str().unwrap_or("");
+                if !dl_url.is_empty() {
+                    let tmp = format!(
+                        "/tmp/cfx-wl-sub-{}.txt",
+                        first["id"].as_str().unwrap_or("wl")
+                    );
+                    if let Ok(resp) = reqwest::get(dl_url).await
+                        && let Ok(body) = resp.text().await
+                    {
+                        let _ = std::fs::write(&tmp, &body);
+                        wordlist_path = tmp;
                     }
                 }
             }
@@ -1492,6 +1491,12 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
                     // RST-close so this per-op connection to pulse doesn't pile
                     // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
+                    // SO_LINGER(0) is an RST close: it returns immediately and is what keeps a
+                    // full-range scan from exhausting the ephemeral-port pool via TIME_WAIT.
+                    // tokio deprecated set_linger because a NON-ZERO linger blocks the thread on
+                    // drop; that hazard does not apply here. Migrating means going through
+                    // socket2 on the raw fd, which is not worth the unsafe for the same syscall.
+                    #[allow(deprecated)]
                     let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                     let (reader, mut writer) = stream.into_split();
                     let mut req_str = serde_json::to_string(&pulse_req).unwrap();
@@ -1728,6 +1733,12 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
                 // RST-close so this per-op connection to pulse doesn't pile
                 // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
+                // SO_LINGER(0) is an RST close: it returns immediately and is what keeps a
+                // full-range scan from exhausting the ephemeral-port pool via TIME_WAIT.
+                // tokio deprecated set_linger because a NON-ZERO linger blocks the thread on
+                // drop; that hazard does not apply here. Migrating means going through
+                // socket2 on the raw fd, which is not worth the unsafe for the same syscall.
+                #[allow(deprecated)]
                 let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                 let (reader, mut writer) = stream.into_split();
                 let mut req_str = serde_json::to_string(&pulse_req).unwrap();
@@ -1966,10 +1977,10 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                             if let Some(p) = event["processed"].as_i64() {
                                 processed = p;
                             }
-                            if let Some(t) = event["total"].as_i64() {
-                                if t > total {
-                                    total = t;
-                                }
+                            if let Some(t) = event["total"].as_i64()
+                                && t > total
+                            {
+                                total = t;
                             }
                         }
                         "done" => break,
@@ -2272,16 +2283,17 @@ pub fn resolve_data_dir(
     if let Some(p) = cli_arg {
         return Ok(p.to_path_buf());
     }
-    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-        if !sudo_user.is_empty() && sudo_user != "root" {
-            // Best effort - fall back to dirs::config_dir() if the home directory
-            // can't be resolved (e.g. unusual NSS setup).
-            if let Some(home) = home_for_user(&sudo_user) {
-                let mut p = home;
-                p.push(".config");
-                p.push("crossfyre");
-                return Ok(p);
-            }
+    if let Ok(sudo_user) = std::env::var("SUDO_USER")
+        && !sudo_user.is_empty()
+        && sudo_user != "root"
+    {
+        // Best effort - fall back to dirs::config_dir() if the home directory
+        // can't be resolved (e.g. unusual NSS setup).
+        if let Some(home) = home_for_user(&sudo_user) {
+            let mut p = home;
+            p.push(".config");
+            p.push("crossfyre");
+            return Ok(p);
         }
     }
     let mut p = dirs::config_dir().ok_or("Could not resolve config directory")?;
@@ -3198,13 +3210,13 @@ pub async fn run_init(
             "could not update initialization status on the server: {}",
             e
         ));
-    } else if let Ok(res) = status_res {
-        if !res.status().is_success() {
-            warn(&format!(
-                "server returned {} updating initialization status",
-                res.status()
-            ));
-        }
+    } else if let Ok(res) = status_res
+        && !res.status().is_success()
+    {
+        warn(&format!(
+            "server returned {} updating initialization status",
+            res.status()
+        ));
     }
 
     // If we ran under sudo, hand ownership of the data dir back to the
@@ -3489,7 +3501,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     );
     let opts = async_nats::ConnectOptions::with_jwt(jwt_str, move |nonce: Vec<u8>| {
         let kp = key_pair.clone();
-        async move { kp.sign(&nonce).map_err(|e| async_nats::AuthError::new(e)) }
+        async move { kp.sign(&nonce).map_err(async_nats::AuthError::new) }
     })
     // Increase the subscriber buffer so large bursts (e.g. a 65k-op scan)
     // don't overflow and drop messages as "slow consumer".
@@ -3566,7 +3578,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     // This blocks the node from ever appearing online with a revoked key.
     let http_client = reqwest::Client::new();
     let validate_res = http_client
-        .post(&format!("{}/api/v1/node-status", config.api_url))
+        .post(format!("{}/api/v1/node-status", config.api_url))
         .json(&serde_json::json!({
             "api_key": &config.api_key,
             "status": "online",
@@ -3625,7 +3637,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     // messages flow through the normal per-node subscription.
     {
         let resume_res = http_client
-            .post(&format!("{}/api/v1/resume-pending", api_url))
+            .post(format!("{}/api/v1/resume-pending", api_url))
             .json(&serde_json::json!({ "api_key": api_key }))
             .send()
             .await;
@@ -3886,7 +3898,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                     })
                 };
 
-                let status_res = http_client.post(&format!("{}/api/v1/node-status", api_url))
+                let status_res = http_client.post(format!("{}/api/v1/node-status", api_url))
                     .json(&serde_json::json!({
                         "api_key": &api_key,
                         "status": "online",
