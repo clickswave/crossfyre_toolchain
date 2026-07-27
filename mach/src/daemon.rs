@@ -157,10 +157,10 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
             let interval = std::time::Duration::from_secs(300);
             loop {
                 tokio::time::sleep(interval).await;
-                if let Ok(n) = db_cleanup.delete_expired_probe_results().await {
-                    if n > 0 {
-                        println!("Cleaned up {} expired probe result(s)", n);
-                    }
+                if let Ok(n) = db_cleanup.delete_expired_probe_results().await
+                    && n > 0
+                {
+                    println!("Cleaned up {} expired probe result(s)", n);
                 }
             }
         });
@@ -582,7 +582,7 @@ async fn prepare_scan(
         }
     }
 
-    let config = build_args(&params, endpoint, http_method);
+    let config = build_args(params, endpoint, http_method);
 
     let wordlist_config = crate::libs::wordlist_config::WordlistConfig::new(&params.wordlist)
         .await

@@ -227,25 +227,28 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
             .all(|w| w[0].body_hash == w[1].body_hash && w[0].body_hash != 0);
 
     // 1) Broken authentication: anon reaches a protected endpoint.
-    if let Some(a) = anon {
-        if a.ok && !a.login_ish && (is_priv_path || looks_protected(&ep.url)) && !all_same_body {
-            out.push(Candidate {
-                confirm_role: a.role.clone(),
-                expect_hash: None,
-                finding: finding_value(
-                    "Unauthenticated access to a protected endpoint",
-                    "high",
-                    "broken_authentication",
-                    ep,
-                    &matrix,
-                    &a.role,
-                    format!(
-                        "An unauthenticated request to {} returned {} (expected 401/403).",
-                        ep.url, a.status
-                    ),
+    if let Some(a) = anon
+        && a.ok
+        && !a.login_ish
+        && (is_priv_path || looks_protected(&ep.url))
+        && !all_same_body
+    {
+        out.push(Candidate {
+            confirm_role: a.role.clone(),
+            expect_hash: None,
+            finding: finding_value(
+                "Unauthenticated access to a protected endpoint",
+                "high",
+                "broken_authentication",
+                ep,
+                &matrix,
+                &a.role,
+                format!(
+                    "An unauthenticated request to {} returned {} (expected 401/403).",
+                    ep.url, a.status
                 ),
-            });
-        }
+            ),
+        });
     }
 
     // 2) BFLA: a non-privileged identity reaches a privileged endpoint that a

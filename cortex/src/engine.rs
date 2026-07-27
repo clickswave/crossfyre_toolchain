@@ -76,10 +76,10 @@ impl AuthSpec {
                 hm.insert(name, val);
             }
         }
-        if !self.cookies.is_empty() {
-            if let Ok(val) = HeaderValue::from_str(&self.cookies) {
-                hm.insert(COOKIE, val);
-            }
+        if !self.cookies.is_empty()
+            && let Ok(val) = HeaderValue::from_str(&self.cookies)
+        {
+            hm.insert(COOKIE, val);
         }
         hm
     }

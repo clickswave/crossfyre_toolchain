@@ -15,15 +15,15 @@ pub async fn fetch(
         let mut unique_subdomains = HashSet::new();
 
         for line in body.lines() {
-            if let Some((subdomain, _ip)) = line.split_once(',') {
-                if subdomain.ends_with(domain) {
-                    let stripped = subdomain
-                        .strip_suffix(domain)
-                        .unwrap_or("")
-                        .trim_end_matches('.');
-                    if !stripped.is_empty() && stripped != "*" {
-                        unique_subdomains.insert(stripped.to_string());
-                    }
+            if let Some((subdomain, _ip)) = line.split_once(',')
+                && subdomain.ends_with(domain)
+            {
+                let stripped = subdomain
+                    .strip_suffix(domain)
+                    .unwrap_or("")
+                    .trim_end_matches('.');
+                if !stripped.is_empty() && stripped != "*" {
+                    unique_subdomains.insert(stripped.to_string());
                 }
             }
         }

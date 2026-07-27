@@ -57,12 +57,12 @@ async fn detect_public_ip() -> Option<String> {
         "https://ifconfig.me/ip",
         "https://icanhazip.com",
     ] {
-        if let Ok(resp) = client.get(url).send().await {
-            if let Ok(text) = resp.text().await {
-                let ip = text.trim().to_string();
-                if ip.split('.').count() == 4 && ip.split('.').all(|o| o.parse::<u8>().is_ok()) {
-                    return Some(ip);
-                }
+        if let Ok(resp) = client.get(url).send().await
+            && let Ok(text) = resp.text().await
+        {
+            let ip = text.trim().to_string();
+            if ip.split('.').count() == 4 && ip.split('.').all(|o| o.parse::<u8>().is_ok()) {
+                return Some(ip);
             }
         }
     }
@@ -143,7 +143,7 @@ fn systemctl(args: &[&str]) -> bool {
 /// Print the DNS records the operator must add at their DNS provider to delegate
 /// the zone to this box.
 fn print_delegation(domain: &str, ip: &str) {
-    let parent = domain.splitn(2, '.').nth(1).unwrap_or(domain);
+    let parent = domain.split_once('.').map(|x| x.1).unwrap_or(domain);
     let sub = domain.strip_suffix(&format!(".{parent}")).unwrap_or(domain);
     println!();
     step(&format!(

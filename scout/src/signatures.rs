@@ -415,11 +415,11 @@ pub fn detect(headers: &[(String, String)], cookies: &[String], body: &str) -> V
         for pat in &rule.patterns {
             match pat {
                 Pat::Header(name, re) => {
-                    if let Some(v) = header_val(headers, name) {
-                        if re.is_match(&v) {
-                            conf += 50;
-                            evidence.push(format!("header {}: {}", name, truncate(&v, 80)));
-                        }
+                    if let Some(v) = header_val(headers, name)
+                        && re.is_match(&v)
+                    {
+                        conf += 50;
+                        evidence.push(format!("header {}: {}", name, truncate(&v, 80)));
                     }
                 }
                 Pat::Cookie(re) => {

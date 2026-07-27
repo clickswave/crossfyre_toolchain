@@ -7,7 +7,7 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table},
@@ -88,20 +88,20 @@ pub async fn run(
         terminal.draw(|f| draw(f, &state))?;
 
         // Handle keyboard input
-        if event::poll(std::time::Duration::from_millis(poll_timeout))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Up => {
-                        if state.scroll > 0 {
-                            state.scroll -= 1;
-                        }
+        if event::poll(std::time::Duration::from_millis(poll_timeout))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Up => {
+                    if state.scroll > 0 {
+                        state.scroll -= 1;
                     }
-                    KeyCode::Down => {
-                        state.scroll += 1;
-                    }
-                    _ => {}
                 }
+                KeyCode::Down => {
+                    state.scroll += 1;
+                }
+                _ => {}
             }
         }
 

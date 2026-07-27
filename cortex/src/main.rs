@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cortex is stateless: no DB, a vulnerability-detection TCP service.
     if cli.daemon {
-        return Ok(daemon::run(cli.port).await?);
+        return daemon::run(cli.port).await;
     }
 
     match cli.command {

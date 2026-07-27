@@ -30,10 +30,11 @@ pub async fn fetch(
                 }
                 // Keep only real subdomains of the target (skip the apex and
                 // unrelated names like "notgoogle.com" that merely end in it).
-                if let Some(stripped) = host.strip_suffix(&dot_suffix) {
-                    if !stripped.is_empty() && stripped != "*" {
-                        unique_subdomains.insert(stripped.to_string());
-                    }
+                if let Some(stripped) = host.strip_suffix(&dot_suffix)
+                    && !stripped.is_empty()
+                    && stripped != "*"
+                {
+                    unique_subdomains.insert(stripped.to_string());
                 }
             }
         }

@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Scout is stateless: no DB, just a fingerprinting TCP service.
     if cli.daemon {
-        return Ok(daemon::run(cli.port).await?);
+        return daemon::run(cli.port).await;
     }
 
     match cli.command {

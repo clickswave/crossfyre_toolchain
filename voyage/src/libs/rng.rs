@@ -1,9 +1,11 @@
 use rand::Rng;
 
+#[allow(dead_code)] // kept in step with the sibling crates' rng module
 pub fn uuid() -> String {
     String::from(uuid::Uuid::new_v4())
 }
 
+#[allow(dead_code)] // kept in step with the sibling crates' rng module
 pub fn scan_id() -> String {
     format!("v_{}", uuid().replace('-', "_"))
 }

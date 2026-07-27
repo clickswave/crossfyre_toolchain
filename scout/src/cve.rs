@@ -56,20 +56,20 @@ pub fn match_cves(product: &str, version: &str) -> Vec<CveRule> {
 }
 
 fn version_in_range(v: &[u64], r: &CveRule) -> bool {
-    if let Some(min) = &r.version_min {
-        if cmp_ver(v, &parse_ver(min)) == Ordering::Less {
-            return false;
-        }
+    if let Some(min) = &r.version_min
+        && cmp_ver(v, &parse_ver(min)) == Ordering::Less
+    {
+        return false;
     }
-    if let Some(max) = &r.version_max_excl {
-        if cmp_ver(v, &parse_ver(max)) != Ordering::Less {
-            return false;
-        }
+    if let Some(max) = &r.version_max_excl
+        && cmp_ver(v, &parse_ver(max)) != Ordering::Less
+    {
+        return false;
     }
-    if let Some(max) = &r.version_max_incl {
-        if cmp_ver(v, &parse_ver(max)) == Ordering::Greater {
-            return false;
-        }
+    if let Some(max) = &r.version_max_incl
+        && cmp_ver(v, &parse_ver(max)) == Ordering::Greater
+    {
+        return false;
     }
     // A rule with no bounds at all would match every version; reject it so a
     // malformed rule can't blanket-flag a product.
@@ -117,12 +117,11 @@ fn cmp_ver(a: &[u64], b: &[u64]) -> Ordering {
 /// are appended, so a synced feed extends coverage without a rebuild.
 fn ruleset() -> Vec<CveRule> {
     let mut rules: Vec<CveRule> = serde_json::from_str(EMBEDDED_JSON).unwrap_or_default();
-    if let Ok(path) = std::env::var("SCOUT_CVE_FILE") {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Ok(mut ext) = serde_json::from_str::<Vec<CveRule>>(&text) {
-                rules.append(&mut ext);
-            }
-        }
+    if let Ok(path) = std::env::var("SCOUT_CVE_FILE")
+        && let Ok(text) = std::fs::read_to_string(&path)
+        && let Ok(mut ext) = serde_json::from_str::<Vec<CveRule>>(&text)
+    {
+        rules.append(&mut ext);
     }
     rules
 }

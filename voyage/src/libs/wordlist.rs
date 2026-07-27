@@ -16,6 +16,8 @@ pub async fn read_lines(file_path: &str) -> Result<Vec<String>, Box<dyn std::err
 }
 
 // get sha512 hash of a file
+// NOTE: duplicates libs::sha::sha512, which is the one actually called.
+#[allow(dead_code)]
 pub async fn sha512(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut file = File::open(file_path).await?;
     let mut hasher = sha2::Sha512::new();

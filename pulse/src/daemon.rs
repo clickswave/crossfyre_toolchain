@@ -33,10 +33,10 @@ pub async fn run(port: u16, db: PulseDb) -> Result<(), Box<dyn std::error::Error
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                if let Ok(n) = db_c.delete_expired_probe_results().await {
-                    if n > 0 {
-                        println!("Cleaned {} expired probe result(s)", n);
-                    }
+                if let Ok(n) = db_c.delete_expired_probe_results().await
+                    && n > 0
+                {
+                    println!("Cleaned {} expired probe result(s)", n);
                 }
             }
         });

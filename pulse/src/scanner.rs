@@ -182,6 +182,8 @@ pub struct ScanParams {
     #[serde(deserialize_with = "deserialize_ports")]
     pub ports: Vec<u16>,
     #[serde(default = "default_technique")]
+    #[allow(dead_code)]
+    // populated but not read yet; kept so the struct still mirrors its config
     pub technique: String,
     #[serde(default = "default_tasks")]
     pub tasks: u32,
@@ -560,6 +562,12 @@ async fn probe_port(
                     // thousands of connections; without this the local
                     // ephemeral-port pool is exhausted partway through and
                     // connect() stalls (slow tail).
+                    // SO_LINGER(0) is an RST close: it returns immediately and is what keeps a
+                    // full-range scan from exhausting the ephemeral-port pool via TIME_WAIT.
+                    // tokio deprecated set_linger because a NON-ZERO linger blocks the thread on
+                    // drop; that hazard does not apply here. Migrating means going through
+                    // socket2 on the raw fd, which is not worth the unsafe for the same syscall.
+                    #[allow(deprecated)]
                     let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                     let event = if detect_service {
                         let service = identify_service(port);
@@ -654,7 +662,6 @@ fn identify_service(port: u16) -> &'static str {
 
 /// Attempt to grab a service banner (first bytes sent by the server).
 async fn grab_banner(stream: &TcpStream, timeout_dur: Duration) -> Option<String> {
-    use tokio::io::AsyncReadExt;
     let mut buf = [0u8; 512];
     match timeout(
         Duration::from_millis(timeout_dur.as_millis() as u64 / 2),

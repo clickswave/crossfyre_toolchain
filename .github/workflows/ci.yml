@@ -14,9 +14,9 @@ name: CI
 #      the tuned pacing crate and the isolated-egress implementation. The
 #      open-core job fails the build if any of them appear.
 #
-# rustfmt is REQUIRED (the workspace has been formatted). clippy stays advisory
-# until its ~140 warnings are worked through; making it a gate today would just
-# get bypassed.
+# rustfmt and clippy are both REQUIRED: the workspace is formatted and at zero
+# clippy warnings. Only the dependency-advisory job stays advisory, because its
+# findings are transitive pins with no upstream fix available yet.
 
 on:
   push:
@@ -34,10 +34,9 @@ env:
   CARGO_TERM_COLOR: always
   # Fewer debug symbols; CI never runs a debugger and this is a big workspace.
   CARGO_PROFILE_DEV_DEBUG: 0
-  # Deliberately NOT `-D warnings`. The build job answers one question, "does this
-  # compile and pass its tests", and an unused import is not a broken build. The
-  # 6 compiler warnings and ~140 clippy warnings surface in the advisory clippy
-  # job instead. Turn this on once that job is clean, not before.
+  # Deliberately NOT `-D warnings` here. The build job answers one question,
+  # "does this compile and pass its tests". Lint lives in the clippy job, which
+  # does use `-D warnings` now that the tree is clean.
 
 permissions:
   contents: read
@@ -136,11 +135,12 @@ jobs:
         run: cargo fmt --all --check
 
   clippy:
-    name: clippy (advisory)
+    name: clippy
     runs-on: ubuntu-latest
-    # Still advisory: ~140 warnings to work through. Flip continue-on-error to
-    # false once that reaches zero.
-    continue-on-error: true
+    # Required as of the clippy cleanup: the workspace is at zero warnings, and
+    # `-D warnings` keeps it there. Every remaining `#[allow(...)]` in the tree
+    # carries a comment saying why, so a future warning means new code, not
+    # inherited debt.
     steps:
       - uses: actions/checkout@v4
 
@@ -161,7 +161,7 @@ jobs:
           restore-keys: lint-${{ runner.os }}-
 
       - name: clippy
-        run: cargo clippy --workspace --all-targets --locked
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   audit:
     name: dependency advisories (advisory)

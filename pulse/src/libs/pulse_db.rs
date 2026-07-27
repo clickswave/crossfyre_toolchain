@@ -1,5 +1,5 @@
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Pool, Postgres, Row};
+use sqlx::{Pool, Postgres};
 
 pub struct PulseDb {
     pub pool: Pool<Postgres>,

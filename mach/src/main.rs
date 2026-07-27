@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
         mach_db.create_tables().await?;
 
-        return Ok(daemon::run(cli.port, mach_db).await?);
+        return daemon::run(cli.port, mach_db).await;
     }
 
     // -----------------------------------------------------------------------
@@ -213,15 +213,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = mpsc::unbounded_channel::<StreamEvent>();
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
-            match serde_json::from_str::<StreamEvent>(&line) {
-                Ok(ev) => {
-                    let done = ev.kind == "done";
-                    let _ = tx.send(ev);
-                    if done {
-                        break;
-                    }
+            if let Ok(ev) = serde_json::from_str::<StreamEvent>(&line) {
+                let done = ev.kind == "done";
+                let _ = tx.send(ev);
+                if done {
+                    break;
                 }
-                Err(_) => {}
             }
         }
     });

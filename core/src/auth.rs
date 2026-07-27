@@ -125,23 +125,22 @@ fn open_browser(url: &str) -> bool {
     #[cfg(unix)]
     {
         let euid = unsafe { libc::geteuid() };
-        if euid == 0 {
-            if let Ok(user) = std::env::var("SUDO_USER") {
-                if !user.is_empty() && user != "root" {
-                    if spawn_quiet(
-                        "sudo",
-                        &[
-                            "-u",
-                            &user,
-                            "--preserve-env=DISPLAY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,WAYLAND_DISPLAY,XAUTHORITY",
-                            "xdg-open",
-                            url,
-                        ],
-                    ) {
-                        return true;
-                    }
-                }
-            }
+        if euid == 0
+            && let Ok(user) = std::env::var("SUDO_USER")
+            && !user.is_empty()
+            && user != "root"
+            && spawn_quiet(
+                "sudo",
+                &[
+                    "-u",
+                    &user,
+                    "--preserve-env=DISPLAY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,WAYLAND_DISPLAY,XAUTHORITY",
+                    "xdg-open",
+                    url,
+                ],
+            )
+        {
+            return true;
         }
     }
     spawn_quiet("xdg-open", &[url])
@@ -243,7 +242,7 @@ fn resolve_method(flags: &mut LoginFlags) -> Result<Method, String> {
     ];
     let pick = dialoguer::Select::new()
         .with_prompt("How would you like to log in?")
-        .items(&choices)
+        .items(choices)
         .default(0)
         .interact()
         .map_err(|e| e.to_string())?;

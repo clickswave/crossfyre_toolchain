@@ -101,10 +101,13 @@ pub struct Scanner {
     logger: Logger,
     scan_id: i64,
 }
+/// Async callback invoked when an [`ObservableValue`] changes.
+type ChangeHook =
+    Box<dyn Fn(usize) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
 pub struct ObservableValue {
     pub(crate) value: usize,
-    on_change:
-        Vec<Box<dyn Fn(usize) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>>,
+    on_change: Vec<ChangeHook>,
 }
 
 // A reactive value that can notify subscribers when it changes;
@@ -567,15 +570,18 @@ const RL_MAX_RETRIES: u32 = 5; // per-probe 429 retries before giving up
 /// HTTP-date form is uncommon for 429 and is ignored (falls back to backoff).
 fn parse_retry_after(headers: &Option<Vec<String>>) -> Option<u64> {
     for h in headers.as_ref()? {
-        if let Some(rest) = h.to_ascii_lowercase().strip_prefix("retry-after:") {
-            if let Ok(secs) = rest.trim().parse::<u64>() {
-                return Some((secs * 1000).min(30_000));
-            }
+        if let Some(rest) = h.to_ascii_lowercase().strip_prefix("retry-after:")
+            && let Ok(secs) = rest.trim().parse::<u64>()
+        {
+            return Some((secs * 1000).min(30_000));
         }
     }
     None
 }
 
+// Worker entry point: every argument is a distinct channel, budget or shared
+// handle. Bundling them hides which parts a task actually touches.
+#[allow(clippy::too_many_arguments)]
 async fn task_handle(
     config: Arc<cli_args::Args>,
     db: Arc<MachDb>,
@@ -608,13 +614,13 @@ async fn task_handle(
         // it receives cancel_workflow, so this is the engine-side half of
         // honoring cancellation. Checked before fetching work, so no further
         // probe is issued once the consumer is gone.
-        if let Some(ref tx) = event_tx {
-            if tx.is_closed() {
-                let _ = logger
-                    .info("Result stream consumer disconnected - stopping scan")
-                    .await;
-                return Ok(());
-            }
+        if let Some(ref tx) = event_tx
+            && tx.is_closed()
+        {
+            let _ = logger
+                .info("Result stream consumer disconnected - stopping scan")
+                .await;
+            return Ok(());
         }
 
         let work = match db.get_work_one(&scan_id).await {
@@ -662,10 +668,10 @@ async fn task_handle(
                 ),
             );
             sleep(Duration::from_millis(backoff)).await;
-            if let Some(ref tx) = event_tx {
-                if tx.is_closed() {
-                    return Ok(());
-                }
+            if let Some(ref tx) = event_tx
+                && tx.is_closed()
+            {
+                return Ok(());
             }
             tested.fetch_add(1, Ordering::Relaxed);
             probe = prober
@@ -909,6 +915,9 @@ async fn controller_tick(
 /// concurrency, paces on the controller's delay, records each outcome into the
 /// shared health window, and retries transient failures per the resilience
 /// policy (health-gated when adaptive_resilience is on).
+// Worker entry point: every argument is a distinct channel, budget or shared
+// handle. Bundling them hides which parts a task actually touches.
+#[allow(clippy::too_many_arguments)]
 async fn adaptive_task_handle(
     config: Arc<cli_args::Args>,
     db: Arc<MachDb>,
@@ -930,10 +939,10 @@ async fn adaptive_task_handle(
                 if shared.drained.load(Ordering::Relaxed) {
                     return Ok(());
                 }
-                if let Some(ref tx) = event_tx {
-                    if tx.is_closed() {
-                        return Ok(());
-                    }
+                if let Some(ref tx) = event_tx
+                    && tx.is_closed()
+                {
+                    return Ok(());
                 }
                 sleep(Duration::from_millis(80)).await;
             }
@@ -955,13 +964,13 @@ async fn adaptive_task_handle(
             continue;
         }
 
-        if let Some(ref tx) = event_tx {
-            if tx.is_closed() {
-                let _ = logger
-                    .info("Result stream consumer disconnected - stopping scan")
-                    .await;
-                return Ok(());
-            }
+        if let Some(ref tx) = event_tx
+            && tx.is_closed()
+        {
+            let _ = logger
+                .info("Result stream consumer disconnected - stopping scan")
+                .await;
+            return Ok(());
         }
 
         let work = match db.get_work_one(&scan_id).await {
@@ -1027,10 +1036,10 @@ async fn adaptive_task_handle(
                     if d.backoff_ms > 0 {
                         sleep(Duration::from_millis(d.backoff_ms)).await;
                     }
-                    if let Some(ref tx) = event_tx {
-                        if tx.is_closed() {
-                            return Ok(());
-                        }
+                    if let Some(ref tx) = event_tx
+                        && tx.is_closed()
+                    {
+                        return Ok(());
                     }
                     continue;
                 }
