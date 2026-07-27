@@ -217,7 +217,9 @@ impl Scanner {
         let arc_prober = match crate::prober::Prober::new(&self.config).await {
             Ok(prober) => Arc::new(prober),
             Err(e) => {
-                self.logger.error(&format!("Failed to create prober: {:?}", e)).await?;
+                self.logger
+                    .error(&format!("Failed to create prober: {:?}", e))
+                    .await?;
                 return Err(sqlx::Error::BeginFailed);
             }
         };
@@ -239,7 +241,11 @@ impl Scanner {
             };
             let shared = Arc::new(AdaptiveShared {
                 window: Mutex::new(adaptive::HealthWindow::new(200, 20)),
-                target_conc: AtomicU64::new(if self.config.adaptive_rate { 1 } else { max_conc }),
+                target_conc: AtomicU64::new(if self.config.adaptive_rate {
+                    1
+                } else {
+                    max_conc
+                }),
                 delay_ms: AtomicU64::new(self.config.interval),
                 score_bits: AtomicU64::new(1.0f64.to_bits()),
                 rate_on: self.config.adaptive_rate,
@@ -270,7 +276,10 @@ impl Scanner {
             }
             let msg = format!(
                 "Adaptive engine on: posture={} rate={} resilience={} max_concurrency={}",
-                self.config.posture, self.config.adaptive_rate, self.config.adaptive_resilience, max_conc
+                self.config.posture,
+                self.config.adaptive_rate,
+                self.config.adaptive_resilience,
+                max_conc
             );
             eprintln!("[mach] {msg}");
             let _ = self.logger.info(&msg).await;
@@ -314,8 +323,14 @@ impl Scanner {
             total: Some(results.totals.entries),
             tested: Some(arc_tested.load(Ordering::Relaxed) as usize),
             retries: None,
-            operation_id: None, url: None, status: None, code: None,
-            body_length: None, headers_length: None, log_level: None, message: None,
+            operation_id: None,
+            url: None,
+            status: None,
+            code: None,
+            body_length: None,
+            headers_length: None,
+            log_level: None,
+            message: None,
         });
 
         Ok(results)
@@ -355,7 +370,6 @@ impl Scanner {
 
         let scan_results_offset = Arc::new(Mutex::new(Offset::new(0)));
         let scan_results_limit = Arc::new(Mutex::new(Limit::new(rows_limit)));
-
 
         let logs_arc = Arc::new(Mutex::new(
             self.db.get_logs(&self.scan_id, rows_limit, 0).await?,
@@ -440,7 +454,7 @@ impl Scanner {
             Arc::clone(&logs_limit),
             Arc::clone(&logs_offset),
             self.scan_id,
-            self.db.clone()
+            self.db.clone(),
         );
 
         for _ in 0..self.config.tasks {
@@ -545,8 +559,8 @@ async fn update_results_handle(
 }
 
 // Adaptive rate-limit control (shared across all workers of one scan).
-const RL_STEP_MS: u64 = 120;   // throttle bump per 429
-const RL_CAP_MS: u64 = 3_000;  // max added delay between probes
+const RL_STEP_MS: u64 = 120; // throttle bump per 429
+const RL_CAP_MS: u64 = 3_000; // max added delay between probes
 const RL_MAX_RETRIES: u32 = 5; // per-probe 429 retries before giving up
 
 /// Parse a `Retry-After: <seconds>` header into milliseconds (capped). The
@@ -596,7 +610,9 @@ async fn task_handle(
         // probe is issued once the consumer is gone.
         if let Some(ref tx) = event_tx {
             if tx.is_closed() {
-                let _ = logger.info("Result stream consumer disconnected - stopping scan").await;
+                let _ = logger
+                    .info("Result stream consumer disconnected - stopping scan")
+                    .await;
                 return Ok(());
             }
         }
@@ -617,7 +633,9 @@ async fn task_handle(
         };
 
         tested.fetch_add(1, Ordering::Relaxed);
-        let mut probe = prober.probe_url(&work, config.random_user_agent_request).await;
+        let mut probe = prober
+            .probe_url(&work, config.random_user_agent_request)
+            .await;
         // Rate-limit handling: a 429 usually means the path exists but the target
         // is throttling us. Treating it as "not found" silently loses findings, so
         // back off (Retry-After or exponential) and re-probe, while bumping the
@@ -626,17 +644,33 @@ async fn task_handle(
         while matches!(&probe, Ok(r) if r.response.status == 429) {
             let cur = throttle.load(Ordering::Relaxed);
             throttle.store((cur + RL_STEP_MS).min(RL_CAP_MS), Ordering::Relaxed);
-            if rl_attempt >= RL_MAX_RETRIES { break; }
+            if rl_attempt >= RL_MAX_RETRIES {
+                break;
+            }
             rl_attempt += 1;
-            let backoff = probe.as_ref().ok()
+            let backoff = probe
+                .as_ref()
+                .ok()
                 .and_then(|r| parse_retry_after(&r.response.headers))
                 .unwrap_or((RL_STEP_MS * (1u64 << rl_attempt.min(5))).min(RL_CAP_MS));
-            emit_log(&event_tx, "debug",
-                &format!("[429] {} rate-limited, backoff {}ms (retry {}/{})", work.url, backoff, rl_attempt, RL_MAX_RETRIES));
+            emit_log(
+                &event_tx,
+                "debug",
+                &format!(
+                    "[429] {} rate-limited, backoff {}ms (retry {}/{})",
+                    work.url, backoff, rl_attempt, RL_MAX_RETRIES
+                ),
+            );
             sleep(Duration::from_millis(backoff)).await;
-            if let Some(ref tx) = event_tx { if tx.is_closed() { return Ok(()); } }
+            if let Some(ref tx) = event_tx {
+                if tx.is_closed() {
+                    return Ok(());
+                }
+            }
             tested.fetch_add(1, Ordering::Relaxed);
-            probe = prober.probe_url(&work, config.random_user_agent_request).await;
+            probe = prober
+                .probe_url(&work, config.random_user_agent_request)
+                .await;
         }
         // Decay the throttle on any non-429 outcome so the scan speeds back up
         // once the target stops limiting.
@@ -662,16 +696,17 @@ async fn record_outcome(
 ) -> Result<(), sqlx::Error> {
     match probe {
         Ok(result) => {
-            if let Err(e) = db.update_work_status(
-                work.entry_id,
-                &result.status,
-                result.response.status.to_string().as_str(),
-                result.response.body,
-                result.response.headers,
-                result.response.headers_length,
-                result.response.body_length,
-            )
-            .await
+            if let Err(e) = db
+                .update_work_status(
+                    work.entry_id,
+                    &result.status,
+                    result.response.status.to_string().as_str(),
+                    result.response.body,
+                    result.response.headers,
+                    result.response.headers_length,
+                    result.response.body_length,
+                )
+                .await
             {
                 let msg = format!("Failed to update work status: {:?}", e);
                 let _ = logger.error(&msg).await;
@@ -682,8 +717,17 @@ async fn record_outcome(
 
             emit_log(
                 event_tx,
-                if result.status == "found" { "info" } else { "debug" },
-                &format!("[{}] {} {}", result.response.status, result.status.to_uppercase(), work.url),
+                if result.status == "found" {
+                    "info"
+                } else {
+                    "debug"
+                },
+                &format!(
+                    "[{}] {} {}",
+                    result.response.status,
+                    result.status.to_uppercase(),
+                    work.url
+                ),
             );
 
             if let Some(tx) = event_tx {
@@ -696,8 +740,13 @@ async fn record_outcome(
                     code: Some(result.response.status.to_string()),
                     body_length: Some(result.response.body_length),
                     headers_length: Some(result.response.headers_length),
-                    operation_id: None, total: None, found: None,
-                    not_found: None, error: None, log_level: None, message: None,
+                    operation_id: None,
+                    total: None,
+                    found: None,
+                    not_found: None,
+                    error: None,
+                    log_level: None,
+                    message: None,
                 });
             }
         }
@@ -708,8 +757,15 @@ async fn record_outcome(
                 crate::prober::ProbeError::UnsupportedMethod(_) => ("error", "EXCEPT"),
                 crate::prober::ProbeError::RequestFailed(_) => ("error", "0"),
             };
-            emit_log(event_tx, "error", &format!("[{}] {} {}", code, work.url, err_msg));
-            if let Err(db_err) = db.update_work_status(work.entry_id, entry_status, code, None, None, 0, 0).await {
+            emit_log(
+                event_tx,
+                "error",
+                &format!("[{}] {} {}", code, work.url, err_msg),
+            );
+            if let Err(db_err) = db
+                .update_work_status(work.entry_id, entry_status, code, None, None, 0, 0)
+                .await
+            {
                 let msg = format!("Failed to update error status: {:?}", db_err);
                 let _ = logger.error(&msg).await;
                 emit_log(event_tx, "error", &msg);
@@ -725,8 +781,13 @@ async fn record_outcome(
                     code: Some(code.to_string()),
                     body_length: Some(0),
                     headers_length: Some(0),
-                    operation_id: None, total: None, found: None,
-                    not_found: None, error: None, log_level: None, message: None,
+                    operation_id: None,
+                    total: None,
+                    found: None,
+                    not_found: None,
+                    error: None,
+                    log_level: None,
+                    message: None,
                 });
             }
         }
@@ -742,9 +803,16 @@ fn emit_log(event_tx: &Option<Arc<mpsc::UnboundedSender<StreamEvent>>>, level: &
             retries: None,
             log_level: Some(level.to_string()),
             message: Some(msg.to_string()),
-            operation_id: None, total: None, url: None, status: None,
-            code: None, body_length: None, headers_length: None,
-            found: None, not_found: None, error: None,
+            operation_id: None,
+            total: None,
+            url: None,
+            status: None,
+            code: None,
+            body_length: None,
+            headers_length: None,
+            found: None,
+            not_found: None,
+            error: None,
         });
     }
 }
@@ -781,7 +849,9 @@ struct AdaptiveShared {
 
 /// Map a probe result to a health class. Success vs NotFound is the finding
 /// view; any request failure counts as a drop (same health bucket as timeout).
-fn classify(probe: &Result<crate::prober::ProbeResult, crate::prober::ProbeError>) -> adaptive::ProbeClass {
+fn classify(
+    probe: &Result<crate::prober::ProbeResult, crate::prober::ProbeError>,
+) -> adaptive::ProbeClass {
     use adaptive::ProbeClass;
     match probe {
         Ok(r) => {
@@ -824,10 +894,14 @@ async fn controller_tick(
         let stats = { shared.window.lock().unwrap().stats() };
         let dir = rc.tick(&stats);
         if shared.rate_on {
-            shared.target_conc.store(dir.concurrency as u64, Ordering::Relaxed);
+            shared
+                .target_conc
+                .store(dir.concurrency as u64, Ordering::Relaxed);
             shared.delay_ms.store(dir.delay_ms, Ordering::Relaxed);
         }
-        shared.score_bits.store(rc.last_score().to_bits(), Ordering::Relaxed);
+        shared
+            .score_bits
+            .store(rc.last_score().to_bits(), Ordering::Relaxed);
     }
 }
 
@@ -883,7 +957,9 @@ async fn adaptive_task_handle(
 
         if let Some(ref tx) = event_tx {
             if tx.is_closed() {
-                let _ = logger.info("Result stream consumer disconnected - stopping scan").await;
+                let _ = logger
+                    .info("Result stream consumer disconnected - stopping scan")
+                    .await;
                 return Ok(());
             }
         }
@@ -910,7 +986,9 @@ async fn adaptive_task_handle(
         let final_probe = loop {
             tested.fetch_add(1, Ordering::Relaxed);
             let t0 = Instant::now();
-            let probe = prober.probe_url(&work, config.random_user_agent_request).await;
+            let probe = prober
+                .probe_url(&work, config.random_user_agent_request)
+                .await;
             let rtt_ms = t0.elapsed().as_millis() as u64;
             let class = classify(&probe);
             {
@@ -941,7 +1019,10 @@ async fn adaptive_task_handle(
                     emit_log(
                         &event_tx,
                         "debug",
-                        &format!("[retry {}] {} (backoff {}ms)", attempt, work.url, d.backoff_ms),
+                        &format!(
+                            "[retry {}] {} (backoff {}ms)",
+                            attempt, work.url, d.backoff_ms
+                        ),
                     );
                     if d.backoff_ms > 0 {
                         sleep(Duration::from_millis(d.backoff_ms)).await;
@@ -957,6 +1038,15 @@ async fn adaptive_task_handle(
             break probe;
         };
 
-        record_outcome(&db, &logger, &event_tx, &tested, &work, final_probe, attempt).await?;
+        record_outcome(
+            &db,
+            &logger,
+            &event_tx,
+            &tested,
+            &work,
+            final_probe,
+            attempt,
+        )
+        .await?;
     }
 }

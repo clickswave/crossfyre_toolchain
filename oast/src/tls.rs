@@ -42,7 +42,8 @@ fn load_certified_key(cert_path: &str, key_path: &str) -> Option<Arc<CertifiedKe
     if certs.is_empty() {
         return None;
     }
-    let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut key_pem.as_slice()).ok()??;
+    let key: PrivateKeyDer<'static> =
+        rustls_pemfile::private_key(&mut key_pem.as_slice()).ok()??;
     let signing_key = rustls::crypto::ring::sign::any_supported_type(&key).ok()?;
     Some(Arc::new(CertifiedKey::new(certs, signing_key)))
 }

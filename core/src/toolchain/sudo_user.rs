@@ -23,21 +23,29 @@ pub fn sudo_user_info() -> Option<(u32, u32, PathBuf, String)> {
     let c = CString::new(sudo_user.clone()).ok()?;
     unsafe {
         let pwd = libc::getpwnam(c.as_ptr());
-        if pwd.is_null() { return None; }
+        if pwd.is_null() {
+            return None;
+        }
         let uid = (*pwd).pw_uid;
         let gid = (*pwd).pw_gid;
         let home_ptr = (*pwd).pw_dir;
         let home = if home_ptr.is_null() {
             PathBuf::from(format!("/home/{}", sudo_user))
         } else {
-            PathBuf::from(std::ffi::CStr::from_ptr(home_ptr).to_string_lossy().into_owned())
+            PathBuf::from(
+                std::ffi::CStr::from_ptr(home_ptr)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         };
         Some((uid, gid, home, sudo_user))
     }
 }
 
 #[cfg(not(unix))]
-pub fn sudo_user_info() -> Option<(u32, u32, PathBuf, String)> { None }
+pub fn sudo_user_info() -> Option<(u32, u32, PathBuf, String)> {
+    None
+}
 
 /// Home directory of the invoking user. Falls back to dirs::home_dir() (which
 /// resolves to /root under sudo) only when SUDO_USER isn't set.
@@ -79,7 +87,10 @@ pub fn cmd_as_invoking_user<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
         // /run/user/<uid> on every modern systemd setup.
         let runtime_dir = format!("/run/user/{}", uid);
         cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
-        cmd.env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}/bus", runtime_dir));
+        cmd.env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}/bus", runtime_dir),
+        );
     }
     cmd
 }
@@ -90,7 +101,9 @@ pub fn cmd_as_invoking_user<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
 /// edit them later without sudo.
 #[cfg(unix)]
 pub fn chown_to_invoking_user(path: &std::path::Path) {
-    let Some((uid, gid, _, _)) = sudo_user_info() else { return };
+    let Some((uid, gid, _, _)) = sudo_user_info() else {
+        return;
+    };
     chown_recursive(path, uid, gid);
 }
 #[cfg(not(unix))]
@@ -104,7 +117,11 @@ fn chown_recursive(path: &std::path::Path, uid: u32, gid: u32) {
             // errno symbol differs by libc (__errno_location on Linux,
             // __error on macOS); last_os_error() is portable across both.
             if libc::chown(cpath.as_ptr(), uid, gid) != 0 {
-                eprintln!("[!] chown {} failed: {}", path.display(), std::io::Error::last_os_error());
+                eprintln!(
+                    "[!] chown {} failed: {}",
+                    path.display(),
+                    std::io::Error::last_os_error()
+                );
             }
         }
     }

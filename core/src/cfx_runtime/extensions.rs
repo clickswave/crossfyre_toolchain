@@ -25,10 +25,23 @@ pub fn inject_defaults() {
 
     // Common CLI recon tools (shell out to binary)
     for name in [
-        "subfinder", "httpx", "nuclei", "naabu", "amass", "ffuf", "dnsx",
-        "katana", "gau", "waybackurls",
+        "subfinder",
+        "httpx",
+        "nuclei",
+        "naabu",
+        "amass",
+        "ffuf",
+        "dnsx",
+        "katana",
+        "gau",
+        "waybackurls",
     ] {
-        map.insert(name.to_string(), ExtensionKind::Cli { binary: name.to_string() });
+        map.insert(
+            name.to_string(),
+            ExtensionKind::Cli {
+                binary: name.to_string(),
+            },
+        );
     }
 
     *REGISTRY.lock().unwrap() = Some(map);
@@ -57,14 +70,18 @@ impl Extension {
             .output()
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to run '{}': {}", binary, e
+                    "Failed to run '{}': {}",
+                    binary, e
                 ))
             })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                "'{}' exited with {}: {}", binary, output.status, stderr.trim()
+                "'{}' exited with {}: {}",
+                binary,
+                output.status,
+                stderr.trim()
             )));
         }
 
@@ -122,12 +139,12 @@ impl DaemonExtension {
                 ))
             })?;
 
-        let parsed: serde_json::Value = serde_json::from_str(response.trim())
-            .map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid JSON from {} daemon: {}", self.name, e
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(response.trim()).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid JSON from {} daemon: {}",
+                self.name, e
+            ))
+        })?;
 
         pythonize::pythonize(py, &parsed)
             .map(|b| b.unbind())
@@ -237,12 +254,12 @@ impl DaemonExtension {
                 ))
             })?;
 
-        let parsed: serde_json::Value = serde_json::from_str(response.trim())
-            .map_err(|e| {
-                pyo3::exceptions::PyValueError::new_err(format!(
-                    "Invalid JSON from {} daemon: {}", name, e
-                ))
-            })?;
+        let parsed: serde_json::Value = serde_json::from_str(response.trim()).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Invalid JSON from {} daemon: {}",
+                name, e
+            ))
+        })?;
 
         pythonize::pythonize(py, &parsed)
             .map(|b| b.unbind())
@@ -277,12 +294,20 @@ fn get(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
         pyo3::exceptions::PyKeyError::new_err(format!("Unknown extension: '{}'", name))
     })?;
     match kind {
-        ExtensionKind::Cli { binary } => {
-            Ok(Extension { name: name.to_string(), binary: binary.clone() }.into_pyobject(py)?.into_any().unbind())
+        ExtensionKind::Cli { binary } => Ok(Extension {
+            name: name.to_string(),
+            binary: binary.clone(),
         }
-        ExtensionKind::Daemon { port } => {
-            Ok(DaemonExtension { name: name.to_string(), port: *port }.into_pyobject(py)?.into_any().unbind())
+        .into_pyobject(py)?
+        .into_any()
+        .unbind()),
+        ExtensionKind::Daemon { port } => Ok(DaemonExtension {
+            name: name.to_string(),
+            port: *port,
         }
+        .into_pyobject(py)?
+        .into_any()
+        .unbind()),
     }
 }
 
@@ -291,7 +316,12 @@ fn get(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
 fn register(name: &str, binary_path: &str) -> PyResult<()> {
     let mut guard = REGISTRY.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(name.to_string(), ExtensionKind::Cli { binary: binary_path.to_string() });
+    map.insert(
+        name.to_string(),
+        ExtensionKind::Cli {
+            binary: binary_path.to_string(),
+        },
+    );
     Ok(())
 }
 

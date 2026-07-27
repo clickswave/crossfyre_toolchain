@@ -37,11 +37,10 @@ impl VoyageDb {
 
         let admin_pool = sqlx::PgPool::connect_with(admin_opts).await?;
 
-        let db_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'voyage')",
-        )
-        .fetch_one(&admin_pool)
-        .await?;
+        let db_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'voyage')")
+                .fetch_one(&admin_pool)
+                .await?;
 
         if !db_exists {
             sqlx::query("CREATE DATABASE voyage")
@@ -236,13 +235,16 @@ impl VoyageDb {
             let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
                 "INSERT INTO scan_entries (scan_id, full_subdomain, method, source, status) ",
             );
-            qb.push_values(chunk.iter(), |mut b, (subdomain, method, source, status)| {
-                b.push_bind(scan_id)
-                    .push_bind(subdomain)
-                    .push_bind(method)
-                    .push_bind(source)
-                    .push_bind(status);
-            });
+            qb.push_values(
+                chunk.iter(),
+                |mut b, (subdomain, method, source, status)| {
+                    b.push_bind(scan_id)
+                        .push_bind(subdomain)
+                        .push_bind(method)
+                        .push_bind(source)
+                        .push_bind(status);
+                },
+            );
             qb.push(" ON CONFLICT (scan_id, full_subdomain) DO NOTHING");
             qb.build().execute(&self.pool).await?;
         }
@@ -352,7 +354,10 @@ impl VoyageDb {
         Ok((found, not_found))
     }
 
-    pub async fn get_passive_results(&self, scan_id: &str) -> Result<Vec<PassiveResult>, sqlx::Error> {
+    pub async fn get_passive_results(
+        &self,
+        scan_id: &str,
+    ) -> Result<Vec<PassiveResult>, sqlx::Error> {
         sqlx::query_as::<_, PassiveResult>(
             "SELECT full_subdomain, source FROM scan_entries WHERE scan_id = $1 AND method = 'passive' ORDER BY id",
         )

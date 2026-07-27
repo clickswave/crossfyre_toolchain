@@ -75,12 +75,28 @@ impl StreamEvent {
     fn base(kind: &str) -> Self {
         Self {
             kind: kind.to_string(),
-            operation_id: None, total: None,
-            host: None, port: None, status: None, service: None, banner: None,
-            latency_ms: None, processed: None, open: None, closed: None, filtered: None,
-            log_level: None, message: None,
-            concurrency: None, timeout_ms: None, retries: None,
-            srtt_ms: None, min_rtt_ms: None, loss_pct: None, goodput: None, phase: None,
+            operation_id: None,
+            total: None,
+            host: None,
+            port: None,
+            status: None,
+            service: None,
+            banner: None,
+            latency_ms: None,
+            processed: None,
+            open: None,
+            closed: None,
+            filtered: None,
+            log_level: None,
+            message: None,
+            concurrency: None,
+            timeout_ms: None,
+            retries: None,
+            srtt_ms: None,
+            min_rtt_ms: None,
+            loss_pct: None,
+            goodput: None,
+            phase: None,
         }
     }
 
@@ -108,7 +124,14 @@ impl StreamEvent {
         ev
     }
 
-    pub fn result_with_service(host: &str, port: u16, status: &str, latency_ms: u64, service: &str, banner: Option<String>) -> Self {
+    pub fn result_with_service(
+        host: &str,
+        port: u16,
+        status: &str,
+        latency_ms: u64,
+        service: &str,
+        banner: Option<String>,
+    ) -> Self {
         let mut ev = Self::result(host, port, status, latency_ms);
         ev.service = Some(service.to_string());
         ev.banner = banner;
@@ -185,13 +208,23 @@ pub struct ScanParams {
     pub posture: Option<String>,
 }
 
-fn default_technique() -> String { "connect".to_string() }
-fn default_tasks() -> u32 { 100 }
-fn default_timeout() -> u64 { 2000 }
-fn default_adaptive() -> bool { true }
+fn default_technique() -> String {
+    "connect".to_string()
+}
+fn default_tasks() -> u32 {
+    100
+}
+fn default_timeout() -> u64 {
+    2000
+}
+fn default_adaptive() -> bool {
+    true
+}
 
 fn deserialize_ports<'de, D>(deserializer: D) -> Result<Vec<u16>, D::Error>
-where D: serde::Deserializer<'de> {
+where
+    D: serde::Deserializer<'de>,
+{
     use serde::de;
 
     struct PortsVisitor;
@@ -241,13 +274,21 @@ pub fn resolve_targets(targets: &[String]) -> Vec<String> {
 fn expand_cidr(cidr: &str) -> Option<Vec<String>> {
     let (ip_str, prefix_str) = cidr.split_once('/')?;
     let prefix: u32 = prefix_str.parse().ok()?;
-    if prefix > 32 { return None; }
+    if prefix > 32 {
+        return None;
+    }
 
     let octets: Vec<u32> = ip_str.split('.').filter_map(|o| o.parse().ok()).collect();
-    if octets.len() != 4 { return None; }
+    if octets.len() != 4 {
+        return None;
+    }
 
     let ip_num = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3];
-    let mask = if prefix == 0 { 0 } else { !((1u32 << (32 - prefix)) - 1) };
+    let mask = if prefix == 0 {
+        0
+    } else {
+        !((1u32 << (32 - prefix)) - 1)
+    };
     let network = ip_num & mask;
     let broadcast = network | !mask;
 
@@ -260,7 +301,13 @@ fn expand_cidr(cidr: &str) -> Option<Vec<String>> {
 
     let mut ips = Vec::new();
     for i in start..=end {
-        ips.push(format!("{}.{}.{}.{}", (i >> 24) & 0xFF, (i >> 16) & 0xFF, (i >> 8) & 0xFF, i & 0xFF));
+        ips.push(format!(
+            "{}.{}.{}.{}",
+            (i >> 24) & 0xFF,
+            (i >> 16) & 0xFF,
+            (i >> 8) & 0xFF,
+            i & 0xFF
+        ));
     }
     Some(ips)
 }
@@ -272,10 +319,7 @@ const ADAPTIVE_MIN: usize = 16;
 /// Run a TCP connect scan, streaming results to the channel. Uses the adaptive
 /// rate governor when the batch is large enough (and `params.adaptive`), else a
 /// fixed-rate pass.
-pub async fn run_connect_scan(
-    params: &ScanParams,
-    tx: mpsc::UnboundedSender<StreamEvent>,
-) {
+pub async fn run_connect_scan(params: &ScanParams, tx: mpsc::UnboundedSender<StreamEvent>) {
     let hosts = resolve_targets(&params.targets);
     let total = hosts.len().saturating_mul(params.ports.len());
     if params.adaptive && total >= ADAPTIVE_MIN {
@@ -299,7 +343,8 @@ async fn run_fixed_scan(
     tx: mpsc::UnboundedSender<StreamEvent>,
 ) {
     let timeout_dur = Duration::from_millis(params.timeout);
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new((params.tasks.max(1)) as usize));
+    let semaphore =
+        std::sync::Arc::new(tokio::sync::Semaphore::new((params.tasks.max(1)) as usize));
 
     let (result_tx, mut result_rx) = mpsc::unbounded_channel::<StreamEvent>();
     let delay = params.delay;
@@ -453,7 +498,13 @@ async fn run_adaptive_scan(
 /// first address from the resolver was making the same port look open or
 /// closed depending on which family came back first - that's why DS and
 /// SB scans of the same `localhost:5432` could disagree.
-async fn probe_port(host: &str, port: u16, timeout_dur: Duration, max_attempts: u32, detect_service: bool) -> ProbeReport {
+async fn probe_port(
+    host: &str,
+    port: u16,
+    timeout_dur: Duration,
+    max_attempts: u32,
+    detect_service: bool,
+) -> ProbeReport {
     use crate::governor::{Outcome, Sample};
     let addr_str = format!("{}:{}", host, port);
 
@@ -465,16 +516,24 @@ async fn probe_port(host: &str, port: u16, timeout_dur: Duration, max_attempts: 
             Ok(iter) => iter.collect(),
             // DNS failure isn't network loss on the probe path; report as
             // delivered-fast so it doesn't drag the governor's loss signal.
-            Err(_) => return ProbeReport {
-                event: StreamEvent::result(host, port, "filtered", 0),
-                sample: Sample { outcome: Outcome::Delivered { rtt_ms: 0 }, attempts: 1 },
-            },
+            Err(_) => {
+                return ProbeReport {
+                    event: StreamEvent::result(host, port, "filtered", 0),
+                    sample: Sample {
+                        outcome: Outcome::Delivered { rtt_ms: 0 },
+                        attempts: 1,
+                    },
+                };
+            }
         }
     };
     if addrs.is_empty() {
         return ProbeReport {
             event: StreamEvent::result(host, port, "filtered", 0),
-            sample: Sample { outcome: Outcome::Delivered { rtt_ms: 0 }, attempts: 1 },
+            sample: Sample {
+                outcome: Outcome::Delivered { rtt_ms: 0 },
+                attempts: 1,
+            },
         };
     }
 
@@ -505,17 +564,24 @@ async fn probe_port(host: &str, port: u16, timeout_dur: Duration, max_attempts: 
                     let event = if detect_service {
                         let service = identify_service(port);
                         let banner = grab_banner(&stream, timeout_dur).await;
-                        StreamEvent::result_with_service(host, port, "open", latency, service, banner)
+                        StreamEvent::result_with_service(
+                            host, port, "open", latency, service, banner,
+                        )
                     } else {
                         StreamEvent::result(host, port, "open", latency)
                     };
                     return ProbeReport {
                         event,
-                        sample: Sample { outcome: Outcome::Delivered { rtt_ms: latency }, attempts: attempt + 1 },
+                        sample: Sample {
+                            outcome: Outcome::Delivered { rtt_ms: latency },
+                            attempts: attempt + 1,
+                        },
                     };
                 }
-                Ok(Err(_)) => { saw_refused = true; }  // RST -> closed (this address)
-                Err(_)     => {}                        // timeout -> retry below
+                Ok(Err(_)) => {
+                    saw_refused = true;
+                } // RST -> closed (this address)
+                Err(_) => {} // timeout -> retry below
             }
         }
         // A definitive RST is a real answer - don't waste retries on it.
@@ -534,12 +600,18 @@ async fn probe_port(host: &str, port: u16, timeout_dur: Duration, max_attempts: 
         let rtt = start.elapsed().as_millis() as u64;
         ProbeReport {
             event: StreamEvent::result(host, port, "closed", rtt),
-            sample: Sample { outcome: Outcome::Delivered { rtt_ms: rtt }, attempts: attempts_used },
+            sample: Sample {
+                outcome: Outcome::Delivered { rtt_ms: rtt },
+                attempts: attempts_used,
+            },
         }
     } else {
         ProbeReport {
             event: StreamEvent::result(host, port, "filtered", timeout_dur.as_millis() as u64),
-            sample: Sample { outcome: Outcome::Lost, attempts: max_attempts },
+            sample: Sample {
+                outcome: Outcome::Lost,
+                attempts: max_attempts,
+            },
         }
     }
 }
@@ -547,14 +619,35 @@ async fn probe_port(host: &str, port: u16, timeout_dur: Duration, max_attempts: 
 /// Basic service identification by well-known port.
 fn identify_service(port: u16) -> &'static str {
     match port {
-        21 => "ftp", 22 => "ssh", 23 => "telnet", 25 => "smtp",
-        53 => "dns", 80 => "http", 110 => "pop3", 111 => "rpcbind",
-        135 => "msrpc", 139 => "netbios", 143 => "imap", 443 => "https",
-        445 => "smb", 465 => "smtps", 587 => "submission", 993 => "imaps",
-        995 => "pop3s", 1433 => "mssql", 1521 => "oracle", 3306 => "mysql",
-        3389 => "rdp", 5432 => "postgresql", 5900 => "vnc", 6379 => "redis",
-        6443 => "k8s-api", 8080 => "http-proxy", 8443 => "https-alt",
-        9200 => "elasticsearch", 27017 => "mongodb",
+        21 => "ftp",
+        22 => "ssh",
+        23 => "telnet",
+        25 => "smtp",
+        53 => "dns",
+        80 => "http",
+        110 => "pop3",
+        111 => "rpcbind",
+        135 => "msrpc",
+        139 => "netbios",
+        143 => "imap",
+        443 => "https",
+        445 => "smb",
+        465 => "smtps",
+        587 => "submission",
+        993 => "imaps",
+        995 => "pop3s",
+        1433 => "mssql",
+        1521 => "oracle",
+        3306 => "mysql",
+        3389 => "rdp",
+        5432 => "postgresql",
+        5900 => "vnc",
+        6379 => "redis",
+        6443 => "k8s-api",
+        8080 => "http-proxy",
+        8443 => "https-alt",
+        9200 => "elasticsearch",
+        27017 => "mongodb",
         _ => "unknown",
     }
 }
@@ -563,20 +656,27 @@ fn identify_service(port: u16) -> &'static str {
 async fn grab_banner(stream: &TcpStream, timeout_dur: Duration) -> Option<String> {
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; 512];
-    match timeout(Duration::from_millis(timeout_dur.as_millis() as u64 / 2), stream.readable()).await {
-        Ok(Ok(())) => {
-            match stream.try_read(&mut buf) {
-                Ok(n) if n > 0 => {
-                    let banner = String::from_utf8_lossy(&buf[..n])
-                        .trim()
-                        .chars()
-                        .take(200)
-                        .collect::<String>();
-                    if banner.is_empty() { None } else { Some(banner) }
+    match timeout(
+        Duration::from_millis(timeout_dur.as_millis() as u64 / 2),
+        stream.readable(),
+    )
+    .await
+    {
+        Ok(Ok(())) => match stream.try_read(&mut buf) {
+            Ok(n) if n > 0 => {
+                let banner = String::from_utf8_lossy(&buf[..n])
+                    .trim()
+                    .chars()
+                    .take(200)
+                    .collect::<String>();
+                if banner.is_empty() {
+                    None
+                } else {
+                    Some(banner)
                 }
-                _ => None,
             }
-        }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -616,7 +716,10 @@ mod tests {
             while let Some(ev) = rx.recv().await {
                 match ev.kind.as_str() {
                     "governor" => saw_governor = true,
-                    "done" => { saw_done = true; break; }
+                    "done" => {
+                        saw_done = true;
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -625,7 +728,10 @@ mod tests {
 
         assert!(collect.is_ok(), "adaptive scan hung (no done within 10s)");
         assert!(saw_done, "scan must emit a done event");
-        assert!(saw_governor, "adaptive scan must emit at least one governor telemetry tick");
+        assert!(
+            saw_governor,
+            "adaptive scan must emit at least one governor telemetry tick"
+        );
         let _ = scan.await;
     }
 }

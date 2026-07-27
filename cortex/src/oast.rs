@@ -15,7 +15,7 @@ use base64::Engine as _;
 use reqwest::Client;
 use rsa::pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey};
 use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::Sha256;
 use std::time::Duration;
 
@@ -23,14 +23,18 @@ fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
 }
 fn b64d(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::STANDARD.decode(s.trim()).ok()
+    base64::engine::general_purpose::STANDARD
+        .decode(s.trim())
+        .ok()
 }
 
 fn rand_alnum(n: usize) -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();
-    (0..n).map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char).collect()
+    (0..n)
+        .map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char)
+        .collect()
 }
 
 /// A per-scan OAST client: one RSA keypair, reused across the scan's correlations.

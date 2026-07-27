@@ -25,7 +25,9 @@ pub const BASE_URL: &str = match option_env!("CROSSFYRE_BINS_ORIGIN") {
 
 /// Host portion of the bins origin, for display (e.g. "bins-dev.crossfyre.io").
 fn origin_host() -> &'static str {
-    BASE_URL.trim_start_matches("https://").trim_start_matches("http://")
+    BASE_URL
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
 }
 
 /// Sidecar recording an installed extension's version (mirrors node.version),
@@ -35,12 +37,16 @@ fn ext_version_file(ext: &str) -> std::path::PathBuf {
 }
 
 fn installed_ext_version(ext: &str) -> Option<String> {
-    fs::read_to_string(ext_version_file(ext)).ok().map(|s| s.trim().to_string())
+    fs::read_to_string(ext_version_file(ext))
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// The version string in `resolve_artifact` for a component, or "" if absent.
 fn manifest_version(manifest: &Manifest, comp: &str) -> String {
-    resolve_artifact(manifest, comp).map(|(c, _)| c.version.clone()).unwrap_or_default()
+    resolve_artifact(manifest, comp)
+        .map(|(c, _)| c.version.clone())
+        .unwrap_or_default()
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -72,12 +78,20 @@ pub fn platform_key() -> String {
 
 pub async fn fetch_manifest() -> Result<Manifest, Box<dyn std::error::Error>> {
     let url = format!("{}/manifest.json", BASE_URL);
-    let resp = reqwest::get(&url).await
+    let resp = reqwest::get(&url)
+        .await
         .map_err(|e| format!("could not fetch release manifest ({}): {}", url, e))?;
     if !resp.status().is_success() {
-        return Err(format!("release manifest fetch failed: {} returned {}", url, resp.status()).into());
+        return Err(format!(
+            "release manifest fetch failed: {} returned {}",
+            url,
+            resp.status()
+        )
+        .into());
     }
-    let manifest: Manifest = resp.json().await
+    let manifest: Manifest = resp
+        .json()
+        .await
         .map_err(|e| format!("release manifest is malformed: {}", e))?;
     Ok(manifest)
 }
@@ -86,18 +100,28 @@ fn resolve_artifact<'m>(
     manifest: &'m Manifest,
     component: &str,
 ) -> Result<(&'m Component, &'m Artifact), Box<dyn std::error::Error>> {
-    let comp = manifest.components.get(component)
+    let comp = manifest
+        .components
+        .get(component)
         .ok_or_else(|| format!("component '{}' not in release manifest", component))?;
     let key = platform_key();
-    let artifact = comp.artifacts.get(&key)
-        .ok_or_else(|| format!("no '{}' artifact for platform {} in release manifest", component, key))?;
+    let artifact = comp.artifacts.get(&key).ok_or_else(|| {
+        format!(
+            "no '{}' artifact for platform {} in release manifest",
+            component, key
+        )
+    })?;
     Ok((comp, artifact))
 }
 
 /// Download an artifact to `dest` and verify its SHA256 against the manifest.
-async fn download_verified(artifact: &Artifact, dest: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn download_verified(
+    artifact: &Artifact,
+    dest: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!("{}/{}", BASE_URL, artifact.file);
-    let resp = reqwest::get(&url).await
+    let resp = reqwest::get(&url)
+        .await
         .map_err(|e| format!("download failed ({}): {}", url, e))?;
     if !resp.status().is_success() {
         return Err(format!("download failed: {} returned {}", url, resp.status()).into());
@@ -111,7 +135,8 @@ async fn download_verified(artifact: &Artifact, dest: &Path) -> Result<(), Box<d
         return Err(format!(
             "checksum mismatch for {} (expected {}, got {}) - refusing to install",
             artifact.file, artifact.sha256, got
-        ).into());
+        )
+        .into());
     }
 
     fs::write(dest, &bytes)?;
@@ -123,7 +148,12 @@ async fn download_verified(artifact: &Artifact, dest: &Path) -> Result<(), Box<d
 fn extract_zip(zip_path: &Path, extract_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(extract_dir)?;
     let status = Command::new("unzip")
-        .args(["-q", &zip_path.to_string_lossy(), "-d", &extract_dir.to_string_lossy()])
+        .args([
+            "-q",
+            &zip_path.to_string_lossy(),
+            "-d",
+            &extract_dir.to_string_lossy(),
+        ])
         .status()
         .map_err(|e| format!("unzip not found or failed to execute: {}", e))?;
     if !status.success() {
@@ -159,28 +189,42 @@ pub async fn install(extension: &str, force: bool) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-async fn install_one(manifest: &Manifest, ext: &str, force: bool, quiet: bool) -> Result<(), Box<dyn std::error::Error>> {
+async fn install_one(
+    manifest: &Manifest,
+    ext: &str,
+    force: bool,
+    quiet: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     use super::ui::*;
     let bin_path = ext_bin_path(ext);
 
-    if !quiet { title("Crossfyre extension install", ext); }
+    if !quiet {
+        title("Crossfyre extension install", ext);
+    }
 
     if bin_path.exists() && !force {
         if !quiet {
-            warn(&format!("{ext} is already installed {}", dim("(use --force to reinstall)")));
+            warn(&format!(
+                "{ext} is already installed {}",
+                dim("(use --force to reinstall)")
+            ));
             end();
         }
         return Ok(());
     }
 
     let (comp, artifact) = resolve_artifact(manifest, ext)?;
-    if !quiet { working(&format!("Downloading {ext} {}", dim(&comp.version))); }
+    if !quiet {
+        working(&format!("Downloading {ext} {}", dim(&comp.version)));
+    }
 
     let tmp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let zip_path = tmp_dir.path().join(&artifact.file);
     download_verified(artifact, &zip_path).await?;
 
-    if !quiet { working("Installing"); }
+    if !quiet {
+        working("Installing");
+    }
     let extract_dir = tmp_dir.path().join("extracted");
     extract_zip(&zip_path, &extract_dir)?;
 
@@ -199,13 +243,22 @@ async fn install_one(manifest: &Manifest, ext: &str, force: bool, quiet: bool) -
     // Record the installed version so `update` can skip it next time (mirrors
     // node.version). Best-effort: a missing sidecar just triggers one reinstall.
     let _ = fs::write(ext_version_file(ext), &comp.version);
-    if !quiet { ok(&format!("{ext} {} installed", comp.version)); }
-
-    if let Err(e) = service::create_service_file(ext) {
-        if !quiet { fail(&format!("Failed to create service: {}", dim(&e.to_string()))); }
+    if !quiet {
+        ok(&format!("{ext} {} installed", comp.version));
     }
 
-    if !quiet { end(); }
+    if let Err(e) = service::create_service_file(ext) {
+        if !quiet {
+            fail(&format!(
+                "Failed to create service: {}",
+                dim(&e.to_string())
+            ));
+        }
+    }
+
+    if !quiet {
+        end();
+    }
 
     Ok(())
 }
@@ -256,7 +309,10 @@ fn remove_one(ext: &str) -> Result<(), Box<dyn std::error::Error>> {
 /// `crossfyre update [self|<ext>|all]`. With no target: update self plus
 /// every installed extension. Returns true if the crossfyre binary itself
 /// was replaced (caller should restart).
-pub async fn update(target: Option<&str>, current_version: &str) -> Result<bool, Box<dyn std::error::Error>> {
+pub async fn update(
+    target: Option<&str>,
+    current_version: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let manifest = fetch_manifest().await?;
     let mut self_updated = false;
 
@@ -299,14 +355,27 @@ pub async fn update(target: Option<&str>, current_version: &str) -> Result<bool,
                 Ok(()) => {
                     let _ = service::start(ext);
                     let mid = match &have {
-                        Some(old) if !old.is_empty() && *old != want => format!("{DIM}{old} \u{2192}{RESET} {want}"),
+                        Some(old) if !old.is_empty() && *old != want => {
+                            format!("{DIM}{old} \u{2192}{RESET} {want}")
+                        }
                         _ => want.clone(),
                     };
-                    println!("\r{}          ", row(&check(), ext, &mid, &format!("{GREEN}updated{RESET}")));
+                    println!(
+                        "\r{}          ",
+                        row(&check(), ext, &mid, &format!("{GREEN}updated{RESET}"))
+                    );
                     changed += 1;
                 }
                 Err(e) => {
-                    println!("\r{}          ", row(&bang(), ext, "", &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))));
+                    println!(
+                        "\r{}          ",
+                        row(
+                            &bang(),
+                            ext,
+                            "",
+                            &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))
+                        )
+                    );
                 }
             }
         }
@@ -319,7 +388,10 @@ pub async fn update(target: Option<&str>, current_version: &str) -> Result<bool,
 
         let want = manifest_version(&manifest, "crossfyre");
         if !want.is_empty() && want == current_version {
-            println!("{}", row(&check(), "crossfyre", &ver(&want), &dim("up to date")));
+            println!(
+                "{}",
+                row(&check(), "crossfyre", &ver(&want), &dim("up to date"))
+            );
             current += 1;
         } else {
             print!("    {} {:<10} {}", dot(), "crossfyre", dim("updating…"));
@@ -327,28 +399,52 @@ pub async fn update(target: Option<&str>, current_version: &str) -> Result<bool,
             match self_update(&manifest, current_version, true).await {
                 Ok(true) => {
                     let mid = format!("{DIM}{current_version} \u{2192}{RESET} {want}");
-                    println!("\r{}          ", row(&check(), "crossfyre", &mid, &format!("{GREEN}updated{RESET}")));
+                    println!(
+                        "\r{}          ",
+                        row(
+                            &check(),
+                            "crossfyre",
+                            &mid,
+                            &format!("{GREEN}updated{RESET}")
+                        )
+                    );
                     self_updated = true;
                     changed += 1;
                 }
                 Ok(false) => {
-                    println!("\r{}          ", row(&check(), "crossfyre", &ver(&want), &dim("up to date")));
+                    println!(
+                        "\r{}          ",
+                        row(&check(), "crossfyre", &ver(&want), &dim("up to date"))
+                    );
                     current += 1;
                 }
                 Err(e) => {
-                    println!("\r{}          ", row(&bang(), "crossfyre", "", &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))));
+                    println!(
+                        "\r{}          ",
+                        row(
+                            &bang(),
+                            "crossfyre",
+                            "",
+                            &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))
+                        )
+                    );
                 }
             }
         }
 
         // node worker (version tracked via the node.version sidecar).
         let nwant = manifest_version(&manifest, "node");
-        let nhave = fs::read_to_string(get_bin_dir().join("node.version")).ok().map(|s| s.trim().to_string());
+        let nhave = fs::read_to_string(get_bin_dir().join("node.version"))
+            .ok()
+            .map(|s| s.trim().to_string());
         let node_ok = get_bin_dir().join(ext_file_name("node")).exists()
             && !nwant.is_empty()
             && nhave.as_deref() == Some(nwant.as_str());
         if node_ok {
-            println!("{}", row(&check(), "node", &ver(&nwant), &dim("up to date")));
+            println!(
+                "{}",
+                row(&check(), "node", &ver(&nwant), &dim("up to date"))
+            );
             current += 1;
         } else {
             print!("    {} {:<10} {}", dot(), "node", dim("updating…"));
@@ -356,19 +452,35 @@ pub async fn update(target: Option<&str>, current_version: &str) -> Result<bool,
             match download_node(&manifest, true).await {
                 Ok(true) => {
                     let mid = match &nhave {
-                        Some(old) if !old.is_empty() && *old != nwant => format!("{DIM}{old} \u{2192}{RESET} {nwant}"),
+                        Some(old) if !old.is_empty() && *old != nwant => {
+                            format!("{DIM}{old} \u{2192}{RESET} {nwant}")
+                        }
                         _ => nwant.clone(),
                     };
-                    println!("\r{}          ", row(&check(), "node", &mid, &format!("{GREEN}updated{RESET}")));
+                    println!(
+                        "\r{}          ",
+                        row(&check(), "node", &mid, &format!("{GREEN}updated{RESET}"))
+                    );
                     self_updated = true;
                     changed += 1;
                 }
                 Ok(false) => {
-                    println!("\r{}          ", row(&check(), "node", &ver(&nwant), &dim("up to date")));
+                    println!(
+                        "\r{}          ",
+                        row(&check(), "node", &ver(&nwant), &dim("up to date"))
+                    );
                     current += 1;
                 }
                 Err(e) => {
-                    println!("\r{}          ", row(&bang(), "node", "", &format!("{YELLOW}skipped{RESET} {}", dim(&e.to_string()))));
+                    println!(
+                        "\r{}          ",
+                        row(
+                            &bang(),
+                            "node",
+                            "",
+                            &format!("{YELLOW}skipped{RESET} {}", dim(&e.to_string()))
+                        )
+                    );
                 }
             }
         }
@@ -395,7 +507,9 @@ pub async fn update(target: Option<&str>, current_version: &str) -> Result<bool,
 }
 
 fn installed_extensions() -> Vec<&'static str> {
-    super::EXTENSIONS.iter().copied()
+    super::EXTENSIONS
+        .iter()
+        .copied()
         .filter(|e| super::config::is_extension_installed(e))
         .collect()
 }
@@ -403,7 +517,11 @@ fn installed_extensions() -> Vec<&'static str> {
 /// Replace the running crossfyre binary with the manifest version. Linux
 /// keeps the old inode mapped, so the running process is unaffected until
 /// restart. Returns true if a new version was written.
-pub async fn self_update(manifest: &Manifest, current_version: &str, quiet: bool) -> Result<bool, Box<dyn std::error::Error>> {
+pub async fn self_update(
+    manifest: &Manifest,
+    current_version: &str,
+    quiet: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let (comp, artifact) = resolve_artifact(manifest, "crossfyre")?;
 
     // `current_version` is supplied by the caller: the crossfyre CLI passes its
@@ -412,11 +530,21 @@ pub async fn self_update(manifest: &Manifest, current_version: &str, quiet: bool
     // code lives in cfx_core, so env! resolves to cfx_core's version (0.1.0), not
     // the CLI's. That mismatch made every `crossfyre update` re-run forever.
     if comp.version == current_version {
-        if !quiet { println!("crossfyre is already at {} - nothing to update.", current_version); }
+        if !quiet {
+            println!(
+                "crossfyre is already at {} - nothing to update.",
+                current_version
+            );
+        }
         return Ok(false);
     }
 
-    if !quiet { println!("[*] Updating crossfyre {} -> {} ...", current_version, comp.version); }
+    if !quiet {
+        println!(
+            "[*] Updating crossfyre {} -> {} ...",
+            current_version, comp.version
+        );
+    }
     let tmp_dir = tempfile::tempdir()?;
     let zip_path = tmp_dir.path().join(&artifact.file);
     download_verified(artifact, &zip_path).await?;
@@ -443,7 +571,12 @@ pub async fn self_update(manifest: &Manifest, current_version: &str, quiet: bool
     // what's actually on disk instead of a compile-time constant.
     let _ = std::fs::write(get_bin_dir().join("crossfyre.version"), &comp.version);
 
-    if !quiet { println!("[+] crossfyre updated to {} - restart the node to run it.", comp.version); }
+    if !quiet {
+        println!(
+            "[+] crossfyre updated to {} - restart the node to run it.",
+            comp.version
+        );
+    }
     Ok(true)
 }
 
@@ -477,11 +610,16 @@ pub fn ensure_self_installed() -> Result<std::path::PathBuf, Box<dyn std::error:
 /// Returns true when the node binary was (re)written, i.e. the caller should
 /// restart the node service. Skips the download when the installed version
 /// already matches the manifest (tracked via a sidecar version file).
-pub async fn download_node(manifest: &Manifest, quiet: bool) -> Result<bool, Box<dyn std::error::Error>> {
+pub async fn download_node(
+    manifest: &Manifest,
+    quiet: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let (comp, artifact) = resolve_artifact(manifest, "node")?;
     let stable = get_bin_dir().join(ext_file_name("node"));
     let ver_file = get_bin_dir().join("node.version");
-    let installed = std::fs::read_to_string(&ver_file).ok().map(|s| s.trim().to_string());
+    let installed = std::fs::read_to_string(&ver_file)
+        .ok()
+        .map(|s| s.trim().to_string());
     if stable.exists() && installed.as_deref() == Some(comp.version.as_str()) {
         return Ok(false); // already current
     }
@@ -497,7 +635,13 @@ pub async fn download_node(manifest: &Manifest, quiet: bool) -> Result<bool, Box
     }
     place_binary(&extracted, &stable)?;
     let _ = std::fs::write(&ver_file, &comp.version);
-    if !quiet { println!("[+] node worker updated to {} at {}", comp.version, stable.display()); }
+    if !quiet {
+        println!(
+            "[+] node worker updated to {} at {}",
+            comp.version,
+            stable.display()
+        );
+    }
     Ok(true)
 }
 

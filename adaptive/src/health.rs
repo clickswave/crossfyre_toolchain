@@ -27,7 +27,10 @@ impl ProbeClass {
     pub fn is_stress(self) -> bool {
         matches!(
             self,
-            ProbeClass::RateLimited | ProbeClass::ServerError | ProbeClass::Timeout | ProbeClass::ConnError
+            ProbeClass::RateLimited
+                | ProbeClass::ServerError
+                | ProbeClass::Timeout
+                | ProbeClass::ConnError
         )
     }
 
@@ -244,7 +247,11 @@ mod tests {
             w.record(ProbeClass::from_status(200), 200);
         }
         let s = w.stats();
-        assert!(s.latency_inflation > 3.0, "inflation was {}", s.latency_inflation);
+        assert!(
+            s.latency_inflation > 3.0,
+            "inflation was {}",
+            s.latency_inflation
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@
 use crate::engine::AuthSpec;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -80,7 +80,9 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
     let _ = tx.send(json!({ "type": "ack", "target": params.target }));
 
     if params.identities.is_empty() {
-        let _ = tx.send(json!({"type":"error","message":"authorization testing needs at least one identity"}));
+        let _ = tx.send(
+            json!({"type":"error","message":"authorization testing needs at least one identity"}),
+        );
         let _ = tx.send(json!({"type":"done","found":0}));
         return;
     }
@@ -105,7 +107,8 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
         match b.build() {
             Ok(c) => clients.push((id.clone(), c)),
             Err(e) => {
-                let _ = tx.send(json!({"type":"error","message":format!("client build failed: {e}")}));
+                let _ =
+                    tx.send(json!({"type":"error","message":format!("client build failed: {e}")}));
                 return;
             }
         }
@@ -124,7 +127,15 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
         for cand in analyze(ep, &probes) {
             // Confirm step: re-request as the accused identity before reporting.
             if let Some((_, client)) = clients.iter().find(|(id, _)| id.role == cand.confirm_role) {
-                let p2 = probe(client, ep, &Identity { role: cand.confirm_role.clone(), auth: AuthSpec::default() }).await;
+                let p2 = probe(
+                    client,
+                    ep,
+                    &Identity {
+                        role: cand.confirm_role.clone(),
+                        auth: AuthSpec::default(),
+                    },
+                )
+                .await;
                 let confirmed = match cand.expect_hash {
                     Some(h) => p2.ok && p2.body_hash == h,
                     None => p2.ok && !p2.login_ish,
@@ -376,15 +387,29 @@ fn looks_like_login(body: &str) -> bool {
 fn path_of(url: &str) -> String {
     // Strip scheme+host, keep the path (lowercased) for pattern checks.
     let after_scheme = url.split("://").nth(1).unwrap_or(url);
-    let path = after_scheme.find('/').map(|i| &after_scheme[i..]).unwrap_or("/");
+    let path = after_scheme
+        .find('/')
+        .map(|i| &after_scheme[i..])
+        .unwrap_or("/");
     path.to_ascii_lowercase()
 }
 
 fn privileged_path(url: &str) -> bool {
     let p = path_of(url);
     const MARKERS: &[&str] = &[
-        "/admin", "/administrator", "/internal", "/manage", "/management", "/backoffice",
-        "/console", "/superuser", "/sudo", "/root", "/staff", "/_admin", "/system/",
+        "/admin",
+        "/administrator",
+        "/internal",
+        "/manage",
+        "/management",
+        "/backoffice",
+        "/console",
+        "/superuser",
+        "/sudo",
+        "/root",
+        "/staff",
+        "/_admin",
+        "/system/",
     ];
     MARKERS.iter().any(|m| p.contains(m))
 }
@@ -392,17 +417,37 @@ fn privileged_path(url: &str) -> bool {
 fn looks_protected(url: &str) -> bool {
     let p = path_of(url);
     const MARKERS: &[&str] = &[
-        "/api/", "/account", "/user", "/users", "/me", "/orders", "/order", "/profile",
-        "/dashboard", "/settings", "/billing", "/invoice", "/wallet", "/private",
+        "/api/",
+        "/account",
+        "/user",
+        "/users",
+        "/me",
+        "/orders",
+        "/order",
+        "/profile",
+        "/dashboard",
+        "/settings",
+        "/billing",
+        "/invoice",
+        "/wallet",
+        "/private",
     ];
     MARKERS.iter().any(|m| p.contains(m))
 }
 
 fn role_is_privileged(role: &str) -> bool {
     let r = role.to_ascii_lowercase();
-    ["admin", "owner", "root", "super", "manager", "staff", "privileged"]
-        .iter()
-        .any(|m| r.contains(m))
+    [
+        "admin",
+        "owner",
+        "root",
+        "super",
+        "manager",
+        "staff",
+        "privileged",
+    ]
+    .iter()
+    .any(|m| r.contains(m))
 }
 
 /// Does the URL reference an object id, either in a path segment
@@ -443,7 +488,9 @@ fn looks_like_id_value(seg: &str) -> bool {
         return true;
     }
     seg.len() >= 12
-        && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && seg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         && seg.chars().any(|c| c.is_ascii_digit())
 }
 
@@ -479,9 +526,13 @@ mod tests {
     fn object_id_detected_in_path_and_query() {
         // Path ids (numeric / uuid).
         assert!(object_id_in_path("http://h/api/v1/invoices/3"));
-        assert!(object_id_in_path("http://h/api/orders/550e8400-e29b-41d4-a716-446655440000"));
+        assert!(object_id_in_path(
+            "http://h/api/orders/550e8400-e29b-41d4-a716-446655440000"
+        ));
         // Query-param object references (the REST/JSON-API BOLA shape).
-        assert!(object_id_in_path("http://h/api/v1/payment-methods?account_id=2"));
+        assert!(object_id_in_path(
+            "http://h/api/v1/payment-methods?account_id=2"
+        ));
         assert!(object_id_in_path("http://h/api/v1/devices?account_id=2"));
         assert!(object_id_in_path("http://h/x?id=42"));
         assert!(object_id_in_path("http://h/x?user-id=42"));

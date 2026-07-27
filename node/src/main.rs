@@ -5,7 +5,11 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "node", about = "Crossfyre node worker (managed by the crossfyre CLI)", version)]
+#[command(
+    name = "node",
+    about = "Crossfyre node worker (managed by the crossfyre CLI)",
+    version
+)]
 struct Cli {
     /// Override the crossfyre config root (matches `crossfyre --data-dir`).
     #[arg(long, global = true, value_name = "PATH")]

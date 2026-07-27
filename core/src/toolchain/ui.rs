@@ -21,22 +21,46 @@ pub const YELLOW: &str = "\x1b[33m";
 pub const RED: &str = "\x1b[31m";
 
 // ── inline colorizers (for a fragment inside a larger line) ─────────────
-pub fn dim(s: &str) -> String { format!("{DIM}{s}{RESET}") }
-pub fn bold(s: &str) -> String { format!("{BOLD}{s}{RESET}") }
-pub fn green(s: &str) -> String { format!("{GREEN}{s}{RESET}") }
-pub fn yellow(s: &str) -> String { format!("{YELLOW}{s}{RESET}") }
-pub fn red(s: &str) -> String { format!("{RED}{s}{RESET}") }
-pub fn cyan(s: &str) -> String { format!("{CYAN}{s}{RESET}") }
+pub fn dim(s: &str) -> String {
+    format!("{DIM}{s}{RESET}")
+}
+pub fn bold(s: &str) -> String {
+    format!("{BOLD}{s}{RESET}")
+}
+pub fn green(s: &str) -> String {
+    format!("{GREEN}{s}{RESET}")
+}
+pub fn yellow(s: &str) -> String {
+    format!("{YELLOW}{s}{RESET}")
+}
+pub fn red(s: &str) -> String {
+    format!("{RED}{s}{RESET}")
+}
+pub fn cyan(s: &str) -> String {
+    format!("{CYAN}{s}{RESET}")
+}
 
 /// A version string in the aligned middle column (dim, padded to a stable width).
-pub fn ver(v: &str) -> String { format!("{DIM}{v:<7}{RESET}") }
+pub fn ver(v: &str) -> String {
+    format!("{DIM}{v:<7}{RESET}")
+}
 
 // ── status symbols ──────────────────────────────────────────────────────
-pub fn check() -> String { format!("{GREEN}\u{2713}{RESET}") } // ✓ done / ok
-pub fn dot() -> String { format!("{CYAN}\u{2022}{RESET}") }    // • neutral / in progress
-pub fn bang() -> String { format!("{YELLOW}!{RESET}") }        // ! warning / skipped
-pub fn cross() -> String { format!("{RED}\u{2717}{RESET}") }   // ✗ failed
-pub fn arrow() -> String { format!("{CYAN}\u{203a}{RESET}") }  // › working
+pub fn check() -> String {
+    format!("{GREEN}\u{2713}{RESET}")
+} // ✓ done / ok
+pub fn dot() -> String {
+    format!("{CYAN}\u{2022}{RESET}")
+} // • neutral / in progress
+pub fn bang() -> String {
+    format!("{YELLOW}!{RESET}")
+} // ! warning / skipped
+pub fn cross() -> String {
+    format!("{RED}\u{2717}{RESET}")
+} // ✗ failed
+pub fn arrow() -> String {
+    format!("{CYAN}\u{203a}{RESET}")
+} // › working
 
 // ── block structure ─────────────────────────────────────────────────────
 
@@ -70,11 +94,21 @@ pub fn field(label: &str, value: &str) {
 }
 
 // ── single status lines (indented under a section) ──────────────────────
-pub fn ok(msg: &str) { println!("    {} {msg}", check()); }
-pub fn warn(msg: &str) { println!("    {} {msg}", bang()); }
-pub fn fail(msg: &str) { println!("    {} {msg}", cross()); }
-pub fn step(msg: &str) { println!("    {} {msg}", dot()); }
-pub fn working(msg: &str) { println!("    {} {msg}", arrow()); }
+pub fn ok(msg: &str) {
+    println!("    {} {msg}", check());
+}
+pub fn warn(msg: &str) {
+    println!("    {} {msg}", bang());
+}
+pub fn fail(msg: &str) {
+    println!("    {} {msg}", cross());
+}
+pub fn step(msg: &str) {
+    println!("    {} {msg}", dot());
+}
+pub fn working(msg: &str) {
+    println!("    {} {msg}", arrow());
+}
 
 /// A dim helper/hint line at the block (2-space) indent.
 pub fn hint(msg: &str) {

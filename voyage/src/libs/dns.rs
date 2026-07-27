@@ -11,7 +11,9 @@ use hickory_resolver::{Resolver, TokioResolver};
 /// DNS responses from scan targets we do not control:
 ///   RUSTSEC-2026-0118  unbounded loop in NSEC3 closest-encloser validation
 ///   RUSTSEC-2026-0119  O(n^2) CPU exhaustion in message encoding
-pub fn create_resolver(dns_server: Option<&str>) -> Result<TokioResolver, Box<dyn std::error::Error>> {
+pub fn create_resolver(
+    dns_server: Option<&str>,
+) -> Result<TokioResolver, Box<dyn std::error::Error>> {
     match dns_server {
         Some(ip) if !ip.trim().is_empty() => {
             let ip = ip.trim();

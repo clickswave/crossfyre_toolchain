@@ -10,7 +10,7 @@
 use crate::template;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -40,8 +40,12 @@ pub struct ScanParams {
     #[serde(default)]
     pub oast: Option<OastSpec>,
 }
-fn d_timeout() -> u64 { 10_000 }
-fn d_true() -> bool { true }
+fn d_timeout() -> u64 {
+    10_000
+}
+fn d_true() -> bool {
+    true
+}
 
 /// An OAST endpoint resolved by the node for this scan.
 #[derive(Debug, Deserialize)]
@@ -62,12 +66,13 @@ pub struct AuthSpec {
 }
 impl AuthSpec {
     pub fn to_header_map(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{HeaderMap, HeaderName, HeaderValue, COOKIE};
+        use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
         let mut hm = HeaderMap::new();
         for (k, v) in &self.headers {
-            if let (Ok(name), Ok(val)) =
-                (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v))
-            {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(k.as_bytes()),
+                HeaderValue::from_str(v),
+            ) {
                 hm.insert(name, val);
             }
         }
@@ -92,7 +97,9 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     let base = match normalize_base(&params.target) {
         Some(b) => b,
         None => {
-            let _ = tx.send(json!({"type":"error","message":format!("invalid target: {}", params.target)}));
+            let _ = tx.send(
+                json!({"type":"error","message":format!("invalid target: {}", params.target)}),
+            );
             return;
         }
     };
@@ -154,7 +161,10 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
             .templates_dir
             .clone()
             .or_else(|| std::env::var("CORTEX_TEMPLATES_DIR").ok());
-        let external = ext_dir.as_deref().map(template::load_dir).unwrap_or_default();
+        let external = ext_dir
+            .as_deref()
+            .map(template::load_dir)
+            .unwrap_or_default();
         let total = template::BUILTIN.len() + external.len();
         let mut done = 0usize;
 
@@ -243,7 +253,10 @@ async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
         Ok(r) => {
             let mut headers = Vec::new();
             for (k, v) in r.headers().iter() {
-                headers.push((k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string()));
+                headers.push((
+                    k.as_str().to_lowercase(),
+                    v.to_str().unwrap_or("").to_string(),
+                ));
             }
             Some(BaseResp {
                 is_https: base.starts_with("https://"),
@@ -263,7 +276,11 @@ fn normalize_base(t: &str) -> Option<String> {
         t.to_string()
     } else if let Some((_, p)) = t.rsplit_once(':') {
         if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) {
-            let scheme = if p == "443" || p == "8443" { "https" } else { "http" };
+            let scheme = if p == "443" || p == "8443" {
+                "https"
+            } else {
+                "http"
+            };
             format!("{}://{}", scheme, t)
         } else {
             format!("http://{}", t)

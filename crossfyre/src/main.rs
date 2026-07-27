@@ -1,11 +1,15 @@
 //! The Crossfyre command-line interface. Management + lifecycle commands.
 //! Node lifecycle is delegated to the separate `node` worker binary (the OS
 //! service execs `node supervise`; `crossfyre node up/down` manage that service).
-use clap::{Parser, Subcommand};
 use cfx_core::toolchain::ui::*;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "crossfyre", about = "Crossfyre node and toolchain CLI", version)]
+#[command(
+    name = "crossfyre",
+    about = "Crossfyre node and toolchain CLI",
+    version
+)]
 struct Cli {
     /// Override the crossfyre config root (the directory that holds
     /// `nodes.d` and `config.toml`). Defaults to `$XDG_CONFIG_HOME/crossfyre`
@@ -93,9 +97,7 @@ enum Commands {
     /// Update from the release manifest: `self`, an extension name, or `all`
     /// (default: self + every installed extension). For a single extension you
     /// can also use `crossfyre extension update <name>`.
-    Update {
-        target: Option<String>,
-    },
+    Update { target: Option<String> },
 
     /// Show a full overview of the local node daemons, extensions and database.
     /// (Use `crossfyre node status`, `crossfyre extension list` or
@@ -197,7 +199,6 @@ enum NodeAction {
 
     /// Disable the node supervisor service (don't start on boot).
     Disable,
-
 }
 
 #[derive(Subcommand, Debug)]
@@ -269,11 +270,12 @@ enum ExtensionAction {
     Disable { name: String },
 }
 
-
-
 /// Run the `node` worker's supervisor in the foreground (fallback for hosts
 /// with no OS service). Finds the `node` binary next to this one, else on PATH.
-fn exec_node_supervise(base: &std::path::Path, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn exec_node_supervise(
+    base: &std::path::Path,
+    force: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let node = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("node")))
@@ -281,7 +283,9 @@ fn exec_node_supervise(base: &std::path::Path, force: bool) -> Result<(), Box<dy
         .unwrap_or_else(|| std::path::PathBuf::from("node"));
     let mut cmd = std::process::Command::new(node);
     cmd.arg("supervise").arg("--data-dir").arg(base);
-    if force { cmd.arg("--force"); }
+    if force {
+        cmd.arg("--force");
+    }
     if !cmd.status()?.success() {
         return Err("node supervise exited with an error".into());
     }
@@ -321,19 +325,45 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match cli.command {
-        Commands::Login { api_key, username, password, api_url, agree_tos, no_prompt } => {
-            cfx_core::auth::run_login(&base, cfx_core::auth::LoginFlags {
-                api_key, username, password, api_url, agree_tos, no_prompt,
-            }).await?;
+        Commands::Login {
+            api_key,
+            username,
+            password,
+            api_url,
+            agree_tos,
+            no_prompt,
+        } => {
+            cfx_core::auth::run_login(
+                &base,
+                cfx_core::auth::LoginFlags {
+                    api_key,
+                    username,
+                    password,
+                    api_url,
+                    agree_tos,
+                    no_prompt,
+                },
+            )
+            .await?;
         }
         Commands::Logout => {
             cfx_core::auth::run_logout(&base);
         }
         Commands::Node { action } => match action {
-            NodeAction::Init { force, api_url, no_service, node_key, no_prompt } => {
+            NodeAction::Init {
+                force,
+                api_url,
+                no_service,
+                node_key,
+                no_prompt,
+            } => {
                 cfx_core::run_init(force, &api_url, &base, no_service, node_key, no_prompt).await?;
             }
-            NodeAction::Remove { node_id, inactive, all } => {
+            NodeAction::Remove {
+                node_id,
+                inactive,
+                all,
+            } => {
                 cfx_core::run_node_remove(&base, node_id, inactive, all).await?;
             }
             NodeAction::List { json } => {
@@ -350,7 +380,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     // No OS service (e.g. `node init --no-service`, or non-Linux):
                     // run the supervisor in the foreground instead.
-                    step("No node service installed; running the supervisor in the foreground (Ctrl-C to stop).");
+                    step(
+                        "No node service installed; running the supervisor in the foreground (Ctrl-C to stop).",
+                    );
                     exec_node_supervise(&base, force)?;
                 }
             }
@@ -375,30 +407,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Extension { action } => match action {
             ExtensionAction::List => cfx_core::toolchain::status::extensions()?,
-            ExtensionAction::Install { name, force } => {
-                match name.as_deref() {
-                    Some(ext) => {
-                        if force {
-                            cfx_core::toolchain::install::install(ext, true).await?;
-                            for e in cfx_core::toolchain::resolve_extensions(ext)? {
-                                cfx_core::toolchain::service::enable(e)?;
-                                cfx_core::toolchain::service::start(e)?;
-                            }
-                        } else {
-                            cfx_core::toolchain::install::install_and_start(ext).await?;
+            ExtensionAction::Install { name, force } => match name.as_deref() {
+                Some(ext) => {
+                    if force {
+                        cfx_core::toolchain::install::install(ext, true).await?;
+                        for e in cfx_core::toolchain::resolve_extensions(ext)? {
+                            cfx_core::toolchain::service::enable(e)?;
+                            cfx_core::toolchain::service::start(e)?;
                         }
+                    } else {
+                        cfx_core::toolchain::install::install_and_start(ext).await?;
                     }
-                    None => cfx_core::toolchain::print_extension_usage("install"),
                 }
-            }
-            ExtensionAction::Remove { name } => {
-                match name.as_deref() {
-                    Some(ext) => cfx_core::toolchain::install::remove(ext)?,
-                    None => cfx_core::toolchain::print_extension_usage("remove"),
-                }
-            }
+                None => cfx_core::toolchain::print_extension_usage("install"),
+            },
+            ExtensionAction::Remove { name } => match name.as_deref() {
+                Some(ext) => cfx_core::toolchain::install::remove(ext)?,
+                None => cfx_core::toolchain::print_extension_usage("remove"),
+            },
             ExtensionAction::Update { name } => {
-                cfx_core::toolchain::install::update(name.as_deref(), env!("CARGO_PKG_VERSION")).await?;
+                cfx_core::toolchain::install::update(name.as_deref(), env!("CARGO_PKG_VERSION"))
+                    .await?;
             }
             ExtensionAction::Start { name } => cfx_core::toolchain::service::start(&name)?,
             ExtensionAction::Stop { name } => cfx_core::toolchain::service::stop(&name)?,
@@ -407,14 +436,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             ExtensionAction::Disable { name } => cfx_core::toolchain::service::disable(&name)?,
         },
         Commands::Oast { action } => match action {
-            OastAction::Setup { domain, public_ip, email, no_tls } => {
+            OastAction::Setup {
+                domain,
+                public_ip,
+                email,
+                no_tls,
+            } => {
                 let exe = std::env::current_exe()?;
                 cfx_core::toolchain::oast::setup(
                     &exe,
-                    cfx_core::toolchain::oast::SetupOpts { domain, public_ip, email, no_tls },
-                ).await?;
+                    cfx_core::toolchain::oast::SetupOpts {
+                        domain,
+                        public_ip,
+                        email,
+                        no_tls,
+                    },
+                )
+                .await?;
             }
-            OastAction::Serve { domain, public_ip, tls_cert, tls_key } => {
+            OastAction::Serve {
+                domain,
+                public_ip,
+                tls_cert,
+                tls_key,
+            } => {
                 // Flags override; with none, read the full config from the environment
                 // (the systemd unit sets OAST_* via EnvironmentFile).
                 let cfg = match domain {
@@ -445,10 +490,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             cfx_core::run_script(&script, &targets).await?;
         }
         Commands::Update { target } => {
-            let self_updated = cfx_core::toolchain::install::update(target.as_deref(), env!("CARGO_PKG_VERSION")).await?;
+            let self_updated =
+                cfx_core::toolchain::install::update(target.as_deref(), env!("CARGO_PKG_VERSION"))
+                    .await?;
             if self_updated && cfx_core::toolchain::service::node_service_exists() {
                 step("Restarting the node service to pick up the new binary...");
-                let _ = cfx_core::toolchain::service::restart(cfx_core::toolchain::service::NODE_TARGET);
+                let _ = cfx_core::toolchain::service::restart(
+                    cfx_core::toolchain::service::NODE_TARGET,
+                );
             }
         }
         Commands::Status => {
@@ -467,4 +516,3 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

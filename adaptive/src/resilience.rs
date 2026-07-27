@@ -16,7 +16,10 @@ pub struct RetryDecision {
 
 impl RetryDecision {
     fn no() -> Self {
-        RetryDecision { retry: false, backoff_ms: 0 }
+        RetryDecision {
+            retry: false,
+            backoff_ms: 0,
+        }
     }
 }
 
@@ -50,7 +53,10 @@ impl ResilienceController {
     pub fn retryable(class: ProbeClass) -> bool {
         matches!(
             class,
-            ProbeClass::RateLimited | ProbeClass::ServerError | ProbeClass::Timeout | ProbeClass::ConnError
+            ProbeClass::RateLimited
+                | ProbeClass::ServerError
+                | ProbeClass::Timeout
+                | ProbeClass::ConnError
         )
     }
 
@@ -77,20 +83,28 @@ impl ResilienceController {
         }
         // Honour an explicit Retry-After with at least one retry.
         let floor = if retry_after_ms.is_some() { 1 } else { 0 };
-        let allowed = self.effective_max(health_score).max(floor).min(self.ceiling);
+        let allowed = self
+            .effective_max(health_score)
+            .max(floor)
+            .min(self.ceiling);
         if attempt >= allowed {
             return RetryDecision::no();
         }
         let backoff = retry_after_ms
             .unwrap_or_else(|| self.exp_backoff(attempt, health_score))
             .min(self.max_backoff_ms);
-        RetryDecision { retry: true, backoff_ms: backoff }
+        RetryDecision {
+            retry: true,
+            backoff_ms: backoff,
+        }
     }
 
     fn exp_backoff(&self, attempt: u32, health_score: f64) -> u64 {
         let mult = 1u64 << attempt.min(5);
         let stress = if health_score < 0.5 { 2 } else { 1 };
-        self.base_backoff_ms.saturating_mul(mult).saturating_mul(stress)
+        self.base_backoff_ms
+            .saturating_mul(mult)
+            .saturating_mul(stress)
     }
 }
 
@@ -105,15 +119,24 @@ mod tests {
     #[test]
     fn definitive_answers_are_never_retried() {
         let rc = ResilienceController::new(Posture::Balanced, 5);
-        assert!(!rc.decide(ProbeClass::NotFound, 0, &stats(), 1.0, None).retry);
+        assert!(
+            !rc.decide(ProbeClass::NotFound, 0, &stats(), 1.0, None)
+                .retry
+        );
         assert!(!rc.decide(ProbeClass::Success, 0, &stats(), 1.0, None).retry);
     }
 
     #[test]
     fn transient_errors_are_retryable_up_to_ceiling() {
         let rc = ResilienceController::new(Posture::Throughput, 1); // hard ceiling 1
-        assert!(rc.decide(ProbeClass::ServerError, 0, &stats(), 1.0, None).retry);
-        assert!(!rc.decide(ProbeClass::ServerError, 1, &stats(), 1.0, None).retry);
+        assert!(
+            rc.decide(ProbeClass::ServerError, 0, &stats(), 1.0, None)
+                .retry
+        );
+        assert!(
+            !rc.decide(ProbeClass::ServerError, 1, &stats(), 1.0, None)
+                .retry
+        );
     }
 
     #[test]

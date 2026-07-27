@@ -37,7 +37,11 @@ pub fn resolve_extensions(name: &str) -> Result<Vec<&'static str>, Box<dyn std::
     } else {
         match EXTENSIONS.iter().find(|&&e| e == name) {
             Some(e) => Ok(vec![e]),
-            None => Err(format!("Unknown extension: '{}'. Use: mach, voyage, pulse, scout, cortex, or all", name).into()),
+            None => Err(format!(
+                "Unknown extension: '{}'. Use: mach, voyage, pulse, scout, cortex, or all",
+                name
+            )
+            .into()),
         }
     }
 }
@@ -45,9 +49,16 @@ pub fn resolve_extensions(name: &str) -> Result<Vec<&'static str>, Box<dyn std::
 pub fn print_extension_usage(verb: &str) {
     use crate::toolchain::ui::*;
 
-    let all_desc = if verb == "remove" { "Remove every extension" } else { "Install every extension" };
+    let all_desc = if verb == "remove" {
+        "Remove every extension"
+    } else {
+        "Install every extension"
+    };
     let choices: [(&str, &str); 6] = [
-        ("mach", "HTTP fuzzer, content-discovery and web-crawl engine"),
+        (
+            "mach",
+            "HTTP fuzzer, content-discovery and web-crawl engine",
+        ),
         ("voyage", "Subdomain enumeration engine"),
         ("pulse", "Network host and port-scanning engine"),
         ("scout", "Service enumeration and web fingerprinting engine"),
@@ -58,7 +69,13 @@ pub fn print_extension_usage(verb: &str) {
     println!();
     println!("  {}", dim(&format!("Choose an extension to {}:", verb)));
     for (name, desc) in choices {
-        println!("    {} crossfyre extension {} {}  {}", dot(), verb, bold(&format!("{name:<7}")), dim(desc));
+        println!(
+            "    {} crossfyre extension {} {}  {}",
+            dot(),
+            verb,
+            bold(&format!("{name:<7}")),
+            dim(desc)
+        );
     }
     println!();
     section("Available extensions");

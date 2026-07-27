@@ -2,7 +2,7 @@ use crate::engine::{self, ScanParams};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, tcp::OwnedWriteHalf};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +33,9 @@ pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn handle_connection(stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn handle_connection(
+    stream: TcpStream,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 
@@ -45,10 +47,13 @@ async fn handle_connection(stream: TcpStream) -> Result<(), Box<dyn std::error::
         let req: DaemonRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                write_line(&mut writer, &serde_json::json!({
-                    "type": "error",
-                    "message": format!("Invalid JSON: {}", e),
-                }))
+                write_line(
+                    &mut writer,
+                    &serde_json::json!({
+                        "type": "error",
+                        "message": format!("Invalid JSON: {}", e),
+                    }),
+                )
                 .await?;
                 continue;
             }
@@ -64,10 +69,13 @@ async fn handle_connection(stream: TcpStream) -> Result<(), Box<dyn std::error::
                 return Ok(());
             }
             other => {
-                write_line(&mut writer, &serde_json::json!({
-                    "type": "error",
-                    "message": format!("Unknown operation: {}", other),
-                }))
+                write_line(
+                    &mut writer,
+                    &serde_json::json!({
+                        "type": "error",
+                        "message": format!("Unknown operation: {}", other),
+                    }),
+                )
                 .await?;
             }
         }
@@ -83,10 +91,13 @@ async fn handle_scan(
     let sp: ScanParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
-            write_line(writer, &serde_json::json!({
-                "type": "error",
-                "message": format!("Invalid scan params: {}", e),
-            }))
+            write_line(
+                writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid scan params: {}", e),
+                }),
+            )
             .await?;
             return Ok(());
         }
@@ -110,10 +121,13 @@ async fn handle_authz(
     let ap: crate::authz::AuthzParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
-            write_line(writer, &serde_json::json!({
-                "type": "error",
-                "message": format!("Invalid authz params: {}", e),
-            }))
+            write_line(
+                writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid authz params: {}", e),
+                }),
+            )
             .await?;
             return Ok(());
         }

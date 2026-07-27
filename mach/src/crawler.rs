@@ -81,12 +81,13 @@ pub struct AuthSpec {
 impl AuthSpec {
     /// Build a HeaderMap from the resolved auth (custom headers + Cookie).
     pub fn to_header_map(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{HeaderMap, HeaderName, HeaderValue, COOKIE};
+        use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
         let mut hm = HeaderMap::new();
         for (k, v) in &self.headers {
-            if let (Ok(name), Ok(val)) =
-                (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v))
-            {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(k.as_bytes()),
+                HeaderValue::from_str(v),
+            ) {
                 hm.insert(name, val);
             }
         }
@@ -103,12 +104,24 @@ impl AuthSpec {
     }
 }
 
-fn d_true() -> bool { true }
-fn d_depth() -> u32 { 3 }
-fn d_pages() -> u32 { 300 }
-fn d_tasks() -> usize { 8 }
-fn d_timeout() -> u64 { 8000 }
-fn d_posture() -> String { "balanced".to_string() }
+fn d_true() -> bool {
+    true
+}
+fn d_depth() -> u32 {
+    3
+}
+fn d_pages() -> u32 {
+    300
+}
+fn d_tasks() -> usize {
+    8
+}
+fn d_timeout() -> u64 {
+    8000
+}
+fn d_posture() -> String {
+    "balanced".to_string()
+}
 
 /// A single streamed crawl event (newline JSON). The node maps `type:"url"` events
 /// into findings and `type:"progress"` into operation_progress.
@@ -140,16 +153,33 @@ pub struct CrawlEvent {
 
 impl CrawlEvent {
     fn ack(total: u32) -> Self {
-        Self { kind: "ack".into(), total: Some(total), ..Self::blank() }
+        Self {
+            kind: "ack".into(),
+            total: Some(total),
+            ..Self::blank()
+        }
     }
     fn progress(processed: u32, total: u32) -> Self {
-        Self { kind: "progress".into(), processed: Some(processed), total: Some(total), ..Self::blank() }
+        Self {
+            kind: "progress".into(),
+            processed: Some(processed),
+            total: Some(total),
+            ..Self::blank()
+        }
     }
     fn done(processed: u32) -> Self {
-        Self { kind: "done".into(), processed: Some(processed), ..Self::blank() }
+        Self {
+            kind: "done".into(),
+            processed: Some(processed),
+            ..Self::blank()
+        }
     }
     fn error(msg: String) -> Self {
-        Self { kind: "error".into(), message: Some(msg), ..Self::blank() }
+        Self {
+            kind: "error".into(),
+            message: Some(msg),
+            ..Self::blank()
+        }
     }
     fn url_fetched(p: &Page) -> Self {
         Self {
@@ -157,7 +187,11 @@ impl CrawlEvent {
             url: Some(p.url.to_string()),
             status_code: Some(p.status),
             method: Some("GET".into()),
-            content_type: if p.content_type.is_empty() { None } else { Some(p.content_type.clone()) },
+            content_type: if p.content_type.is_empty() {
+                None
+            } else {
+                Some(p.content_type.clone())
+            },
             params: p.params.clone(),
             discovered_from: p.parent.clone(),
             depth: Some(p.depth),
@@ -176,9 +210,17 @@ impl CrawlEvent {
     }
     fn blank() -> Self {
         Self {
-            kind: String::new(), url: None, status_code: None, method: None,
-            content_type: None, params: Vec::new(), discovered_from: None,
-            depth: None, processed: None, total: None, message: None,
+            kind: String::new(),
+            url: None,
+            status_code: None,
+            method: None,
+            content_type: None,
+            params: Vec::new(),
+            discovered_from: None,
+            depth: None,
+            processed: None,
+            total: None,
+            message: None,
         }
     }
 }
@@ -188,9 +230,8 @@ impl CrawlEvent {
 // ---------------------------------------------------------------------------
 
 /// href/src/action attribute values. Skips pure-fragment and inline handlers.
-static RE_HTML_ATTR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(?:href|src|action)\s*=\s*["']([^"'][^"']*)["']"#).unwrap()
-});
+static RE_HTML_ATTR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)(?:href|src|action)\s*=\s*["']([^"'][^"']*)["']"#).unwrap());
 /// `<input name="...">` for parameter collection.
 static RE_INPUT_NAME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)<(?:input|select|textarea)[^>]*\bname\s*=\s*["']([^"']+)["']"#).unwrap()
@@ -225,12 +266,17 @@ const MAX_VISITED: usize = 20_000;
 pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEvent>) {
     let seed = match normalize_seed(&params.seed) {
         Some(u) => u,
-        None => { let _ = tx.send(CrawlEvent::error(format!("invalid seed: {}", params.seed))); return; }
+        None => {
+            let _ = tx.send(CrawlEvent::error(format!("invalid seed: {}", params.seed)));
+            return;
+        }
     };
     let seed_host = seed.host_str().unwrap_or_default().to_lowercase();
 
     let mut builder = Client::builder()
-        .timeout(std::time::Duration::from_millis(params.timeout_ms.max(1000)))
+        .timeout(std::time::Duration::from_millis(
+            params.timeout_ms.max(1000),
+        ))
         .redirect(reqwest::redirect::Policy::limited(5))
         .cookie_store(true)
         .danger_accept_invalid_certs(true)
@@ -241,7 +287,10 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
     }
     let client = match builder.build() {
         Ok(c) => c,
-        Err(e) => { let _ = tx.send(CrawlEvent::error(format!("client build failed: {e}"))); return; }
+        Err(e) => {
+            let _ = tx.send(CrawlEvent::error(format!("client build failed: {e}")));
+            return;
+        }
     };
 
     let max_pages = params.max_pages.clamp(1, 5000);
@@ -266,7 +315,9 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
                 None => break,
             }
         }
-        if wave.is_empty() { break; }
+        if wave.is_empty() {
+            break;
+        }
 
         let mut set = tokio::task::JoinSet::new();
         for (u, d, parent) in wave {
@@ -282,18 +333,25 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
         }
 
         while let Some(joined) = set.join_next().await {
-            let page = match joined { Ok(p) => p, Err(_) => continue };
+            let page = match joined {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
             pages_crawled += 1;
             let _ = tx.send(CrawlEvent::url_fetched(&page));
 
             for raw in &page.links {
-                if visited.len() >= MAX_VISITED { break; }
+                if visited.len() >= MAX_VISITED {
+                    break;
+                }
                 let child = match resolve_and_scope(raw, &page.url, &params, &seed_host) {
                     Some(c) => c,
                     None => continue,
                 };
                 let key = norm_key(&child);
-                if !visited.insert(key) { continue; }
+                if !visited.insert(key) {
+                    continue;
+                }
                 if is_static_asset(&child) {
                     // In-scope but a static asset: recorded (deduped) but not mapped or fetched.
                     continue;
@@ -324,7 +382,13 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
 // Fetch + extract
 // ---------------------------------------------------------------------------
 
-async fn fetch_page(client: &Client, url: Url, depth: u32, parent: Option<String>, parse_js: bool) -> Page {
+async fn fetch_page(
+    client: &Client,
+    url: Url,
+    depth: u32,
+    parent: Option<String>,
+    parse_js: bool,
+) -> Page {
     let mut page = Page {
         params: query_keys(&url),
         url: url.clone(),
@@ -372,7 +436,9 @@ async fn fetch_page(client: &Client, url: Url, depth: u32, parent: Option<String
                 }
             }
         }
-        Err(_) => { page.status = 0; }
+        Err(_) => {
+            page.status = 0;
+        }
     }
 
     dedup(&mut page.links);
@@ -415,7 +481,9 @@ fn extract_js(body: &str, out: &mut Vec<String>) {
 
 fn normalize_seed(seed: &str) -> Option<Url> {
     let s = seed.trim();
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
     let with_scheme = if s.starts_with("http://") || s.starts_with("https://") {
         s.to_string()
     } else {
@@ -428,7 +496,9 @@ fn normalize_seed(seed: &str) -> Option<Url> {
 /// canonical (fragment-stripped) URL if it should be part of the map.
 fn resolve_and_scope(raw: &str, base: &Url, params: &CrawlParams, seed_host: &str) -> Option<Url> {
     let raw = raw.trim();
-    if raw.is_empty() { return None; }
+    if raw.is_empty() {
+        return None;
+    }
     let lower = raw.to_ascii_lowercase();
     if lower.starts_with("mailto:")
         || lower.starts_with("javascript:")
@@ -460,13 +530,23 @@ fn resolve_and_scope(raw: &str, base: &Url, params: &CrawlParams, seed_host: &st
             host == s || host.ends_with(&format!(".{s}"))
         })
     };
-    if !in_scope { return None; }
-    if !params.same_host && !params.include_subdomains && !params.follow_external && host != seed_host {
+    if !in_scope {
+        return None;
+    }
+    if !params.same_host
+        && !params.include_subdomains
+        && !params.follow_external
+        && host != seed_host
+    {
         return None;
     }
 
     let full = url.as_str();
-    if params.exclude.iter().any(|p| !p.is_empty() && full.contains(p.as_str())) {
+    if params
+        .exclude
+        .iter()
+        .any(|p| !p.is_empty() && full.contains(p.as_str()))
+    {
         return None;
     }
 
@@ -483,7 +563,11 @@ fn norm_key(url: &Url) -> String {
     let mut keys: Vec<String> = url.query_pairs().map(|(k, _)| k.into_owned()).collect();
     keys.sort();
     keys.dedup();
-    let q = if keys.is_empty() { String::new() } else { format!("?{}", keys.join("&")) };
+    let q = if keys.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", keys.join("&"))
+    };
     format!("{scheme}://{host}{port}{path}{q}")
 }
 
@@ -496,10 +580,9 @@ fn query_keys(url: &Url) -> Vec<String> {
 fn is_static_asset(url: &Url) -> bool {
     let path = url.path().to_lowercase();
     const EXT: &[&str] = &[
-        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".bmp",
-        ".css", ".woff", ".woff2", ".ttf", ".eot", ".otf",
-        ".mp4", ".webm", ".mp3", ".wav", ".avi", ".mov",
-        ".pdf", ".zip", ".gz", ".tar", ".rar", ".7z",
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".bmp", ".css", ".woff",
+        ".woff2", ".ttf", ".eot", ".otf", ".mp4", ".webm", ".mp3", ".wav", ".avi", ".mov", ".pdf",
+        ".zip", ".gz", ".tar", ".rar", ".7z",
     ];
     EXT.iter().any(|e| path.ends_with(e))
 }

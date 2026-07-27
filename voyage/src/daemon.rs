@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, tcp::OwnedWriteHalf};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -82,7 +82,9 @@ struct EnumParams {
     posture: String,
 }
 
-fn default_posture() -> String { "balanced".to_string() }
+fn default_posture() -> String {
+    "balanced".to_string()
+}
 
 fn default_tasks() -> usize {
     4
@@ -238,7 +240,9 @@ async fn handle_stream_enum(
 
     if req.save {
         let params_str = serde_json::to_string(&req.params).unwrap_or_default();
-        let _ = db.create_operation(&operation_id, "enum", &params_str).await;
+        let _ = db
+            .create_operation(&operation_id, "enum", &params_str)
+            .await;
     }
 
     let (scanner, total) = match prepare_enum(&params, &db).await {
@@ -326,13 +330,15 @@ async fn dispatch(req: DaemonRequest, db: Arc<VoyageDb>) -> DaemonResponse {
                         status: "error".to_string(),
                         results: None,
                         message: Some(format!("Invalid enum params: {}", e)),
-                    }
+                    };
                 }
             };
 
             if req.save {
                 let params_str = serde_json::to_string(&req.params).unwrap_or_default();
-                let _ = db.create_operation(&operation_id, "enum", &params_str).await;
+                let _ = db
+                    .create_operation(&operation_id, "enum", &params_str)
+                    .await;
             }
 
             match req.response.as_str() {
@@ -395,7 +401,7 @@ async fn dispatch(req: DaemonRequest, db: Arc<VoyageDb>) -> DaemonResponse {
                         status: "error".to_string(),
                         results: None,
                         message: Some(format!("Invalid probe params: {}", e)),
-                    }
+                    };
                 }
             };
             run_probe(probe_params, db).await
@@ -572,7 +578,7 @@ async fn run_probe(params: ProbeParams, db: Arc<VoyageDb>) -> DaemonResponse {
                 status: "error".to_string(),
                 results: None,
                 message: Some(format!("DNS resolver error: {}", e)),
-            }
+            };
         }
     };
 

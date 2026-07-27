@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{
-    tcp::OwnedWriteHalf,
-    TcpListener, TcpStream,
-};
+use tokio::net::{TcpListener, TcpStream, tcp::OwnedWriteHalf};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -83,14 +80,26 @@ struct ScanParams {
     posture: String,
 }
 
-fn default_posture() -> String { "balanced".to_string() }
-fn default_method() -> String { "get".to_string() }
-fn default_tasks() -> usize { 4 }
-fn default_follow_redirects_depth() -> u64 { 5 }
-fn default_fuzz_marker() -> String { "::FUZZ::".to_string() }
+fn default_posture() -> String {
+    "balanced".to_string()
+}
+fn default_method() -> String {
+    "get".to_string()
+}
+fn default_tasks() -> usize {
+    4
+}
+fn default_follow_redirects_depth() -> u64 {
+    5
+}
+fn default_fuzz_marker() -> String {
+    "::FUZZ::".to_string()
+}
 fn default_success_codes() -> Vec<u16> {
-    vec![200, 201, 202, 203, 204, 205, 206, 207, 208, 226,
-         300, 301, 302, 303, 304, 305, 306, 307, 308]
+    vec![
+        200, 201, 202, 203, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304, 305, 306, 307,
+        308,
+    ]
 }
 
 /// Params for the lightweight single-URL probe operation.
@@ -111,7 +120,9 @@ struct ProbeParams {
     follow_redirects: bool,
 }
 
-fn default_follow_redirects() -> bool { true }
+fn default_follow_redirects() -> bool {
+    true
+}
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -162,7 +173,9 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
         let client_clone = Arc::clone(&probe_client);
         let client_noredir_clone = Arc::clone(&probe_client_noredirect);
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, db_clone, client_clone, client_noredir_clone).await {
+            if let Err(e) =
+                handle_connection(stream, db_clone, client_clone, client_noredir_clone).await
+            {
                 eprintln!("Connection error from {}: {}", addr, e);
             }
         });
@@ -190,11 +203,14 @@ async fn handle_connection(
 
         let req = match serde_json::from_str::<DaemonRequest>(&line) {
             Err(e) => {
-                write_json(&mut writer, &serde_json::json!({
-                    "operation_id": Uuid::new_v4().to_string(),
-                    "status": "error",
-                    "message": format!("Invalid JSON: {}", e),
-                }))
+                write_json(
+                    &mut writer,
+                    &serde_json::json!({
+                        "operation_id": Uuid::new_v4().to_string(),
+                        "status": "error",
+                        "message": format!("Invalid JSON: {}", e),
+                    }),
+                )
                 .await?;
                 continue;
             }
@@ -210,14 +226,23 @@ async fn handle_connection(
             return Ok(());
         }
 
-        let response = dispatch(req, Arc::clone(&db), Arc::clone(&probe_client), Arc::clone(&probe_client_noredirect)).await;
+        let response = dispatch(
+            req,
+            Arc::clone(&db),
+            Arc::clone(&probe_client),
+            Arc::clone(&probe_client_noredirect),
+        )
+        .await;
         write_json(&mut writer, &response).await?;
     }
 
     Ok(())
 }
 
-async fn write_json<W, T>(writer: &mut W, value: &T) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+async fn write_json<W, T>(
+    writer: &mut W,
+    value: &T,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     W: AsyncWriteExt + Unpin,
     T: Serialize,
@@ -242,11 +267,14 @@ async fn handle_stream_scan(
     let scan_params: ScanParams = match serde_json::from_value(req.params.clone()) {
         Ok(p) => p,
         Err(e) => {
-            write_json(&mut writer, &serde_json::json!({
-                "type": "error",
-                "operation_id": operation_id,
-                "message": format!("Invalid scan params: {}", e),
-            }))
+            write_json(
+                &mut writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "operation_id": operation_id,
+                    "message": format!("Invalid scan params: {}", e),
+                }),
+            )
             .await?;
             return Ok(());
         }
@@ -254,37 +282,52 @@ async fn handle_stream_scan(
 
     if req.save {
         let params_str = serde_json::to_string(&req.params).unwrap_or_default();
-        let _ = db.create_operation(&operation_id, "scan", &params_str).await;
+        let _ = db
+            .create_operation(&operation_id, "scan", &params_str)
+            .await;
     }
 
     // Set up the scan (wordlist, DB entries, etc.). Pass operation_id so this
     // stream scan gets its OWN isolated scan record - concurrent scans of the
     // same target/wordlist no longer share a row and clobber each other.
-    let (scanner, total, scan_id) = match prepare_scan(&scan_params, &db, Some(&operation_id)).await {
+    let (scanner, total, scan_id) = match prepare_scan(&scan_params, &db, Some(&operation_id)).await
+    {
         Ok(v) => v,
         Err(e) => {
-            write_json(&mut writer, &serde_json::json!({
-                "type": "error",
-                "operation_id": operation_id,
-                "message": e.to_string(),
-            }))
+            write_json(
+                &mut writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "operation_id": operation_id,
+                    "message": e.to_string(),
+                }),
+            )
             .await?;
             return Ok(());
         }
     };
 
     // Send "ack" with operation_id and total entry count
-    write_json(&mut writer, &StreamEvent {
-        kind: "ack".to_string(),
-        operation_id: Some(operation_id.clone()),
-        total: Some(total),
-        tested: None,
-        retries: None,
-        url: None, status: None, code: None,
-        body_length: None, headers_length: None,
-        found: None, not_found: None, error: None,
-        log_level: None, message: None,
-    })
+    write_json(
+        &mut writer,
+        &StreamEvent {
+            kind: "ack".to_string(),
+            operation_id: Some(operation_id.clone()),
+            total: Some(total),
+            tested: None,
+            retries: None,
+            url: None,
+            status: None,
+            code: None,
+            body_length: None,
+            headers_length: None,
+            found: None,
+            not_found: None,
+            error: None,
+            log_level: None,
+            message: None,
+        },
+    )
     .await?;
 
     // Create event channel and run the scan
@@ -298,12 +341,16 @@ async fn handle_stream_scan(
         match scanner.run_headless_stream(tx).await {
             Ok(_) => {
                 if save {
-                    let _ = db_clone.update_operation_status(&oid, "completed", None).await;
+                    let _ = db_clone
+                        .update_operation_status(&oid, "completed", None)
+                        .await;
                 }
             }
             Err(e) => {
                 if save {
-                    let _ = db_clone.update_operation_status(&oid, "error", Some(&e.to_string())).await;
+                    let _ = db_clone
+                        .update_operation_status(&oid, "error", Some(&e.to_string()))
+                        .await;
                 }
             }
         }
@@ -332,10 +379,13 @@ async fn handle_stream_crawl(
     let params: crate::crawler::CrawlParams = match serde_json::from_value(req.params.clone()) {
         Ok(p) => p,
         Err(e) => {
-            write_json(&mut writer, &serde_json::json!({
-                "type": "error",
-                "message": format!("Invalid crawl params: {}", e),
-            }))
+            write_json(
+                &mut writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid crawl params: {}", e),
+                }),
+            )
             .await?;
             return Ok(());
         }
@@ -357,7 +407,12 @@ async fn handle_stream_crawl(
 // Regular (non-stream) dispatch
 // ---------------------------------------------------------------------------
 
-async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>, probe_client_noredirect: Arc<Client>) -> DaemonResponse {
+async fn dispatch(
+    req: DaemonRequest,
+    db: Arc<MachDb>,
+    probe_client: Arc<Client>,
+    probe_client_noredirect: Arc<Client>,
+) -> DaemonResponse {
     let operation_id = Uuid::new_v4().to_string();
 
     match req.operation.as_str() {
@@ -376,7 +431,10 @@ async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>
 
             if req.save {
                 let params_str = serde_json::to_string(&req.params).unwrap_or_default();
-                if let Err(e) = db.create_operation(&operation_id, "scan", &params_str).await {
+                if let Err(e) = db
+                    .create_operation(&operation_id, "scan", &params_str)
+                    .await
+                {
                     eprintln!("Failed to save operation: {}", e);
                 }
             }
@@ -400,33 +458,37 @@ async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>
         "probe" => {
             let probe_params: ProbeParams = match serde_json::from_value(req.params.clone()) {
                 Ok(p) => p,
-                Err(e) => return DaemonResponse {
-                    operation_id,
-                    status: "error".to_string(),
-                    results: None,
-                    message: Some(format!("Invalid probe params: {}", e)),
-                },
+                Err(e) => {
+                    return DaemonResponse {
+                        operation_id,
+                        status: "error".to_string(),
+                        results: None,
+                        message: Some(format!("Invalid probe params: {}", e)),
+                    };
+                }
             };
             // Pick the client whose redirect policy matches the request.
-            let client = if probe_params.follow_redirects { probe_client } else { probe_client_noredirect };
+            let client = if probe_params.follow_redirects {
+                probe_client
+            } else {
+                probe_client_noredirect
+            };
             run_probe(probe_params, client, db).await
         }
-        "db_reset" => {
-            match db.truncate_tables().await {
-                Ok(_) => DaemonResponse {
-                    operation_id,
-                    status: "completed".to_string(),
-                    results: None,
-                    message: Some("All tables truncated.".to_string()),
-                },
-                Err(e) => DaemonResponse {
-                    operation_id,
-                    status: "error".to_string(),
-                    results: None,
-                    message: Some(format!("DB reset failed: {}", e)),
-                },
-            }
-        }
+        "db_reset" => match db.truncate_tables().await {
+            Ok(_) => DaemonResponse {
+                operation_id,
+                status: "completed".to_string(),
+                results: None,
+                message: Some("All tables truncated.".to_string()),
+            },
+            Err(e) => DaemonResponse {
+                operation_id,
+                status: "error".to_string(),
+                results: None,
+                message: Some(format!("DB reset failed: {}", e)),
+            },
+        },
         unknown => DaemonResponse {
             operation_id,
             status: "error".to_string(),
@@ -436,19 +498,40 @@ async fn dispatch(req: DaemonRequest, db: Arc<MachDb>, probe_client: Arc<Client>
     }
 }
 
-async fn run_scan_instant(operation_id: String, params: ScanParams, db: Arc<MachDb>, save: bool) -> DaemonResponse {
+async fn run_scan_instant(
+    operation_id: String,
+    params: ScanParams,
+    db: Arc<MachDb>,
+    save: bool,
+) -> DaemonResponse {
     match run_scan(&params, &db).await {
         Ok(results) => {
             let result_json = serde_json::to_value(&results.found).unwrap_or(Value::Null);
             if save {
                 let s = serde_json::to_string(&result_json).unwrap_or_default();
-                let _ = db.update_operation_status(&operation_id, "completed", Some(&s)).await;
+                let _ = db
+                    .update_operation_status(&operation_id, "completed", Some(&s))
+                    .await;
             }
-            DaemonResponse { operation_id, status: "completed".to_string(), results: Some(result_json), message: None }
+            DaemonResponse {
+                operation_id,
+                status: "completed".to_string(),
+                results: Some(result_json),
+                message: None,
+            }
         }
         Err(e) => {
-            if save { let _ = db.update_operation_status(&operation_id, "error", Some(&e.to_string())).await; }
-            DaemonResponse { operation_id, status: "error".to_string(), results: None, message: Some(e.to_string()) }
+            if save {
+                let _ = db
+                    .update_operation_status(&operation_id, "error", Some(&e.to_string()))
+                    .await;
+            }
+            DaemonResponse {
+                operation_id,
+                status: "error".to_string(),
+                results: None,
+                message: Some(e.to_string()),
+            }
         }
     }
 }
@@ -457,10 +540,14 @@ async fn run_scan_background(operation_id: String, params: ScanParams, db: Arc<M
     match run_scan(&params, &db).await {
         Ok(results) => {
             let s = serde_json::to_string(&results.found).unwrap_or_default();
-            let _ = db.update_operation_status(&operation_id, "completed", Some(&s)).await;
+            let _ = db
+                .update_operation_status(&operation_id, "completed", Some(&s))
+                .await;
         }
         Err(e) => {
-            let _ = db.update_operation_status(&operation_id, "error", Some(&e.to_string())).await;
+            let _ = db
+                .update_operation_status(&operation_id, "error", Some(&e.to_string()))
+                .await;
         }
     }
 }
@@ -503,11 +590,17 @@ async fn prepare_scan(
 
     let wordlist = match db.find_wordlist(&wordlist_config.hash).await {
         Ok(w) => w,
-        Err(sqlx::Error::RowNotFound) => db.create_wordlist(&wordlist_config).await.map_err(|e| format!("DB: {}", e))?,
+        Err(sqlx::Error::RowNotFound) => db
+            .create_wordlist(&wordlist_config)
+            .await
+            .map_err(|e| format!("DB: {}", e))?,
         Err(e) => return Err(format!("DB: {}", e).into()),
     };
 
-    let words = db.fetch_words(&wordlist.id).await.map_err(|e| format!("DB: {}", e))?;
+    let words = db
+        .fetch_words(&wordlist.id)
+        .await
+        .map_err(|e| format!("DB: {}", e))?;
 
     let mut scan_config = serde_json::json!({
         "urls": &config.url,
@@ -526,28 +619,54 @@ async fn prepare_scan(
         .map_err(|e| format!("Hash: {}", e))?;
 
     let mut scan = match db.find_scan(&scan_config_hash).await {
-        Ok(s) if params.fresh_start => db.fresh_start_scan(&s.id).await.map_err(|e| format!("DB: {}", e))?,
+        Ok(s) if params.fresh_start => db
+            .fresh_start_scan(&s.id)
+            .await
+            .map_err(|e| format!("DB: {}", e))?,
         Ok(s) => s,
-        Err(sqlx::Error::RowNotFound) => db.create_scan(&scan_config_hash, &wordlist.id, &config.http_method.to_string()).await.map_err(|e| format!("DB: {}", e))?,
+        Err(sqlx::Error::RowNotFound) => db
+            .create_scan(
+                &scan_config_hash,
+                &wordlist.id,
+                &config.http_method.to_string(),
+            )
+            .await
+            .map_err(|e| format!("DB: {}", e))?,
         Err(e) => return Err(format!("DB: {}", e).into()),
     };
 
-    let logger = db.spawn_logger(&scan.id, &config.log_level.to_string()).await.map_err(|e| format!("DB: {}", e))?;
+    let logger = db
+        .spawn_logger(&scan.id, &config.log_level.to_string())
+        .await
+        .map_err(|e| format!("DB: {}", e))?;
 
     let urls = match db.find_urls(&scan.id).await {
         Ok(u) => u,
-        Err(sqlx::Error::RowNotFound) => db.create_urls(&scan.id, &config.url).await.map_err(|e| format!("DB: {}", e))?,
+        Err(sqlx::Error::RowNotFound) => db
+            .create_urls(&scan.id, &config.url)
+            .await
+            .map_err(|e| format!("DB: {}", e))?,
         Err(e) => return Err(format!("DB: {}", e).into()),
     };
 
     if scan.status == "created" {
-        db.create_scan_entries(&urls, &scan, &words).await.map_err(|e| format!("DB: {}", e))?;
-        scan.status = db.set_scan_status(&scan.id, "populated").await.map_err(|e| format!("DB: {}", e))?;
+        db.create_scan_entries(&urls, &scan, &words)
+            .await
+            .map_err(|e| format!("DB: {}", e))?;
+        scan.status = db
+            .set_scan_status(&scan.id, "populated")
+            .await
+            .map_err(|e| format!("DB: {}", e))?;
     }
 
-    db.reset_halted_scan_entries(&scan.id).await.map_err(|e| format!("DB: {}", e))?;
+    db.reset_halted_scan_entries(&scan.id)
+        .await
+        .map_err(|e| format!("DB: {}", e))?;
 
-    let (_, _, _, total) = db.fetch_total_scan_entries(scan.id).await.map_err(|e| format!("DB: {}", e))?;
+    let (_, _, _, total) = db
+        .fetch_total_scan_entries(scan.id)
+        .await
+        .map_err(|e| format!("DB: {}", e))?;
 
     let scan_db = db.clone_with_config(config.clone());
     let scanner = Scanner::new(config, scan_db, logger, scan.id);
@@ -560,7 +679,10 @@ async fn run_scan(
     db: &Arc<MachDb>,
 ) -> Result<crate::scanner::ScanResults, Box<dyn std::error::Error + Send + Sync>> {
     let (scanner, _, _) = prepare_scan(params, db, None).await?;
-    scanner.run_headless().await.map_err(|e| format!("Scan: {}", e).into())
+    scanner
+        .run_headless()
+        .await
+        .map_err(|e| format!("Scan: {}", e).into())
 }
 
 // ---------------------------------------------------------------------------
@@ -616,17 +738,18 @@ fn build_args(params: &ScanParams, endpoint: String, http_method: HttpMethod) ->
 
 async fn run_probe(params: ProbeParams, client: Arc<Client>, db: Arc<MachDb>) -> DaemonResponse {
     let builder = match params.method.to_lowercase().as_str() {
-        "post"   => client.post(&params.url),
-        "put"    => client.put(&params.url),
+        "post" => client.post(&params.url),
+        "put" => client.put(&params.url),
         "delete" => client.delete(&params.url),
-        "head"   => client.head(&params.url),
-        _        => client.get(&params.url),
+        "head" => client.head(&params.url),
+        _ => client.get(&params.url),
     };
 
     match builder.send().await {
         Ok(resp) => {
             let code = resp.status().as_u16();
-            let status = if params.success_codes.is_empty() || params.success_codes.contains(&code) {
+            let status = if params.success_codes.is_empty() || params.success_codes.contains(&code)
+            {
                 "found"
             } else {
                 "not_found"
@@ -636,15 +759,17 @@ async fn run_probe(params: ProbeParams, client: Arc<Client>, db: Arc<MachDb>) ->
 
             let volatility = params.volatility.min(8766);
             if volatility > 0 {
-                let _ = db.save_probe_result(
-                    &params.operation_id,
-                    &params.url,
-                    status,
-                    code as i32,
-                    body_length,
-                    headers_length,
-                    volatility as i32,
-                ).await;
+                let _ = db
+                    .save_probe_result(
+                        &params.operation_id,
+                        &params.url,
+                        status,
+                        code as i32,
+                        body_length,
+                        headers_length,
+                        volatility as i32,
+                    )
+                    .await;
             }
 
             DaemonResponse {

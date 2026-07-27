@@ -17,7 +17,9 @@ struct DaemonRequest {
     params: serde_json::Value,
 }
 
-fn default_response() -> String { "queue".to_string() }
+fn default_response() -> String {
+    "queue".to_string()
+}
 
 pub async fn run(port: u16, db: PulseDb) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
@@ -32,7 +34,9 @@ pub async fn run(port: u16, db: PulseDb) -> Result<(), Box<dyn std::error::Error
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
                 if let Ok(n) = db_c.delete_expired_probe_results().await {
-                    if n > 0 { println!("Cleaned {} expired probe result(s)", n); }
+                    if n > 0 {
+                        println!("Cleaned {} expired probe result(s)", n);
+                    }
                 }
             }
         });
@@ -59,7 +63,9 @@ async fn handle_connection(
 
     while let Some(line) = lines.next_line().await? {
         let line = line.trim().to_string();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
 
         let req: DaemonRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
@@ -98,14 +104,20 @@ async fn handle_stream_scan(
     let scan_params: ScanParams = match serde_json::from_value(req.params.clone()) {
         Ok(p) => p,
         Err(e) => {
-            write_json(&mut writer, &StreamEvent::error(&format!("Invalid scan params: {}", e))).await?;
+            write_json(
+                &mut writer,
+                &StreamEvent::error(&format!("Invalid scan params: {}", e)),
+            )
+            .await?;
             return Ok(());
         }
     };
 
     if req.save {
         let params_str = serde_json::to_string(&req.params).unwrap_or_default();
-        let _ = db.create_operation(&operation_id, "scan", &params_str).await;
+        let _ = db
+            .create_operation(&operation_id, "scan", &params_str)
+            .await;
     }
 
     // Resolve hosts and compute total probes
@@ -128,16 +140,15 @@ async fn handle_stream_scan(
     while let Some(ev) = rx.recv().await {
         let done = ev.kind == "done";
         write_json(&mut writer, &ev).await?;
-        if done { break; }
+        if done {
+            break;
+        }
     }
 
     Ok(())
 }
 
-async fn dispatch(
-    req: DaemonRequest,
-    db: Arc<PulseDb>,
-) -> serde_json::Value {
+async fn dispatch(req: DaemonRequest, db: Arc<PulseDb>) -> serde_json::Value {
     let operation_id = uuid::Uuid::new_v4().to_string();
 
     match req.operation.as_str() {
@@ -155,7 +166,9 @@ async fn dispatch(
 
             if req.save {
                 let params_str = serde_json::to_string(&req.params).unwrap_or_default();
-                let _ = db.create_operation(&operation_id, "scan", &params_str).await;
+                let _ = db
+                    .create_operation(&operation_id, "scan", &params_str)
+                    .await;
             }
 
             match req.response.as_str() {
@@ -165,11 +178,17 @@ async fn dispatch(
 
                     let mut results = Vec::new();
                     while let Some(ev) = rx.recv().await {
-                        if ev.kind == "result" { results.push(serde_json::to_value(&ev).unwrap()); }
-                        if ev.kind == "done" { break; }
+                        if ev.kind == "result" {
+                            results.push(serde_json::to_value(&ev).unwrap());
+                        }
+                        if ev.kind == "done" {
+                            break;
+                        }
                     }
 
-                    let _ = db.update_operation_status(&operation_id, "completed", None).await;
+                    let _ = db
+                        .update_operation_status(&operation_id, "completed", None)
+                        .await;
 
                     serde_json::json!({
                         "operation_id": operation_id,
@@ -231,7 +250,9 @@ async fn dispatch(
                     result = serde_json::to_value(&ev).unwrap();
                     break;
                 }
-                if ev.kind == "done" { break; }
+                if ev.kind == "done" {
+                    break;
+                }
             }
 
             serde_json::json!({
@@ -241,20 +262,18 @@ async fn dispatch(
             })
         }
 
-        "db_reset" => {
-            match db.truncate_tables().await {
-                Ok(_) => serde_json::json!({
-                    "operation_id": operation_id,
-                    "status": "completed",
-                    "message": "All tables truncated.",
-                }),
-                Err(e) => serde_json::json!({
-                    "operation_id": operation_id,
-                    "status": "error",
-                    "message": format!("DB reset failed: {}", e),
-                }),
-            }
-        }
+        "db_reset" => match db.truncate_tables().await {
+            Ok(_) => serde_json::json!({
+                "operation_id": operation_id,
+                "status": "completed",
+                "message": "All tables truncated.",
+            }),
+            Err(e) => serde_json::json!({
+                "operation_id": operation_id,
+                "status": "error",
+                "message": format!("DB reset failed: {}", e),
+            }),
+        },
 
         unknown => serde_json::json!({
             "operation_id": operation_id,

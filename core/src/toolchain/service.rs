@@ -15,8 +15,8 @@
 // Each `imp` exposes the same set of primitives; only the one matching the
 // build target compiles.
 
-use super::config::is_extension_installed;
 use super::EXTENSIONS;
+use super::config::is_extension_installed;
 
 pub const NODE_TARGET: &str = "node";
 
@@ -90,35 +90,55 @@ pub fn try_stop(ext: &str) {
 
 pub fn start(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     for t in resolve_targets(target)? {
-        if t == NODE_TARGET { node::action("start")?; } else { imp::action("start", t)?; }
+        if t == NODE_TARGET {
+            node::action("start")?;
+        } else {
+            imp::action("start", t)?;
+        }
     }
     Ok(())
 }
 
 pub fn stop(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     for t in resolve_targets(target)? {
-        if t == NODE_TARGET { node::action("stop")?; } else { imp::action("stop", t)?; }
+        if t == NODE_TARGET {
+            node::action("stop")?;
+        } else {
+            imp::action("stop", t)?;
+        }
     }
     Ok(())
 }
 
 pub fn restart(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     for t in resolve_targets(target)? {
-        if t == NODE_TARGET { node::action("restart")?; } else { imp::action("restart", t)?; }
+        if t == NODE_TARGET {
+            node::action("restart")?;
+        } else {
+            imp::action("restart", t)?;
+        }
     }
     Ok(())
 }
 
 pub fn enable(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     for t in resolve_targets(target)? {
-        if t == NODE_TARGET { node::action("enable")?; } else { imp::action("enable", t)?; }
+        if t == NODE_TARGET {
+            node::action("enable")?;
+        } else {
+            imp::action("enable", t)?;
+        }
     }
     Ok(())
 }
 
 pub fn disable(target: &str) -> Result<(), Box<dyn std::error::Error>> {
     for t in resolve_targets(target)? {
-        if t == NODE_TARGET { node::action("disable")?; } else { imp::action("disable", t)?; }
+        if t == NODE_TARGET {
+            node::action("disable")?;
+        } else {
+            imp::action("disable", t)?;
+        }
     }
     Ok(())
 }
@@ -127,17 +147,34 @@ pub fn list() -> Result<(), Box<dyn std::error::Error>> {
     println!("Crossfyre Services");
     println!("==================");
     println!();
-    println!("  {:<12} {:<12} {:<10} {:<10}", "SERVICE", "INSTALLED", "STATUS", "ENABLED");
-    println!("  {:<12} {:<12} {:<10} {:<10}", "-------", "---------", "------", "-------");
+    println!(
+        "  {:<12} {:<12} {:<10} {:<10}",
+        "SERVICE", "INSTALLED", "STATUS", "ENABLED"
+    );
+    println!(
+        "  {:<12} {:<12} {:<10} {:<10}",
+        "-------", "---------", "------", "-------"
+    );
 
     // The node supervisor service (system scope).
     {
         let has_service = node::exists();
-        let status_str = if has_service { node::status() } else { "no service".to_string() };
+        let status_str = if has_service {
+            node::status()
+        } else {
+            "no service".to_string()
+        };
         let enabled_str = if !has_service {
             "-".to_string()
-        } else if node::is_enabled() { "yes".to_string() } else { "no".to_string() };
-        println!("  {:<12} {:<12} {:<10} {:<10}", NODE_TARGET, "yes", status_str, enabled_str);
+        } else if node::is_enabled() {
+            "yes".to_string()
+        } else {
+            "no".to_string()
+        };
+        println!(
+            "  {:<12} {:<12} {:<10} {:<10}",
+            NODE_TARGET, "yes", status_str, enabled_str
+        );
     }
 
     for ext in EXTENSIONS {
@@ -209,7 +246,10 @@ mod node {
         Ok(())
     }
 
-    pub fn create(exe: &std::path::Path, data_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create(
+        exe: &std::path::Path,
+        data_dir: &std::path::Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         require_root()?;
         // Bake SUDO_USER into the unit so the daemon's user-scoped state
         // (config root, systemctl --user for extensions) keeps resolving to
@@ -242,18 +282,28 @@ mod node {
             sudo_env = sudo_env,
         );
         fs::write(UNIT_PATH, body)?;
-        let _ = std::process::Command::new("systemctl").arg("daemon-reload").status();
-        if !super::quiet() { super::svc_ok(&format!("{} created", UNIT)); }
+        let _ = std::process::Command::new("systemctl")
+            .arg("daemon-reload")
+            .status();
+        if !super::quiet() {
+            super::svc_ok(&format!("{} created", UNIT));
+        }
         Ok(())
     }
 
     pub fn delete() -> Result<(), Box<dyn std::error::Error>> {
         if std::path::Path::new(UNIT_PATH).exists() {
             require_root()?;
-            let _ = std::process::Command::new("systemctl").args(["stop", UNIT]).status();
-            let _ = std::process::Command::new("systemctl").args(["disable", UNIT]).status();
+            let _ = std::process::Command::new("systemctl")
+                .args(["stop", UNIT])
+                .status();
+            let _ = std::process::Command::new("systemctl")
+                .args(["disable", UNIT])
+                .status();
             fs::remove_file(UNIT_PATH)?;
-            let _ = std::process::Command::new("systemctl").arg("daemon-reload").status();
+            let _ = std::process::Command::new("systemctl")
+                .arg("daemon-reload")
+                .status();
             super::svc_ok(&format!("{} removed", UNIT));
         }
         Ok(())
@@ -268,12 +318,17 @@ mod node {
         if !status.success() {
             return Err(format!("Failed to {} {}", action, UNIT).into());
         }
-        if !super::quiet() { super::svc_ok(&format!("{} {}", UNIT, super::action_past(action))); }
+        if !super::quiet() {
+            super::svc_ok(&format!("{} {}", UNIT, super::action_past(action)));
+        }
         Ok(())
     }
 
     pub fn status() -> String {
-        match std::process::Command::new("systemctl").args(["is-active", UNIT]).output() {
+        match std::process::Command::new("systemctl")
+            .args(["is-active", UNIT])
+            .output()
+        {
             Ok(o) => match String::from_utf8_lossy(&o.stdout).trim() {
                 "active" => "running".to_string(),
                 "inactive" => "stopped".to_string(),
@@ -302,23 +357,36 @@ mod node {
     // Auto-start of the node supervisor is Linux-only for now. On macOS and
     // Windows the operator runs `crossfyre node up` in a terminal (or wires up
     // their own LaunchDaemon / scheduled task).
-    pub fn create(_exe: &std::path::Path, _data_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create(
+        _exe: &std::path::Path,
+        _data_dir: &std::path::Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         Err("the node service is only supported on Linux for now - run `crossfyre node up` directly".into())
     }
-    pub fn delete() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }
+    pub fn delete() -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
     pub fn action(_action: &str) -> Result<(), Box<dyn std::error::Error>> {
         Err("the node service is only supported on Linux for now - run `crossfyre node up` directly".into())
     }
-    pub fn status() -> String { "unsupported".to_string() }
-    pub fn is_enabled() -> bool { false }
-    pub fn exists() -> bool { false }
+    pub fn status() -> String {
+        "unsupported".to_string()
+    }
+    pub fn is_enabled() -> bool {
+        false
+    }
+    pub fn exists() -> bool {
+        false
+    }
 }
 
 // ── Linux: systemd user units (extensions) ────────────────────────────
 #[cfg(target_os = "linux")]
 mod imp {
     use super::super::config::ext_bin_path;
-    use super::super::sudo_user::{chown_to_invoking_user, cmd_as_invoking_user, invoking_user_home};
+    use super::super::sudo_user::{
+        chown_to_invoking_user, cmd_as_invoking_user, invoking_user_home,
+    };
     use std::fs;
 
     fn service_name(ext: &str) -> String {
@@ -357,8 +425,12 @@ mod imp {
         fs::write(dir.join(service_name(ext)), unit_body(ext))?;
         // Written into the user's home as root - chown it back.
         chown_to_invoking_user(&dir);
-        let _ = cmd_as_invoking_user("systemctl").args(["--user", "daemon-reload"]).status();
-        if !super::quiet() { super::svc_ok(&format!("{} created", service_name(ext))); }
+        let _ = cmd_as_invoking_user("systemctl")
+            .args(["--user", "daemon-reload"])
+            .status();
+        if !super::quiet() {
+            super::svc_ok(&format!("{} created", service_name(ext)));
+        }
         Ok(())
     }
 
@@ -366,7 +438,9 @@ mod imp {
         let path = unit_dir().join(service_name(ext));
         if path.exists() {
             fs::remove_file(&path)?;
-            let _ = cmd_as_invoking_user("systemctl").args(["--user", "daemon-reload"]).status();
+            let _ = cmd_as_invoking_user("systemctl")
+                .args(["--user", "daemon-reload"])
+                .status();
             super::svc_ok(&format!("{} removed", service_name(ext)));
         }
         Ok(())
@@ -381,13 +455,18 @@ mod imp {
         if !status.success() {
             return Err(format!("Failed to {} {}", action, svc).into());
         }
-        if !super::quiet() { super::svc_ok(&format!("{} {}", svc, super::action_past(action))); }
+        if !super::quiet() {
+            super::svc_ok(&format!("{} {}", svc, super::action_past(action)));
+        }
         Ok(())
     }
 
     pub fn status(ext: &str) -> String {
         let svc = service_name(ext);
-        match cmd_as_invoking_user("systemctl").args(["--user", "is-active", &svc]).output() {
+        match cmd_as_invoking_user("systemctl")
+            .args(["--user", "is-active", &svc])
+            .output()
+        {
             Ok(o) => match String::from_utf8_lossy(&o.stdout).trim() {
                 "active" => "running".to_string(),
                 "inactive" => "stopped".to_string(),
@@ -416,7 +495,9 @@ mod imp {
 #[cfg(target_os = "macos")]
 mod imp {
     use super::super::config::ext_bin_path;
-    use super::super::sudo_user::{chown_to_invoking_user, cmd_as_invoking_user, invoking_user_home};
+    use super::super::sudo_user::{
+        chown_to_invoking_user, cmd_as_invoking_user, invoking_user_home,
+    };
     use std::fs;
     use std::path::PathBuf;
 
@@ -484,14 +565,26 @@ mod imp {
         let lbl = label(ext);
         let plist = plist_path(ext).to_string_lossy().into_owned();
         let result = match action {
-            "start" => cmd_as_invoking_user("launchctl").args(["start", &lbl]).status(),
-            "stop" => cmd_as_invoking_user("launchctl").args(["stop", &lbl]).status(),
+            "start" => cmd_as_invoking_user("launchctl")
+                .args(["start", &lbl])
+                .status(),
+            "stop" => cmd_as_invoking_user("launchctl")
+                .args(["stop", &lbl])
+                .status(),
             // load -w / unload -w toggle the Disabled key, i.e. start-on-login.
-            "enable" => cmd_as_invoking_user("launchctl").args(["load", "-w", &plist]).status(),
-            "disable" => cmd_as_invoking_user("launchctl").args(["unload", "-w", &plist]).status(),
+            "enable" => cmd_as_invoking_user("launchctl")
+                .args(["load", "-w", &plist])
+                .status(),
+            "disable" => cmd_as_invoking_user("launchctl")
+                .args(["unload", "-w", &plist])
+                .status(),
             "restart" => {
-                let _ = cmd_as_invoking_user("launchctl").args(["stop", &lbl]).status();
-                cmd_as_invoking_user("launchctl").args(["start", &lbl]).status()
+                let _ = cmd_as_invoking_user("launchctl")
+                    .args(["stop", &lbl])
+                    .status();
+                cmd_as_invoking_user("launchctl")
+                    .args(["start", &lbl])
+                    .status()
             }
             other => return Err(format!("Unsupported action: {}", other).into()),
         }
@@ -507,7 +600,10 @@ mod imp {
     pub fn status(ext: &str) -> String {
         // `launchctl list <label>` exits 0 and prints a dict (with "PID" when
         // the job is actually running) only if the agent is loaded.
-        match cmd_as_invoking_user("launchctl").args(["list", &label(ext)]).output() {
+        match cmd_as_invoking_user("launchctl")
+            .args(["list", &label(ext)])
+            .output()
+        {
             Ok(o) if o.status.success() => {
                 if String::from_utf8_lossy(&o.stdout).contains("\"PID\"") {
                     "running".to_string()
@@ -548,7 +644,18 @@ mod imp {
         // Quote the path; ONLOGON mirrors systemd --user (starts at user login).
         let tr = format!("\"{}\" --daemon", bin.display());
         let status = Command::new("schtasks")
-            .args(["/Create", "/TN", &task_name(ext), "/TR", &tr, "/SC", "ONLOGON", "/RL", "LIMITED", "/F"])
+            .args([
+                "/Create",
+                "/TN",
+                &task_name(ext),
+                "/TR",
+                &tr,
+                "/SC",
+                "ONLOGON",
+                "/RL",
+                "LIMITED",
+                "/F",
+            ])
             .status()
             .map_err(|e| format!("schtasks failed: {}", e))?;
         if !status.success() {
@@ -581,8 +688,12 @@ mod imp {
         let result = match action {
             "start" => Command::new("schtasks").args(["/Run", "/TN", &tn]).status(),
             "stop" => Command::new("schtasks").args(["/End", "/TN", &tn]).status(),
-            "enable" => Command::new("schtasks").args(["/Change", "/TN", &tn, "/ENABLE"]).status(),
-            "disable" => Command::new("schtasks").args(["/Change", "/TN", &tn, "/DISABLE"]).status(),
+            "enable" => Command::new("schtasks")
+                .args(["/Change", "/TN", &tn, "/ENABLE"])
+                .status(),
+            "disable" => Command::new("schtasks")
+                .args(["/Change", "/TN", &tn, "/DISABLE"])
+                .status(),
             "restart" => {
                 let _ = Command::new("schtasks").args(["/End", "/TN", &tn]).status();
                 Command::new("schtasks").args(["/Run", "/TN", &tn]).status()
@@ -614,7 +725,10 @@ mod imp {
                 let line = out
                     .lines()
                     .find(|l| l.trim_start().to_lowercase().starts_with("status:"));
-                match line.and_then(|l| l.split(':').nth(1)).map(|s| s.trim().to_lowercase()) {
+                match line
+                    .and_then(|l| l.split(':').nth(1))
+                    .map(|s| s.trim().to_lowercase())
+                {
                     Some(s) if s == "running" => "running".to_string(),
                     Some(s) if s == "ready" => "stopped".to_string(),
                     Some(s) if s == "disabled" => "disabled".to_string(),

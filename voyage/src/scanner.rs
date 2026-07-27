@@ -113,7 +113,11 @@ impl Scanner {
             };
             let shared = Arc::new(AdaptiveShared {
                 window: Mutex::new(adaptive::HealthWindow::new(200, 20)),
-                target_conc: AtomicU64::new(if self.config.adaptive_rate { 1 } else { max_conc }),
+                target_conc: AtomicU64::new(if self.config.adaptive_rate {
+                    1
+                } else {
+                    max_conc
+                }),
                 delay_ms: AtomicU64::new(self.config.interval_ms),
                 score_bits: AtomicU64::new(1.0f64.to_bits()),
                 rate_on: self.config.adaptive_rate,
@@ -137,10 +141,17 @@ impl Scanner {
                     i,
                 ));
             }
-            emit_log(&Some(Arc::clone(&arc_tx)), "info", &format!(
-                "Adaptive active enum on: posture={} rate={} resilience={} max_concurrency={}",
-                self.config.posture, self.config.adaptive_rate, self.config.adaptive_resilience, max_conc
-            ));
+            emit_log(
+                &Some(Arc::clone(&arc_tx)),
+                "info",
+                &format!(
+                    "Adaptive active enum on: posture={} rate={} resilience={} max_concurrency={}",
+                    self.config.posture,
+                    self.config.adaptive_rate,
+                    self.config.adaptive_resilience,
+                    max_conc
+                ),
+            );
             Some((ticker, stop))
         } else {
             for _ in 0..self.config.tasks {
@@ -275,7 +286,11 @@ async fn task_handle(
             emit_log(&Some(event_tx.clone()), &neg.level, &neg.description);
         }
 
-        let status = if scan_result.found { "found" } else { "not_found" };
+        let status = if scan_result.found {
+            "found"
+        } else {
+            "not_found"
+        };
         let source = &scan_result.source;
 
         if let Err(e) = db.update_work_status(work.entry_id, status, source).await {
@@ -312,11 +327,7 @@ async fn task_handle(
     }
 }
 
-fn emit_log(
-    event_tx: &Option<Arc<mpsc::UnboundedSender<StreamEvent>>>,
-    level: &str,
-    msg: &str,
-) {
+fn emit_log(event_tx: &Option<Arc<mpsc::UnboundedSender<StreamEvent>>>, level: &str, msg: &str) {
     if let Some(tx) = event_tx {
         let _ = tx.send(StreamEvent {
             kind: "log".to_string(),
@@ -381,10 +392,14 @@ async fn controller_tick(
         let stats = { shared.window.lock().unwrap().stats() };
         let dir = rc.tick(&stats);
         if shared.rate_on {
-            shared.target_conc.store(dir.concurrency as u64, Ordering::Relaxed);
+            shared
+                .target_conc
+                .store(dir.concurrency as u64, Ordering::Relaxed);
             shared.delay_ms.store(dir.delay_ms, Ordering::Relaxed);
         }
-        shared.score_bits.store(rc.last_score().to_bits(), Ordering::Relaxed);
+        shared
+            .score_bits
+            .store(rc.last_score().to_bits(), Ordering::Relaxed);
     }
 }
 
@@ -398,7 +413,11 @@ async fn adaptive_task_handle(
     let resolver = match crate::libs::dns::create_resolver(Some(config.dns_server.as_str())) {
         Ok(r) => r,
         Err(e) => {
-            emit_log(&Some(event_tx.clone()), "error", &format!("DNS resolver error: {}", e));
+            emit_log(
+                &Some(event_tx.clone()),
+                "error",
+                &format!("DNS resolver error: {}", e),
+            );
             return Ok(());
         }
     };
@@ -414,7 +433,11 @@ async fn adaptive_task_handle(
     {
         Ok(c) => c,
         Err(e) => {
-            emit_log(&Some(event_tx.clone()), "error", &format!("HTTP client build error: {}", e));
+            emit_log(
+                &Some(event_tx.clone()),
+                "error",
+                &format!("HTTP client build error: {}", e),
+            );
             return Ok(());
         }
     };
@@ -451,7 +474,11 @@ async fn adaptive_task_handle(
                 }
             },
             Err(e) => {
-                emit_log(&Some(event_tx.clone()), "error", &format!("get_work_one error: {}", e));
+                emit_log(
+                    &Some(event_tx.clone()),
+                    "error",
+                    &format!("get_work_one error: {}", e),
+                );
                 sleep(Duration::from_millis(200)).await;
                 continue;
             }
@@ -480,7 +507,13 @@ async fn adaptive_task_handle(
                 } else {
                     1.0
                 };
-                let d = shared.resilience.decide(class, attempt, &adaptive::HealthStats::empty(), score, None);
+                let d = shared.resilience.decide(
+                    class,
+                    attempt,
+                    &adaptive::HealthStats::empty(),
+                    score,
+                    None,
+                );
                 if d.retry {
                     attempt += 1;
                     if d.backoff_ms > 0 {
@@ -495,15 +528,27 @@ async fn adaptive_task_handle(
         for neg in &scan_result.negatives {
             emit_log(&Some(event_tx.clone()), &neg.level, &neg.description);
         }
-        let status = if scan_result.found { "found" } else { "not_found" };
+        let status = if scan_result.found {
+            "found"
+        } else {
+            "not_found"
+        };
         let source = &scan_result.source;
         if let Err(e) = db.update_work_status(work.entry_id, status, source).await {
-            emit_log(&Some(event_tx.clone()), "error", &format!("update_work_status failed: {}", e));
+            emit_log(
+                &Some(event_tx.clone()),
+                "error",
+                &format!("update_work_status failed: {}", e),
+            );
             let _ = db.reset_entry_to_queued(work.entry_id).await;
             continue;
         }
         if scan_result.found {
-            emit_log(&Some(event_tx.clone()), "info", &format!("FOUND: {} ({})", work.full_subdomain, source));
+            emit_log(
+                &Some(event_tx.clone()),
+                "info",
+                &format!("FOUND: {} ({})", work.full_subdomain, source),
+            );
         }
         let _ = event_tx.send(StreamEvent {
             kind: "result".to_string(),

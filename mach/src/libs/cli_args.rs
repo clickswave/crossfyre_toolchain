@@ -1,5 +1,5 @@
 use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
-use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use reqwest::Url;
 
 #[derive(Clone, Debug, ValueEnum)]

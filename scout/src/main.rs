@@ -28,27 +28,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             send_stream(cli.port, req).await
         }
         Some(Commands::Exec(args)) => {
-            let mut payload: serde_json::Value = serde_json::from_str(&args.json)
-                .map_err(|e| format!("Invalid JSON: {}", e))?;
+            let mut payload: serde_json::Value =
+                serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;
             if payload.get("response").is_none() {
                 payload["response"] = serde_json::json!("stream");
             }
             send_stream(cli.port, payload).await
         }
         None => {
-            eprintln!("No command given. Use `scout fingerprint <target>`, `scout exec <json>`, or `scout --daemon`.");
+            eprintln!(
+                "No command given. Use `scout fingerprint <target>`, `scout exec <json>`, or `scout --daemon`."
+            );
             std::process::exit(1);
         }
     }
 }
 
 async fn send_stream(port: u16, req: serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
-    let stream = TcpStream::connect(format!("127.0.0.1:{}", port)).await.map_err(|_| {
-        format!(
-            "Scout daemon is not running on port {}. Start it first with: scout --daemon",
-            port
-        )
-    })?;
+    let stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+        .await
+        .map_err(|_| {
+            format!(
+                "Scout daemon is not running on port {}. Start it first with: scout --daemon",
+                port
+            )
+        })?;
     let (reader, mut writer) = tokio::io::split(stream);
     let mut s = serde_json::to_string(&req)?;
     s.push('\n');

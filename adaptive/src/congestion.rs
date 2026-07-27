@@ -140,7 +140,11 @@ pub fn decide(
     .clamp(limits.retry_floor, limits.retry_ceil);
 
     let _ = (w.retried, w.recovered);
-    Decision { concurrency, timeout_ms, retries }
+    Decision {
+        concurrency,
+        timeout_ms,
+        retries,
+    }
 }
 
 #[cfg(test)]
@@ -150,27 +154,61 @@ mod tests {
     fn win(sent: u64, lost: u64, mean_rtt_ms: u64) -> Window {
         let delivered = sent - lost;
         Window {
-            sent, lost, delivered, retried: 0, recovered: 0,
+            sent,
+            lost,
+            delivered,
+            retried: 0,
+            recovered: 0,
             rtt_sum_us: delivered * mean_rtt_ms * 1000,
         }
     }
 
     #[test]
     fn concurrency_respects_ceiling_and_floor() {
-        let limits = Limits { conc_ceil: 120, ..Limits::default() };
-        let mut e = Estimator { srtt_us: 100_000.0, rttvar_us: 10_000.0, warmup: false };
+        let limits = Limits {
+            conc_ceil: 120,
+            ..Limits::default()
+        };
+        let mut e = Estimator {
+            srtt_us: 100_000.0,
+            rttvar_us: 10_000.0,
+            warmup: false,
+        };
         let d = decide(&mut e, 119, &win(1000, 0, 100), Some(100_000.0), &limits);
         assert!(d.concurrency <= 120, "cannot exceed conc_ceil");
 
-        let mut e2 = Estimator { srtt_us: 100_000.0, rttvar_us: 10_000.0, warmup: false };
-        let d2 = decide(&mut e2, limits.conc_floor, &win(1000, 500, 100), Some(100_000.0), &limits);
-        assert_eq!(d2.concurrency, limits.conc_floor, "cannot drop below conc_floor");
+        let mut e2 = Estimator {
+            srtt_us: 100_000.0,
+            rttvar_us: 10_000.0,
+            warmup: false,
+        };
+        let d2 = decide(
+            &mut e2,
+            limits.conc_floor,
+            &win(1000, 500, 100),
+            Some(100_000.0),
+            &limits,
+        );
+        assert_eq!(
+            d2.concurrency, limits.conc_floor,
+            "cannot drop below conc_floor"
+        );
     }
 
     #[test]
     fn loss_backs_off() {
-        let mut e = Estimator { srtt_us: 100_000.0, rttvar_us: 10_000.0, warmup: false };
-        let d = decide(&mut e, 100, &win(1000, 300, 100), Some(100_000.0), &Limits::default());
+        let mut e = Estimator {
+            srtt_us: 100_000.0,
+            rttvar_us: 10_000.0,
+            warmup: false,
+        };
+        let d = decide(
+            &mut e,
+            100,
+            &win(1000, 300, 100),
+            Some(100_000.0),
+            &Limits::default(),
+        );
         assert!(d.concurrency < 100, "heavy loss must reduce concurrency");
     }
 }

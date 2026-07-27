@@ -38,8 +38,10 @@ pub mod rate;
 pub mod resilience;
 pub mod wire;
 
-pub use congestion::{decide as congestion_decide, Decision, Estimator, Limits, Outcome, Sample, Window, WINDOW_MS};
+pub use congestion::{
+    Decision, Estimator, Limits, Outcome, Sample, WINDOW_MS, Window, decide as congestion_decide,
+};
 pub use health::{HealthStats, HealthWindow, ProbeClass};
-pub use rate::{score, Caps, Directive, Posture, PostureParams, RateController};
+pub use rate::{Caps, Directive, Posture, PostureParams, RateController, score};
 pub use resilience::{ResilienceController, RetryDecision};
 pub use wire::{AdaptiveConfig, ControlDirective, HealthReport};

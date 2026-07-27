@@ -4,7 +4,7 @@
 //! The node resolves it via the control plane into { domains, api_url } and hands
 //! that to cortex, which registers/polls/decrypts directly (zero-knowledge).
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Resolve an OAST endpoint id into (callback_domains, poll_api_url). Returns
 /// Ok(None) when OOB should be skipped ("off", or an endpoint with no usable
@@ -39,7 +39,11 @@ pub async fn resolve(
     let d = &body["data"];
     let domains: Vec<String> = d["domains"]
         .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     let poll_url = d["api_url"].as_str().unwrap_or("").to_string();
     if domains.is_empty() || poll_url.is_empty() {

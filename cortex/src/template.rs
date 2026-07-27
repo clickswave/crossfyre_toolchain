@@ -87,9 +87,15 @@ pub struct Matcher {
     pub negative: bool,
 }
 
-fn default_method() -> String { "GET".to_string() }
-fn default_and() -> String { "and".to_string() }
-fn default_or() -> String { "or".to_string() }
+fn default_method() -> String {
+    "GET".to_string()
+}
+fn default_and() -> String {
+    "and".to_string()
+}
+fn default_or() -> String {
+    "or".to_string()
+}
 
 /// A confirmed template match.
 pub struct Match {
@@ -134,7 +140,9 @@ pub async fn eval_template(
             let Some(oc) = oast else { continue };
             // Register a fresh correlation (sealed to this scan's keypair) for this
             // template, so callbacks are attributable and encrypted end to end.
-            let Some(reg) = oc.register(client).await else { continue };
+            let Some(reg) = oc.register(client).await else {
+                continue;
+            };
             let host = oc.host(&reg);
             let mut fired = false;
             for raw_path in &req.path {
@@ -166,8 +174,16 @@ pub async fn eval_template(
                 };
                 out.push(Match {
                     template_id: tmpl.id.clone(),
-                    name: if tmpl.info.name.is_empty() { tmpl.id.clone() } else { tmpl.info.name.clone() },
-                    severity: if tmpl.info.severity.is_empty() { "high".to_string() } else { tmpl.info.severity.clone() },
+                    name: if tmpl.info.name.is_empty() {
+                        tmpl.id.clone()
+                    } else {
+                        tmpl.info.name.clone()
+                    },
+                    severity: if tmpl.info.severity.is_empty() {
+                        "high".to_string()
+                    } else {
+                        tmpl.info.severity.clone()
+                    },
                     description: format!(
                         "{} Confirmed out-of-band: {} callback(s) to {}.",
                         base_desc, hits, host
@@ -199,8 +215,16 @@ pub async fn eval_template(
 
                 out.push(Match {
                     template_id: tmpl.id.clone(),
-                    name: if tmpl.info.name.is_empty() { tmpl.id.clone() } else { tmpl.info.name.clone() },
-                    severity: if tmpl.info.severity.is_empty() { "info".to_string() } else { tmpl.info.severity.clone() },
+                    name: if tmpl.info.name.is_empty() {
+                        tmpl.id.clone()
+                    } else {
+                        tmpl.info.name.clone()
+                    },
+                    severity: if tmpl.info.severity.is_empty() {
+                        "info".to_string()
+                    } else {
+                        tmpl.info.severity.clone()
+                    },
                     description: tmpl.info.description.clone(),
                     matched_at: v.url.clone(),
                 });
@@ -211,7 +235,8 @@ pub async fn eval_template(
 }
 
 fn substitute_oob(s: &str, host: &str) -> String {
-    s.replace("{{interactsh-url}}", host).replace("{{oast-url}}", host)
+    s.replace("{{interactsh-url}}", host)
+        .replace("{{oast-url}}", host)
 }
 
 /// A concrete request produced by expanding one template request's payloads.
@@ -227,8 +252,11 @@ struct ReqVariant {
 /// generating a capped cartesian product of concrete requests. A payload
 /// referenced only in the body/headers (not the URL) is still expanded.
 fn expand_request(req: &HttpReq, raw_path: &str, base: &str, cap: usize) -> Vec<ReqVariant> {
-    let headers0: Vec<(String, String)> =
-        req.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let headers0: Vec<(String, String)> = req
+        .headers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     let base_variant = ReqVariant {
         url: expand(raw_path, base),
         headers: headers0,
@@ -335,12 +363,19 @@ async fn fetch(client: &Client, method: &str, v: &ReqVariant) -> Option<Resp> {
                     headers.push('\n');
                 }
                 let body = r.text().await.unwrap_or_default();
-                return Some(Resp { status, headers, body });
+                return Some(Resp {
+                    status,
+                    headers,
+                    body,
+                });
             }
             Err(_) => {
                 // Transient connection error: one or two quick retries.
                 if attempt < 2 {
-                    tokio::time::sleep(std::time::Duration::from_millis(300 * (attempt as u64 + 1))).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        300 * (attempt as u64 + 1),
+                    ))
+                    .await;
                     attempt += 1;
                     continue;
                 }
@@ -750,7 +785,11 @@ mod tests {
             "a builtin template failed to parse"
         );
         assert!(super::BUILTIN.iter().any(|t| t.id == "path-traversal-lfi"));
-        assert!(super::BUILTIN.iter().any(|t| t.id == "debug-stacktrace-disclosure"));
+        assert!(
+            super::BUILTIN
+                .iter()
+                .any(|t| t.id == "debug-stacktrace-disclosure")
+        );
     }
 
     #[test]
