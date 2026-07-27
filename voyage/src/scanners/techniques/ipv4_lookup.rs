@@ -10,11 +10,11 @@ pub async fn execute(
         Err(e) => match e.is_no_records_found() {
             true => Err(NegativeResult {
                 level: "info".to_string(),
-                description: format!("No IPv4 addresses found for {}", domain),
+                description: format!("No IPv4 addresses found for {domain}"),
             }),
             false => Err(NegativeResult {
                 level: "error".to_string(),
-                description: format!("IPv4 lookup error: {}", e),
+                description: format!("IPv4 lookup error: {e}"),
             }),
         },
     }

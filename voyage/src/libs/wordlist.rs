@@ -29,5 +29,5 @@ pub async fn sha512(file_path: &str) -> Result<String, Box<dyn std::error::Error
         hasher.update(&buffer[..n]);
     }
     let hash_result = hasher.finalize();
-    Ok(format!("{:x}", hash_result))
+    Ok(format!("{hash_result:x}"))
 }

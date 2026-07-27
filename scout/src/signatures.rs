@@ -427,7 +427,7 @@ pub fn detect(headers: &[(String, String)], cookies: &[String], body: &str) -> V
                         let cn = c.split(&['=', ';'][..]).next().unwrap_or("").trim();
                         if re.is_match(cn) {
                             conf += 45;
-                            evidence.push(format!("cookie {}", cn));
+                            evidence.push(format!("cookie {cn}"));
                             break;
                         }
                     }
@@ -449,7 +449,7 @@ pub fn detect(headers: &[(String, String)], cookies: &[String], body: &str) -> V
         if conf == 0 {
             continue;
         }
-        let blob = format!("{} {} {} {}", server, powered, generator, body_head);
+        let blob = format!("{server} {powered} {generator} {body_head}");
         let version = rule
             .version
             .as_ref()

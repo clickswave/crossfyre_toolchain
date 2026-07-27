@@ -272,12 +272,12 @@ impl ScanArgs {
         let mut valid_urls = vec![];
         for mut url in self.url.drain(..) {
             if !url.starts_with("http://") && !url.starts_with("https://") {
-                url = format!("http://{}", url);
+                url = format!("http://{url}");
             }
 
             let mut parsed = match Url::parse(&url) {
                 Ok(u) => u.to_string(),
-                Err(e) => return Err(format!("Invalid URL `{}`: {}", url, e)),
+                Err(e) => return Err(format!("Invalid URL `{url}`: {e}")),
             };
 
             if !parsed.as_str().contains(&self.fuzz_marker) {

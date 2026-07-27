@@ -129,8 +129,8 @@ fn default_follow_redirects() -> bool {
 // ---------------------------------------------------------------------------
 
 pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    println!("Mach daemon listening on port {}", port);
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    println!("Mach daemon listening on port {port}");
 
     let db = Arc::new(db);
     let probe_client = Arc::new(
@@ -160,7 +160,7 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
                 if let Ok(n) = db_cleanup.delete_expired_probe_results().await
                     && n > 0
                 {
-                    println!("Cleaned up {} expired probe result(s)", n);
+                    println!("Cleaned up {n} expired probe result(s)");
                 }
             }
         });
@@ -176,7 +176,7 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
             if let Err(e) =
                 handle_connection(stream, db_clone, client_clone, client_noredir_clone).await
             {
-                eprintln!("Connection error from {}: {}", addr, e);
+                eprintln!("Connection error from {addr}: {e}");
             }
         });
     }
@@ -424,7 +424,7 @@ async fn dispatch(
                         operation_id,
                         status: "error".to_string(),
                         results: None,
-                        message: Some(format!("Invalid scan params: {}", e)),
+                        message: Some(format!("Invalid scan params: {e}")),
                     };
                 }
             };
@@ -435,7 +435,7 @@ async fn dispatch(
                     .create_operation(&operation_id, "scan", &params_str)
                     .await
                 {
-                    eprintln!("Failed to save operation: {}", e);
+                    eprintln!("Failed to save operation: {e}");
                 }
             }
 
@@ -463,7 +463,7 @@ async fn dispatch(
                         operation_id,
                         status: "error".to_string(),
                         results: None,
-                        message: Some(format!("Invalid probe params: {}", e)),
+                        message: Some(format!("Invalid probe params: {e}")),
                     };
                 }
             };
@@ -486,14 +486,14 @@ async fn dispatch(
                 operation_id,
                 status: "error".to_string(),
                 results: None,
-                message: Some(format!("DB reset failed: {}", e)),
+                message: Some(format!("DB reset failed: {e}")),
             },
         },
         unknown => DaemonResponse {
             operation_id,
             status: "error".to_string(),
             results: None,
-            message: Some(format!("Unknown operation: {}", unknown)),
+            message: Some(format!("Unknown operation: {unknown}")),
         },
     }
 }
@@ -572,7 +572,7 @@ async fn prepare_scan(
 
     let mut endpoint = params.endpoint.clone();
     if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
-        endpoint = format!("http://{}", endpoint);
+        endpoint = format!("http://{endpoint}");
     }
     if !endpoint.contains(&params.fuzz_marker) {
         if endpoint.ends_with('/') {
@@ -586,21 +586,21 @@ async fn prepare_scan(
 
     let wordlist_config = crate::libs::wordlist_config::WordlistConfig::new(&params.wordlist)
         .await
-        .map_err(|e| format!("Wordlist error: {}", e))?;
+        .map_err(|e| format!("Wordlist error: {e}"))?;
 
     let wordlist = match db.find_wordlist(&wordlist_config.hash).await {
         Ok(w) => w,
         Err(sqlx::Error::RowNotFound) => db
             .create_wordlist(&wordlist_config)
             .await
-            .map_err(|e| format!("DB: {}", e))?,
-        Err(e) => return Err(format!("DB: {}", e).into()),
+            .map_err(|e| format!("DB: {e}"))?,
+        Err(e) => return Err(format!("DB: {e}").into()),
     };
 
     let words = db
         .fetch_words(&wordlist.id)
         .await
-        .map_err(|e| format!("DB: {}", e))?;
+        .map_err(|e| format!("DB: {e}"))?;
 
     let mut scan_config = serde_json::json!({
         "urls": &config.url,
@@ -616,13 +616,13 @@ async fn prepare_scan(
     let scan_config_json = serde_json::to_string(&scan_config)?;
     let scan_config_hash = crate::libs::sha::sha512_from_string(scan_config_json)
         .await
-        .map_err(|e| format!("Hash: {}", e))?;
+        .map_err(|e| format!("Hash: {e}"))?;
 
     let mut scan = match db.find_scan(&scan_config_hash).await {
         Ok(s) if params.fresh_start => db
             .fresh_start_scan(&s.id)
             .await
-            .map_err(|e| format!("DB: {}", e))?,
+            .map_err(|e| format!("DB: {e}"))?,
         Ok(s) => s,
         Err(sqlx::Error::RowNotFound) => db
             .create_scan(
@@ -631,42 +631,42 @@ async fn prepare_scan(
                 &config.http_method.to_string(),
             )
             .await
-            .map_err(|e| format!("DB: {}", e))?,
-        Err(e) => return Err(format!("DB: {}", e).into()),
+            .map_err(|e| format!("DB: {e}"))?,
+        Err(e) => return Err(format!("DB: {e}").into()),
     };
 
     let logger = db
         .spawn_logger(&scan.id, &config.log_level.to_string())
         .await
-        .map_err(|e| format!("DB: {}", e))?;
+        .map_err(|e| format!("DB: {e}"))?;
 
     let urls = match db.find_urls(&scan.id).await {
         Ok(u) => u,
         Err(sqlx::Error::RowNotFound) => db
             .create_urls(&scan.id, &config.url)
             .await
-            .map_err(|e| format!("DB: {}", e))?,
-        Err(e) => return Err(format!("DB: {}", e).into()),
+            .map_err(|e| format!("DB: {e}"))?,
+        Err(e) => return Err(format!("DB: {e}").into()),
     };
 
     if scan.status == "created" {
         db.create_scan_entries(&urls, &scan, &words)
             .await
-            .map_err(|e| format!("DB: {}", e))?;
+            .map_err(|e| format!("DB: {e}"))?;
         scan.status = db
             .set_scan_status(&scan.id, "populated")
             .await
-            .map_err(|e| format!("DB: {}", e))?;
+            .map_err(|e| format!("DB: {e}"))?;
     }
 
     db.reset_halted_scan_entries(&scan.id)
         .await
-        .map_err(|e| format!("DB: {}", e))?;
+        .map_err(|e| format!("DB: {e}"))?;
 
     let (_, _, _, total) = db
         .fetch_total_scan_entries(scan.id)
         .await
-        .map_err(|e| format!("DB: {}", e))?;
+        .map_err(|e| format!("DB: {e}"))?;
 
     let scan_db = db.clone_with_config(config.clone());
     let scanner = Scanner::new(config, scan_db, logger, scan.id);
@@ -682,7 +682,7 @@ async fn run_scan(
     scanner
         .run_headless()
         .await
-        .map_err(|e| format!("Scan: {}", e).into())
+        .map_err(|e| format!("Scan: {e}").into())
 }
 
 // ---------------------------------------------------------------------------

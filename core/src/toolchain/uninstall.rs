@@ -94,7 +94,7 @@ pub fn cleanup_legacy_orionchain() {
 
     #[cfg(target_os = "linux")]
     for tool in EXTENSIONS {
-        let svc = format!("orion-{}.service", tool);
+        let svc = format!("orion-{tool}.service");
         let _ = cmd_as_invoking_user("systemctl")
             .args(["--user", "stop", &svc])
             .output();
@@ -106,7 +106,7 @@ pub fn cleanup_legacy_orionchain() {
             .join(&svc);
         if unit.exists() {
             let _ = std::fs::remove_file(&unit);
-            println!("[migrate] Removed old service {}", svc);
+            println!("[migrate] Removed old service {svc}");
         }
     }
     #[cfg(target_os = "linux")]
@@ -139,10 +139,9 @@ pub fn cleanup_legacy_orionchain() {
     if legacy_bin.exists() {
         match std::fs::remove_dir_all(legacy_bin) {
             Ok(_) => println!("[migrate] Removed /opt/orionchain"),
-            Err(e) => eprintln!(
-                "[migrate] Could not remove /opt/orionchain: {} (remove it manually)",
-                e
-            ),
+            Err(e) => {
+                eprintln!("[migrate] Could not remove /opt/orionchain: {e} (remove it manually)")
+            }
         }
     }
     if legacy_cfg.exists() {

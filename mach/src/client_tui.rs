@@ -275,7 +275,7 @@ fn render_logs(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
                 _ => (Color::Cyan, "INF"),
             };
             ListItem::new(Line::from(vec![
-                Span::styled(format!("[{}] ", prefix), Style::default().fg(level_color)),
+                Span::styled(format!("[{prefix}] "), Style::default().fg(level_color)),
                 Span::raw(entry.message.clone()),
             ]))
         })
@@ -326,7 +326,7 @@ pub async fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     tokio::task::spawn_blocking(move || run_blocking(rx, operation_id, total, poll_timeout))
         .await?
-        .map_err(|e| -> Box<dyn std::error::Error> { format!("{}", e).into() })
+        .map_err(|e| -> Box<dyn std::error::Error> { format!("{e}").into() })
 }
 
 fn run_blocking(

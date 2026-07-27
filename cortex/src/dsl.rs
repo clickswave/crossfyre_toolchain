@@ -486,7 +486,7 @@ fn to_str(v: &Val) -> String {
             if n.fract() == 0.0 {
                 format!("{}", *n as i64)
             } else {
-                format!("{}", n)
+                format!("{n}")
             }
         }
     }

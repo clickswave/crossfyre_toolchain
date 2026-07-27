@@ -365,7 +365,7 @@ async fn verify_key(
     key: &str,
 ) -> Result<UserTriple, Box<dyn std::error::Error>> {
     let res = client
-        .post(format!("{}/api/v1/cli/verify-key", api_url))
+        .post(format!("{api_url}/api/v1/cli/verify-key"))
         .json(&serde_json::json!({ "api_key": key }))
         .send()
         .await?;
@@ -384,7 +384,7 @@ async fn password_login(
     password: &str,
 ) -> Result<(String, UserTriple), Box<dyn std::error::Error>> {
     let res = client
-        .post(format!("{}/api/v1/cli/login", api_url))
+        .post(format!("{api_url}/api/v1/cli/login"))
         .json(&serde_json::json!({
             "identifier": identifier,
             "password": password,
@@ -411,7 +411,7 @@ async fn browser_login(
 ) -> Result<(String, UserTriple), Box<dyn std::error::Error>> {
     // 1. Start the device flow.
     let res = client
-        .post(format!("{}/api/v1/cli/device/start", api_url))
+        .post(format!("{api_url}/api/v1/cli/device/start"))
         .json(&serde_json::json!({
             "client_info": { "hostname": hostname(), "os": os_label(), "version": cli_version() }
         }))
@@ -453,7 +453,7 @@ async fn browser_login(
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 
         let res = client
-            .post(format!("{}/api/v1/cli/device/poll", api_url))
+            .post(format!("{api_url}/api/v1/cli/device/poll"))
             .json(&serde_json::json!({ "device_code": device_code }))
             .send()
             .await?;
@@ -583,7 +583,7 @@ pub async fn run_login(
     field("account", &format!("{} <{}>", who, account.email));
     field("file", &account_path(data_dir).display().to_string());
     end();
-    done(&format!("Signed in as {}", who));
+    done(&format!("Signed in as {who}"));
     hint("Next: register this host with `crossfyre node init`.");
     end();
     Ok(())
@@ -639,7 +639,7 @@ pub async fn ensure_logged_in(
         } else {
             &existing.username
         };
-        ok(&format!("Using saved login for {}.", who));
+        ok(&format!("Using saved login for {who}."));
         return Ok(existing);
     }
     step("Not logged in yet; signing in first.");

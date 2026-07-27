@@ -19,7 +19,7 @@ pub fn create_resolver(
             let ip = ip.trim();
             let addr: std::net::IpAddr = ip
                 .parse()
-                .map_err(|_| format!("invalid DNS server IP '{}'", ip))?;
+                .map_err(|_| format!("invalid DNS server IP '{ip}'"))?;
             // udp_and_tcp keeps the previous behaviour: UDP first, TCP fallback
             // for responses that do not fit.
             let ns = hickory_resolver::config::NameServerConfig::udp_and_tcp(addr);

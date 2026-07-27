@@ -393,10 +393,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         let done = m.completed.load(Ordering::Relaxed);
         let fail = m.errored.load(Ordering::Relaxed);
         let short = workflow_id.get(..8).unwrap_or(&workflow_id);
-        println!(
-            "[scan {}] claim in_flight={} done={} failed={}",
-            short, ifl, done, fail
-        );
+        println!("[scan {short}] claim in_flight={ifl} done={done} failed={fail}");
         Some(g)
     } else {
         None
@@ -408,7 +405,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
     // race to win, so we skip the HTTP round-trip).
     if consumption == "single" && !pre_claimed {
         let claim_res = http
-            .post(format!("{}/api/v1/claim-operation", api_url))
+            .post(format!("{api_url}/api/v1/claim-operation"))
             .json(&serde_json::json!({
                 "operation_id": op_id,
                 "node_id": node_id,
@@ -515,14 +512,14 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                             let _ = pub_clone
                                 .publish(result_subj.clone(), result_msg.to_string().into())
                                 .await;
-                            println!("[op] OK FOUND {} [{}]", probe_url, code);
+                            println!("[op] OK FOUND {probe_url} [{code}]");
                         } else {
                             // Not found - no result published
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[op] FAIL Cannot connect to mach daemon: {}", e);
+                    eprintln!("[op] FAIL Cannot connect to mach daemon: {e}");
                 }
             }
 
@@ -567,7 +564,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         if let Some(wl_url) = data["wordlist_url"].as_str() {
             // single chunk URL
             if !wl_url.is_empty() {
-                let tmp = format!("/tmp/cfx-wl-chunk-{}.txt", op_id);
+                let tmp = format!("/tmp/cfx-wl-chunk-{op_id}.txt");
                 println!("[op] Downloading wordlist chunk...");
                 if let Ok(resp) = reqwest::get(wl_url).await
                     && let Ok(body) = resp.text().await
@@ -588,8 +585,8 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                 let dl_url = first["url"].as_str().unwrap_or("");
                 if !dl_url.is_empty() {
                     let wl_id = first["id"].as_str().unwrap_or("wordlist");
-                    let tmp = format!("/tmp/cfx-wl-{}.txt", wl_id);
-                    println!("[op] Downloading wordlist: {}", wl_id);
+                    let tmp = format!("/tmp/cfx-wl-{wl_id}.txt");
+                    println!("[op] Downloading wordlist: {wl_id}");
                     if let Ok(resp) = reqwest::get(dl_url).await
                         && let Ok(body) = resp.text().await
                     {
@@ -690,17 +687,14 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             && let Some(rw_url) = data["recurse_wordlist_url"].as_str()
             && !rw_url.is_empty()
         {
-            let tmp = format!("/tmp/cfx-wl-recurse-{}.txt", op_id);
+            let tmp = format!("/tmp/cfx-wl-recurse-{op_id}.txt");
             if let Ok(resp) = reqwest::get(rw_url).await
                 && let Ok(body) = resp.text().await
             {
                 let _ = std::fs::write(&tmp, &body);
                 recurse_wordlist_path = tmp;
                 recurse_wl_lines = body.lines().filter(|l| !l.trim().is_empty()).count() as i64;
-                println!(
-                    "[op] recursion wordlist downloaded ({} lines)",
-                    recurse_wl_lines
-                );
+                println!("[op] recursion wordlist downloaded ({recurse_wl_lines} lines)");
             }
         }
 
@@ -741,8 +735,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             };
 
             println!(
-                "[op] mach scan (depth {}): {} method={} threads={} delay={}ms wordlist={} mode={}",
-                depth, endpoint, method, threads, delay, level_wordlist, mode
+                "[op] mach scan (depth {depth}): {endpoint} method={method} threads={threads} delay={delay}ms wordlist={level_wordlist} mode={mode}"
             );
 
             let mach_req = serde_json::json!({
@@ -872,14 +865,13 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                                 }
                                 "done" => {
                                     println!(
-                                        "[op] OK Scan level complete (depth {}): {} found so far",
-                                        depth, found_count
+                                        "[op] OK Scan level complete (depth {depth}): {found_count} found so far"
                                     );
                                     break;
                                 }
                                 "error" => {
                                     let msg = event["message"].as_str().unwrap_or("unknown error");
-                                    eprintln!("[op] FAIL mach error: {}", msg);
+                                    eprintln!("[op] FAIL mach error: {msg}");
                                     break;
                                 }
                                 _ => {} // ack, progress, not_found - skip
@@ -930,7 +922,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                         .await;
                 }
                 Err(e) => {
-                    eprintln!("[op] FAIL Cannot connect to mach daemon: {}", e);
+                    eprintln!("[op] FAIL Cannot connect to mach daemon: {e}");
                     let msg = serde_json::json!({
                         "type": "completed",
                         "job_id": format!("{}-{}", workflow_id, op_id),
@@ -1135,8 +1127,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             }
             Err(e) => {
                 eprintln!(
-                    "[op] FAIL mach daemon unreachable on 127.0.0.1:4441 for crawl ({}). Is `mach --daemon` running?",
-                    e
+                    "[op] FAIL mach daemon unreachable on 127.0.0.1:4441 for crawl ({e}). Is `mach --daemon` running?"
                 );
                 let msg = serde_json::json!({
                     "type": "completed",
@@ -1196,7 +1187,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         if !disable_active {
             if let Some(wl_url) = data["wordlist_url"].as_str() {
                 if !wl_url.is_empty() {
-                    let tmp = format!("/tmp/cfx-wl-sub-{}.txt", op_id);
+                    let tmp = format!("/tmp/cfx-wl-sub-{op_id}.txt");
                     if let Ok(resp) = reqwest::get(wl_url).await
                         && let Ok(body) = resp.text().await
                     {
@@ -1380,15 +1371,14 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                                 }
                                 "done" => {
                                     println!(
-                                        "[op] OK Enum level complete (depth {}): {} found so far",
-                                        depth, found_count
+                                        "[op] OK Enum level complete (depth {depth}): {found_count} found so far"
                                     );
                                     emit_progress(words_done, words_total, found_count).await;
                                     break;
                                 }
                                 "error" => {
                                     let msg = event["message"].as_str().unwrap_or("unknown");
-                                    eprintln!("[op] FAIL voyage error: {}", msg);
+                                    eprintln!("[op] FAIL voyage error: {msg}");
                                     break;
                                 }
                                 _ => {}
@@ -1403,7 +1393,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[op] FAIL Cannot connect to voyage daemon: {}", e);
+                    eprintln!("[op] FAIL Cannot connect to voyage daemon: {e}");
                     let msg = serde_json::json!({
                         "type": "completed",
                         "job_id": format!("{}-{}", workflow_id, op_id),
@@ -1511,7 +1501,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                         );
                     }
                     if let Err(e) = writer.write_all(req_str.as_bytes()).await {
-                        eprintln!("[ds {} {}:{}] write failed: {}", short_op, host, port, e);
+                        eprintln!("[ds {short_op} {host}:{port}] write failed: {e}");
                     }
 
                     let mut lines = BufReader::new(reader).lines();
@@ -1521,10 +1511,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                             // sampled probes so we can see the actual shape.
                             if log_sample {
                                 let snippet = &line[..line.len().min(250)];
-                                println!(
-                                    "[ds {} {}:{}] <- pulse: {}",
-                                    short_op, host, port, snippet
-                                );
+                                println!("[ds {short_op} {host}:{port}] <- pulse: {snippet}");
                             }
                             if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
                                 let results_arr =
@@ -1562,8 +1549,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                                             .await
                                         {
                                             Err(e) => eprintln!(
-                                                "[ds {} {}:{}] result publish failed: {}",
-                                                short_op, host, port, e
+                                                "[ds {short_op} {host}:{port}] result publish failed: {e}"
                                             ),
                                             Ok(_) => println!(
                                                 "[ds {} {}:{}] OPEN service={} latency={}",
@@ -1599,12 +1585,11 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                         }
                         Ok(None) => {
                             eprintln!(
-                                "[ds {} {}:{}] pulse closed connection without response",
-                                short_op, host, port
+                                "[ds {short_op} {host}:{port}] pulse closed connection without response"
                             );
                         }
                         Err(e) => {
-                            eprintln!("[ds {} {}:{}] read error: {}", short_op, host, port, e);
+                            eprintln!("[ds {short_op} {host}:{port}] read error: {e}");
                         }
                     }
 
@@ -1618,14 +1603,10 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                         .publish(result_subj, done_msg.to_string().into())
                         .await
                     {
-                        eprintln!(
-                            "[ds {} {}:{}] completed publish failed: {}",
-                            short_op, host, port, e
-                        );
+                        eprintln!("[ds {short_op} {host}:{port}] completed publish failed: {e}");
                     } else if log_sample {
                         println!(
-                            "[ds {} {}:{}] -> completed published (found={})",
-                            short_op, host, port, found_count
+                            "[ds {short_op} {host}:{port}] -> completed published (found={found_count})"
                         );
                     }
 
@@ -1642,8 +1623,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                         .await
                     {
                         eprintln!(
-                            "[ds {} {}:{}] operation_completed publish failed: {}",
-                            short_op, host, port, e
+                            "[ds {short_op} {host}:{port}] operation_completed publish failed: {e}"
                         );
                     }
                 }
@@ -1661,8 +1641,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                     if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
                         LAST_LOG.store(now_secs, Ordering::Relaxed);
                         eprintln!(
-                            "[op] FAIL pulse daemon unreachable on 127.0.0.1:4443 ({}). Is `pulse --daemon` running? (suppressing further messages for 60s)",
-                            e
+                            "[op] FAIL pulse daemon unreachable on 127.0.0.1:4443 ({e}). Is `pulse --daemon` running? (suppressing further messages for 60s)"
                         );
                     }
                     let msg = serde_json::json!({
@@ -1799,14 +1778,13 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                             }
                             "done" => {
                                 println!(
-                                    "[op] OK Scan complete: {} open ports found ({} events)",
-                                    found_count, total_events
+                                    "[op] OK Scan complete: {found_count} open ports found ({total_events} events)"
                                 );
                                 break;
                             }
                             "error" => {
                                 let msg = event["message"].as_str().unwrap_or("unknown");
-                                eprintln!("[op] FAIL pulse error: {}", msg);
+                                eprintln!("[op] FAIL pulse error: {msg}");
                                 break;
                             }
                             _ => {}
@@ -1846,8 +1824,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                 if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
                     LAST_LOG.store(now_secs, Ordering::Relaxed);
                     eprintln!(
-                        "[op] FAIL Cannot connect to pulse daemon: {} (suppressing further messages for 60s)",
-                        e
+                        "[op] FAIL Cannot connect to pulse daemon: {e} (suppressing further messages for 60s)"
                     );
                 }
                 let msg = serde_json::json!({
@@ -2012,8 +1989,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             }
             Err(e) => {
                 eprintln!(
-                    "[op] FAIL cortex daemon unreachable on 127.0.0.1:4445 ({}). Is `cortex --daemon` running?",
-                    e
+                    "[op] FAIL cortex daemon unreachable on 127.0.0.1:4445 ({e}). Is `cortex --daemon` running?"
                 );
                 let msg = serde_json::json!({
                     "type": "completed",
@@ -2150,8 +2126,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             }
             Err(e) => {
                 eprintln!(
-                    "[op] FAIL scout daemon unreachable on 127.0.0.1:4444 ({}). Is `scout --daemon` running?",
-                    e
+                    "[op] FAIL scout daemon unreachable on 127.0.0.1:4444 ({e}). Is `scout --daemon` running?"
                 );
                 let msg = serde_json::json!({
                     "type": "completed",
@@ -2199,7 +2174,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             .publish(status_subj.clone(), status_msg.to_string().into())
             .await;
     } else {
-        println!("[op] Unknown op_type: {}", op_type);
+        println!("[op] Unknown op_type: {op_type}");
     }
 }
 
@@ -2384,9 +2359,9 @@ impl NodePaths {
         Self {
             base: base.to_path_buf(),
             node_id: node_id.to_string(),
-            config: nodes_dir.join(format!("{}.toml", node_id)),
-            pid: nodes_dir.join(format!("{}.pid", node_id)),
-            network_dir: nodes_dir.join(format!("{}.network", node_id)),
+            config: nodes_dir.join(format!("{node_id}.toml")),
+            pid: nodes_dir.join(format!("{node_id}.pid")),
+            network_dir: nodes_dir.join(format!("{node_id}.network")),
         }
     }
 }
@@ -2404,18 +2379,15 @@ pub fn nodes_dir(base: &std::path::Path) -> std::path::PathBuf {
 pub fn discover_nodes(base: &std::path::Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     if !base.exists() {
         return Err(format!(
-            "config root {:?} does not exist - run `crossfyre node init` first",
-            base
+            "config root {base:?} does not exist - run `crossfyre node init` first"
         )
         .into());
     }
     let nd = nodes_dir(base);
     if !nd.is_dir() {
-        return Err(format!(
-            "{:?} is missing - run `crossfyre node init` to register a node",
-            nd
-        )
-        .into());
+        return Err(
+            format!("{nd:?} is missing - run `crossfyre node init` to register a node").into(),
+        );
     }
 
     let mut ids = Vec::new();
@@ -2434,10 +2406,7 @@ pub fn discover_nodes(base: &std::path::Path) -> Result<Vec<String>, Box<dyn std
             .and_then(|s| toml::from_str::<Config>(&s).map_err(|e| e.to_string()))
         {
             Ok(_) => ids.push(stem.to_string()),
-            Err(e) => eprintln!(
-                "[boot] WARNING: skipping {:?} - not a valid node config: {}",
-                path, e
-            ),
+            Err(e) => eprintln!("[boot] WARNING: skipping {path:?} - not a valid node config: {e}"),
         }
     }
     ids.sort();
@@ -2464,7 +2433,7 @@ pub fn migrate_legacy_config(base: &std::path::Path) {
         return; // already migrated
     }
     if let Err(e) = fs::create_dir_all(nodes_dir(base)) {
-        eprintln!("[migrate] Could not create nodes.d: {}", e);
+        eprintln!("[migrate] Could not create nodes.d: {e}");
         return;
     }
     if fs::rename(&legacy, &paths.config).is_ok() {
@@ -2505,7 +2474,7 @@ pub fn spawn_node_daemon(
             Some(child)
         }
         Err(e) => {
-            eprintln!("[boot] FAIL Could not start node {}: {}", id, e);
+            eprintln!("[boot] FAIL Could not start node {id}: {e}");
             None
         }
     }
@@ -2521,7 +2490,7 @@ pub async fn run_boot(
     force: bool,
     base: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Booting Crossfyre nodes from {:?}...", base);
+    println!("Booting Crossfyre nodes from {base:?}...");
 
     // Pull a pre-nodes.d single-node install into the new layout if present.
     migrate_legacy_config(base);
@@ -2581,7 +2550,7 @@ pub async fn run_boot(
                 let exited: Vec<String> = children.iter_mut()
                     .filter_map(|(id, child)| match child.try_wait() {
                         Ok(Some(status)) => {
-                            println!("[boot] Node {} exited ({}). Holding until its config changes.", id, status);
+                            println!("[boot] Node {id} exited ({status}). Holding until its config changes.");
                             Some(id.clone())
                         }
                         _ => None,
@@ -2596,14 +2565,14 @@ pub async fn run_boot(
                 //    is transient - skip this tick rather than tearing down.
                 let current = match discover_nodes(base) {
                     Ok(ids) => ids,
-                    Err(e) => { eprintln!("[boot] re-scan skipped: {}", e); continue; }
+                    Err(e) => { eprintln!("[boot] re-scan skipped: {e}"); continue; }
                 };
                 let current_set: std::collections::HashSet<&String> = current.iter().collect();
 
                 // 3. Start nodes that appeared and aren't already running/held.
                 for id in &current {
                     if !children.contains_key(id) && !dead.contains(id) {
-                        println!("[boot] New node detected: {}", id);
+                        println!("[boot] New node detected: {id}");
                         if let Some(child) = spawn_node_daemon(&exe, base, id, force) {
                             children.insert(id.clone(), child);
                         }
@@ -2644,7 +2613,7 @@ pub async fn run_boot(
     for (id, mut child) in children {
         let _ = child.kill();
         let _ = child.wait();
-        println!("[boot] Node {} stopped.", id);
+        println!("[boot] Node {id} stopped.");
     }
 
     Ok(())
@@ -3021,10 +2990,7 @@ pub async fn run_init(
         let node_name = json_resp["node_name"].as_str().unwrap_or("unknown");
         let last_seen = json_resp["last_seen"].as_str().unwrap_or("unknown");
         end();
-        error(&format!(
-            "Node '{}' is already running elsewhere",
-            node_name
-        ));
+        error(&format!("Node '{node_name}' is already running elsewhere"));
         field("Last heartbeat", last_seen);
         hint("Run with --force to disconnect it and take over:");
         hint("  crossfyre node init --force");
@@ -3138,7 +3104,7 @@ pub async fn run_init(
     // Write the default toolchain config (postgres connection for the
     // extension daemons) if this host doesn't have one yet.
     if let Err(e) = toolchain::config::load_or_create_config() {
-        warn(&format!("could not create toolchain config: {}", e));
+        warn(&format!("could not create toolchain config: {e}"));
     }
 
     // Install each extension assigned to this node: download, verify against
@@ -3146,20 +3112,17 @@ pub async fn run_init(
     // is built in - no external installer involved.
     for ext in &selected_extensions {
         if toolchain::config::is_extension_installed(ext) {
-            ok(&format!("{} already installed", ext));
+            ok(&format!("{ext} already installed"));
             let _ = toolchain::service::enable(ext);
             let _ = toolchain::service::start(ext);
             continue;
         }
-        working(&format!("Installing {}", ext));
+        working(&format!("Installing {ext}"));
         match toolchain::install::install_and_start(ext).await {
-            Ok(()) => ok(&format!("{} installed and started", ext)),
+            Ok(()) => ok(&format!("{ext} installed and started")),
             Err(e) => {
-                fail(&format!("{} install failed: {}", ext, e));
-                hint(&format!(
-                    "Run manually: crossfyre extension install {}",
-                    ext
-                ));
+                fail(&format!("{ext} install failed: {e}"));
+                hint(&format!("Run manually: crossfyre extension install {ext}"));
             }
         }
     }
@@ -3170,7 +3133,7 @@ pub async fn run_init(
         match toolchain::db::ensure_up() {
             Ok(()) => ok("Database ready"),
             Err(e) => {
-                fail(&format!("Database start failed: {}", e));
+                fail(&format!("Database start failed: {e}"));
                 hint("Run manually: crossfyre db up");
             }
         }
@@ -3187,7 +3150,7 @@ pub async fn run_init(
         match toolchain::service::install_node_service(&stable_exe, data_dir) {
             Ok(()) => ok("Node service installed and started (crossfyre-node)"),
             Err(e) => {
-                warn(&format!("could not install the node service: {}", e));
+                warn(&format!("could not install the node service: {e}"));
                 hint("Run the node manually with: sudo crossfyre node up");
             }
         }
@@ -3195,7 +3158,7 @@ pub async fn run_init(
 
     // Update node status on the server
     let status_res = client
-        .post(format!("{}/api/v1/node-status", api_url))
+        .post(format!("{api_url}/api/v1/node-status"))
         .json(&serde_json::json!({
             "api_key": &node_api_key,
             "status": "initialized",
@@ -3207,8 +3170,7 @@ pub async fn run_init(
 
     if let Err(e) = status_res {
         warn(&format!(
-            "could not update initialization status on the server: {}",
-            e
+            "could not update initialization status on the server: {e}"
         ));
     } else if let Ok(res) = status_res
         && !res.status().is_success()
@@ -3303,8 +3265,7 @@ pub async fn refresh_node_state(
         let node_name = json_resp["node_name"].as_str().unwrap_or("unknown");
         let last_seen = json_resp["last_seen"].as_str().unwrap_or("unknown");
         return Err(format!(
-            "node '{}' is already running elsewhere (last heartbeat {}). Use --force to take over.",
-            node_name, last_seen
+            "node '{node_name}' is already running elsewhere (last heartbeat {last_seen}). Use --force to take over."
         )
         .into());
     }
@@ -3384,13 +3345,10 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
         let existing_pid_str = fs::read_to_string(&pid_path).unwrap_or_default();
         let existing_pid: u32 = existing_pid_str.trim().parse().unwrap_or(0);
         if existing_pid > 0 {
-            let proc_path = format!("/proc/{}", existing_pid);
+            let proc_path = format!("/proc/{existing_pid}");
             if std::path::Path::new(&proc_path).exists() {
                 if force {
-                    println!(
-                        "  --force: Terminating existing daemon (PID {})...",
-                        existing_pid
-                    );
+                    println!("  --force: Terminating existing daemon (PID {existing_pid})...");
                     // SIGTERM the old process
                     unsafe {
                         libc::kill(existing_pid as i32, libc::SIGTERM);
@@ -3402,7 +3360,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                         "\n  A daemon is already running for node {}.",
                         paths.node_id
                     );
-                    eprintln!("  PID            : {}", existing_pid);
+                    eprintln!("  PID            : {existing_pid}");
                     eprintln!("\n  Take it over with:");
                     eprintln!("  crossfyre node daemon {} --force\n", paths.node_id);
                     std::process::exit(1);
@@ -3458,7 +3416,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
             eprintln!("    crossfyre node remove --inactive   # remove all server-deleted nodes");
             std::process::exit(1);
         }
-        eprintln!("\n  Cannot start daemon: {}", e);
+        eprintln!("\n  Cannot start daemon: {e}");
         eprintln!(
             "  crossfyre node daemon {} --force   # take over this node",
             paths.node_id
@@ -3508,7 +3466,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     .subscription_capacity(1_000_000);
 
     let nats_client = opts.connect(nats_url).await.map_err(|e| {
-        eprintln!("ERROR: Failed to connect to NATS: {}", e);
+        eprintln!("ERROR: Failed to connect to NATS: {e}");
         e
     })?;
 
@@ -3518,7 +3476,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
         .subscribe(job_subject.clone())
         .await
         .map_err(|e| {
-            eprintln!("ERROR: Failed to subscribe to {}: {}", job_subject, e);
+            eprintln!("ERROR: Failed to subscribe to {job_subject}: {e}");
             e
         })?;
 
@@ -3570,8 +3528,8 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
 
     // -- Send full host_status on first connect ------------------------------
     println!("Connected to Jetstream successfully.");
-    println!("Listening for commands on : {}", job_subject);
-    println!("Publishing status to      : {}", status_subject);
+    println!("Listening for commands on : {job_subject}");
+    println!("Publishing status to      : {status_subject}");
     println!("Daemon running. Press Ctrl+C to stop.");
 
     // -- Validate API key before going online -------------------------------
@@ -3618,10 +3576,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
             );
         }
         Err(e) => {
-            eprintln!(
-                "Warning: Could not reach backend on startup: {}. Continuing offline...",
-                e
-            );
+            eprintln!("Warning: Could not reach backend on startup: {e}. Continuing offline...");
         }
         _ => {}
     }
@@ -3637,7 +3592,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     // messages flow through the normal per-node subscription.
     {
         let resume_res = http_client
-            .post(format!("{}/api/v1/resume-pending", api_url))
+            .post(format!("{api_url}/api/v1/resume-pending"))
             .json(&serde_json::json!({ "api_key": api_key }))
             .send()
             .await;
@@ -3646,10 +3601,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 if let Ok(body) = r.json::<serde_json::Value>().await {
                     let n = body["data"]["republished"].as_u64().unwrap_or(0);
                     if n > 0 {
-                        println!(
-                            "[resume] Picking up {} pending operation(s) from prior run",
-                            n
-                        );
+                        println!("[resume] Picking up {n} pending operation(s) from prior run");
                     }
                 }
             }
@@ -3657,10 +3609,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 "[resume] Controller returned {} - skipping resume",
                 r.status()
             ),
-            Err(e) => eprintln!(
-                "[resume] Could not reach controller: {} - skipping resume",
-                e
-            ),
+            Err(e) => eprintln!("[resume] Could not reach controller: {e} - skipping resume"),
         }
     }
 
@@ -3718,13 +3667,13 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                     None => return,
                 }
             };
-            let durable = format!("node-{}", node_id_pc);
+            let durable = format!("node-{node_id_pc}");
             let consumer = match stream
                 .get_or_create_consumer(
                     durable.as_str(),
                     async_nats::jetstream::consumer::pull::Config {
                         durable_name: Some(durable.clone()),
-                        filter_subject: format!("cfx.work.{}", node_id_pc),
+                        filter_subject: format!("cfx.work.{node_id_pc}"),
                         ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
                         ack_wait: std::time::Duration::from_secs(900),
                         max_ack_pending,
@@ -3746,7 +3695,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                     return;
                 }
             };
-            println!("[work] worker ready (max in-flight={})", max_ack_pending);
+            println!("[work] worker ready (max in-flight={max_ack_pending})");
             while let Some(next) = messages.next().await {
                 let msg = match next {
                     Ok(m) => m,
@@ -3770,7 +3719,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 let ctx = OpCtx {
                     pub_clone: publisher_pc.clone(),
                     status_subj: status_subject_pc.clone(),
-                    result_subj: format!("cfx.results.{}", node_id_pc),
+                    result_subj: format!("cfx.results.{node_id_pc}"),
                     node_id: node_id_pc.clone(),
                     http: http_pc.clone(),
                     api_url: api_url_pc.clone(),
@@ -3810,7 +3759,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 println!("[refresh] Proactively refreshing NATS credentials...");
                 match refresh_node_state(&mut config, &config_path, &paths.network_dir, false).await {
                     Ok(()) => println!("[refresh] Done. New JWT will take effect on next daemon restart."),
-                    Err(e) => eprintln!("[refresh] Warning: credential refresh failed: {}. JWT still valid for ~1 day.", e),
+                    Err(e) => eprintln!("[refresh] Warning: credential refresh failed: {e}. JWT still valid for ~1 day."),
                 }
                 // we don't reconnect NATS in-flight - the current connection uses the
                 // old JWT which is still valid for ~1 more day. The refresh just ensures the
@@ -3898,7 +3847,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                     })
                 };
 
-                let status_res = http_client.post(format!("{}/api/v1/node-status", api_url))
+                let status_res = http_client.post(format!("{api_url}/api/v1/node-status"))
                     .json(&serde_json::json!({
                         "api_key": &api_key,
                         "status": "online",
@@ -3922,14 +3871,14 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                         break;
                     }
                     Ok(res) => eprintln!("Warning: Heartbeat returned {}", res.status()),
-                    Err(e) => eprintln!("Warning: Failed to send heartbeat: {}", e),
+                    Err(e) => eprintln!("Warning: Failed to send heartbeat: {e}"),
                 }
             }
 
             // Ctrl+C - graceful shutdown
             _ = tokio::signal::ctrl_c() => {
                 let reason = "user_initiated_shutdown";
-                println!("\nCtrl+C received. Reason: {}. Shutting down...", reason);
+                println!("\nCtrl+C received. Reason: {reason}. Shutting down...");
                 let msg = serde_json::json!({
                     "type": "terminated",
                     "reason": reason,
@@ -3960,7 +3909,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                         match cmd["type"].as_str() {
                             Some("terminate") => {
                                 let reason = cmd["reason"].as_str().unwrap_or("unknown");
-                                println!("\nReceived terminate command. Reason: {}. Shutting down...", reason);
+                                println!("\nReceived terminate command. Reason: {reason}. Shutting down...");
                                 let msg = serde_json::json!({
                                     "type": "terminated",
                                     "reason": reason,
@@ -3971,13 +3920,13 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             }
                             Some("cancel_workflow") => {
                                 if let Some(wid) = cmd["workflow_id"].as_str() {
-                                    println!("[op] Cancelling all in-flight ops for workflow {}", wid);
+                                    println!("[op] Cancelling all in-flight ops for workflow {wid}");
                                     cancel_workflow(wid);
                                 }
                             }
                             Some("resume_workflow") => {
                                 if let Some(wid) = cmd["workflow_id"].as_str() {
-                                    println!("[op] Clearing cancel flag for workflow {} (restart)", wid);
+                                    println!("[op] Clearing cancel flag for workflow {wid} (restart)");
                                     resume_workflow(wid);
                                 }
                             }
@@ -3988,7 +3937,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             Some("shell_exec") => {
                                 let command = cmd["command"].as_str().unwrap_or("").to_string();
                                 let command_id = cmd["command_id"].as_str().unwrap_or("").to_string();
-                                println!("[shell] exec: {}", command);
+                                println!("[shell] exec: {command}");
                                 let run = tokio::task::spawn_blocking(move || {
                                     std::process::Command::new("sh").arg("-c").arg(&command).output()
                                 })
@@ -4017,7 +3966,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                 let __ctx = OpCtx {
                                     pub_clone: publisher.clone(),
                                     status_subj: status_subject.clone(),
-                                    result_subj: format!("cfx.results.{}", node_id),
+                                    result_subj: format!("cfx.results.{node_id}"),
                                     node_id: node_id.clone(),
                                     http: http_client.clone(),
                                     api_url: api_url.clone(),
@@ -4053,26 +4002,26 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                     targets,
                                 };
                                 let pub_clone = publisher.clone();
-                                let subj = format!("cfx.results.{}", node_id);
+                                let subj = format!("cfx.results.{node_id}");
                                 tokio::spawn(async move {
                                     let result = executor::execute_job(ctx, pub_clone, subj).await;
                                     match result {
                                         executor::ExecutionResult::Completed { code } =>
-                                            println!("[execute] job={} completed code={}", job_id, code),
+                                            println!("[execute] job={job_id} completed code={code}"),
                                         executor::ExecutionResult::Error { message } =>
-                                            eprintln!("[execute] job={} error: {}", job_id, message),
+                                            eprintln!("[execute] job={job_id} error: {message}"),
                                     }
                                 });
                             }
                             Some("install_extension") => {
                                 let ext = cmd["extension"].as_str().unwrap_or("").to_string();
-                                println!("\n[install] Installing extension: {}", ext);
+                                println!("\n[install] Installing extension: {ext}");
 
                                 // Built-in package manager: download + verify +
                                 // enable + start in one call.
                                 let msg = match toolchain::install::install_and_start(&ext).await {
                                     Ok(()) => {
-                                        println!("[install] OK {} installed and started", ext);
+                                        println!("[install] OK {ext} installed and started");
                                         serde_json::json!({
                                             "type": "extension_installed",
                                             "extension": ext,
@@ -4081,7 +4030,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                         })
                                     }
                                     Err(e) => {
-                                        eprintln!("[install] FAIL Failed to install {}: {}", ext, e);
+                                        eprintln!("[install] FAIL Failed to install {ext}: {e}");
                                         serde_json::json!({
                                             "type": "extension_install_failed",
                                             "extension": ext,
@@ -4096,7 +4045,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                 println!("\n[toolchain] Starting PostgreSQL...");
                                 let success = match toolchain::db::ensure_up() {
                                     Ok(()) => { println!("[toolchain] OK PostgreSQL started"); true }
-                                    Err(e) => { eprintln!("[toolchain] FAIL PostgreSQL failed to start: {}", e); false }
+                                    Err(e) => { eprintln!("[toolchain] FAIL PostgreSQL failed to start: {e}"); false }
                                 };
 
                                 let msg = serde_json::json!({
@@ -4125,7 +4074,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                     Ok(true) => (true, true),
                                     Ok(false) => (true, false), // already current
                                     Err(e) => {
-                                        eprintln!("[update] FAIL {}", e);
+                                        eprintln!("[update] FAIL {e}");
                                         (false, false)
                                     }
                                 };
@@ -4147,11 +4096,11 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             }
                             Some("remove_extension") => {
                                 let ext = cmd["extension"].as_str().unwrap_or("").to_string();
-                                println!("\n[remove] Removing extension: {}", ext);
+                                println!("\n[remove] Removing extension: {ext}");
 
                                 let remove_ok = match toolchain::install::remove(&ext) {
-                                    Ok(()) => { println!("[remove] OK {} removed", ext); true }
-                                    Err(e) => { eprintln!("[remove] FAIL Failed to remove {}: {}", ext, e); false }
+                                    Ok(()) => { println!("[remove] OK {ext} removed"); true }
+                                    Err(e) => { eprintln!("[remove] FAIL Failed to remove {ext}: {e}"); false }
                                 };
 
                                 let msg = serde_json::json!({
@@ -4164,11 +4113,11 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             }
                             Some("restart_extension") => {
                                 let ext = cmd["extension"].as_str().unwrap_or("").to_string();
-                                println!("\n[restart] Restarting extension: {}", ext);
+                                println!("\n[restart] Restarting extension: {ext}");
 
                                 let msg = match toolchain::service::restart(&ext) {
                                     Ok(()) => {
-                                        println!("[restart] OK {} restarted", ext);
+                                        println!("[restart] OK {ext} restarted");
                                         serde_json::json!({
                                             "type": "extension_restarted",
                                             "extension": ext,
@@ -4177,7 +4126,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                         })
                                     }
                                     Err(e) => {
-                                        eprintln!("[restart] FAIL Failed to restart {}: {}", ext, e);
+                                        eprintln!("[restart] FAIL Failed to restart {ext}: {e}");
                                         serde_json::json!({
                                             "type": "extension_restart_failed",
                                             "extension": ext,
@@ -4190,16 +4139,16 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             }
                             Some("reinstall_extension") => {
                                 let ext = cmd["extension"].as_str().unwrap_or("").to_string();
-                                println!("\n[reinstall] Reinstalling extension: {}", ext);
+                                println!("\n[reinstall] Reinstalling extension: {ext}");
 
                                 let success = match toolchain::install::install(&ext, true).await {
                                     Ok(()) => {
-                                        println!("[reinstall] OK {} reinstalled, starting service...", ext);
+                                        println!("[reinstall] OK {ext} reinstalled, starting service...");
                                         let _ = toolchain::service::start(&ext);
                                         true
                                     }
                                     Err(e) => {
-                                        eprintln!("[reinstall] FAIL Failed to reinstall {}: {}", ext, e);
+                                        eprintln!("[reinstall] FAIL Failed to reinstall {ext}: {e}");
                                         false
                                     }
                                 };
@@ -4214,11 +4163,11 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             }
                             Some("stop_extension") => {
                                 let ext = cmd["extension"].as_str().unwrap_or("").to_string();
-                                println!("\n[stop] Stopping extension: {}", ext);
+                                println!("\n[stop] Stopping extension: {ext}");
 
                                 let success = match toolchain::service::stop(&ext) {
-                                    Ok(()) => { println!("[stop] OK {} stopped", ext); true }
-                                    Err(e) => { eprintln!("[stop] FAIL Failed to stop {}: {}", ext, e); false }
+                                    Ok(()) => { println!("[stop] OK {ext} stopped"); true }
+                                    Err(e) => { eprintln!("[stop] FAIL Failed to stop {ext}: {e}"); false }
                                 };
 
                                 let msg = serde_json::json!({
@@ -4230,7 +4179,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                 let _ = publisher.publish(status_subject.clone(), msg.to_string().into()).await;
                             }
                             _ => {
-                                println!("Received unknown job command: {}", body);
+                                println!("Received unknown job command: {body}");
                             }
                         }
                     }
@@ -4272,10 +4221,10 @@ pub async fn run_script(
 
     match result {
         executor::ExecutionResult::Completed { code } => {
-            println!("\nScript finished with code {}", code);
+            println!("\nScript finished with code {code}");
         }
         executor::ExecutionResult::Error { message } => {
-            eprintln!("\nScript failed: {}", message);
+            eprintln!("\nScript failed: {message}");
             std::process::exit(1);
         }
     }

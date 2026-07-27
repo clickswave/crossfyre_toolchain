@@ -880,7 +880,7 @@ impl MachDb {
                         .push_bind(Option::<Vec<u8>>::None);
                 });
                 if let Err(e) = qb.build().execute(&self.pool).await {
-                    eprintln!("Error inserting scan entries: {:?}", e);
+                    eprintln!("Error inserting scan entries: {e:?}");
                     return Err(e);
                 }
             }
@@ -967,7 +967,7 @@ impl MachDb {
             "words",
             "wordlists",
         ] {
-            sqlx::query(&format!("DROP TABLE IF EXISTS {} CASCADE", table))
+            sqlx::query(&format!("DROP TABLE IF EXISTS {table} CASCADE"))
                 .execute(&self.pool)
                 .await?;
         }

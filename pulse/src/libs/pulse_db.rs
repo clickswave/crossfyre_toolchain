@@ -13,8 +13,8 @@ impl PulseDb {
         password: Option<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let admin_url = match password {
-            Some(pw) => format!("postgresql://{}:{}@{}:{}/postgres", user, pw, host, port),
-            None => format!("postgresql://{}@{}:{}/postgres", user, host, port),
+            Some(pw) => format!("postgresql://{user}:{pw}@{host}:{port}/postgres"),
+            None => format!("postgresql://{user}@{host}:{port}/postgres"),
         };
 
         let admin_pool = PgPoolOptions::new()
@@ -39,8 +39,8 @@ impl PulseDb {
 
         // Connect to the pulse database
         let db_url = match password {
-            Some(pw) => format!("postgresql://{}:{}@{}:{}/pulse", user, pw, host, port),
-            None => format!("postgresql://{}@{}:{}/pulse", user, host, port),
+            Some(pw) => format!("postgresql://{user}:{pw}@{host}:{port}/pulse"),
+            None => format!("postgresql://{user}@{host}:{port}/pulse"),
         };
 
         let pool = PgPoolOptions::new()

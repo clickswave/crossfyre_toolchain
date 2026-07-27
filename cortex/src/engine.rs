@@ -281,19 +281,19 @@ fn normalize_base(t: &str) -> Option<String> {
             } else {
                 "http"
             };
-            format!("{}://{}", scheme, t)
+            format!("{scheme}://{t}")
         } else {
-            format!("http://{}", t)
+            format!("http://{t}")
         }
     } else {
-        format!("http://{}", t)
+        format!("http://{t}")
     };
     let url = reqwest::Url::parse(&with_scheme).ok()?;
     let scheme = url.scheme();
     let host = url.host_str()?;
     let base = match url.port() {
-        Some(p) => format!("{}://{}:{}", scheme, host, p),
-        None => format!("{}://{}", scheme, host),
+        Some(p) => format!("{scheme}://{host}:{p}"),
+        None => format!("{scheme}://{host}"),
     };
     Some(base)
 }

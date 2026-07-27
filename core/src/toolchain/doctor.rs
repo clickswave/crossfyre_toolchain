@@ -15,7 +15,7 @@ fn check(label: &str, is_ok: bool, fix: &str) -> bool {
     } else {
         fail(label);
         if !fix.is_empty() {
-            println!("      {}", dim(&format!("-> {}", fix)));
+            println!("      {}", dim(&format!("-> {fix}")));
         }
     }
     is_ok
@@ -95,11 +95,11 @@ pub async fn run(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
     section("Daemons");
     for (ext, port) in EXTENSION_PORTS {
         if config::is_extension_installed(ext) {
-            let label = format!("{} daemon listening on {}", ext, port);
+            let label = format!("{ext} daemon listening on {port}");
             if !check(
                 &label,
                 port_open(*port),
-                &format!("crossfyre extension start {}", ext),
+                &format!("crossfyre extension start {ext}"),
             ) {
                 failed += 1;
             }
@@ -117,11 +117,11 @@ pub async fn run(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // -- Connectivity ---------------------------------------------------------
     section("Connectivity");
     let cdn = super::install::BASE_URL;
-    let cdn_ok = reqwest::get(format!("{}/manifest.json", cdn))
+    let cdn_ok = reqwest::get(format!("{cdn}/manifest.json"))
         .await
         .map(|r| r.status().is_success())
         .unwrap_or(false);
-    let label = format!("release CDN reachable {}", dim(&format!("({})", cdn)));
+    let label = format!("release CDN reachable {}", dim(&format!("({cdn})")));
     if !check(
         &label,
         cdn_ok,

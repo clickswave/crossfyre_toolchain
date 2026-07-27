@@ -77,10 +77,10 @@ pub fn platform_key() -> String {
 }
 
 pub async fn fetch_manifest() -> Result<Manifest, Box<dyn std::error::Error>> {
-    let url = format!("{}/manifest.json", BASE_URL);
+    let url = format!("{BASE_URL}/manifest.json");
     let resp = reqwest::get(&url)
         .await
-        .map_err(|e| format!("could not fetch release manifest ({}): {}", url, e))?;
+        .map_err(|e| format!("could not fetch release manifest ({url}): {e}"))?;
     if !resp.status().is_success() {
         return Err(format!(
             "release manifest fetch failed: {} returned {}",
@@ -92,7 +92,7 @@ pub async fn fetch_manifest() -> Result<Manifest, Box<dyn std::error::Error>> {
     let manifest: Manifest = resp
         .json()
         .await
-        .map_err(|e| format!("release manifest is malformed: {}", e))?;
+        .map_err(|e| format!("release manifest is malformed: {e}"))?;
     Ok(manifest)
 }
 
@@ -103,13 +103,10 @@ fn resolve_artifact<'m>(
     let comp = manifest
         .components
         .get(component)
-        .ok_or_else(|| format!("component '{}' not in release manifest", component))?;
+        .ok_or_else(|| format!("component '{component}' not in release manifest"))?;
     let key = platform_key();
     let artifact = comp.artifacts.get(&key).ok_or_else(|| {
-        format!(
-            "no '{}' artifact for platform {} in release manifest",
-            component, key
-        )
+        format!("no '{component}' artifact for platform {key} in release manifest")
     })?;
     Ok((comp, artifact))
 }
@@ -122,7 +119,7 @@ async fn download_verified(
     let url = format!("{}/{}", BASE_URL, artifact.file);
     let resp = reqwest::get(&url)
         .await
-        .map_err(|e| format!("download failed ({}): {}", url, e))?;
+        .map_err(|e| format!("download failed ({url}): {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("download failed: {} returned {}", url, resp.status()).into());
     }
@@ -155,7 +152,7 @@ fn extract_zip(zip_path: &Path, extract_dir: &Path) -> Result<(), Box<dyn std::e
             &extract_dir.to_string_lossy(),
         ])
         .status()
-        .map_err(|e| format!("unzip not found or failed to execute: {}", e))?;
+        .map_err(|e| format!("unzip not found or failed to execute: {e}"))?;
     if !status.success() {
         return Err(format!("Failed to extract {}", zip_path.display()).into());
     }
@@ -218,7 +215,7 @@ async fn install_one(
         working(&format!("Downloading {ext} {}", dim(&comp.version)));
     }
 
-    let tmp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    let tmp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {e}"))?;
     let zip_path = tmp_dir.path().join(&artifact.file);
     download_verified(artifact, &zip_path).await?;
 
@@ -531,10 +528,7 @@ pub async fn self_update(
     // the CLI's. That mismatch made every `crossfyre update` re-run forever.
     if comp.version == current_version {
         if !quiet {
-            println!(
-                "crossfyre is already at {} - nothing to update.",
-                current_version
-            );
+            println!("crossfyre is already at {current_version} - nothing to update.");
         }
         return Ok(false);
     }

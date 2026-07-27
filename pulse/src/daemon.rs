@@ -22,8 +22,8 @@ fn default_response() -> String {
 }
 
 pub async fn run(port: u16, db: PulseDb) -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    println!("Pulse daemon listening on port {}", port);
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    println!("Pulse daemon listening on port {port}");
 
     let db = Arc::new(db);
 
@@ -36,7 +36,7 @@ pub async fn run(port: u16, db: PulseDb) -> Result<(), Box<dyn std::error::Error
                 if let Ok(n) = db_c.delete_expired_probe_results().await
                     && n > 0
                 {
-                    println!("Cleaned {} expired probe result(s)", n);
+                    println!("Cleaned {n} expired probe result(s)");
                 }
             }
         });
@@ -48,7 +48,7 @@ pub async fn run(port: u16, db: PulseDb) -> Result<(), Box<dyn std::error::Error
         let db_clone = Arc::clone(&db);
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, db_clone).await {
-                eprintln!("Connection error from {}: {}", addr, e);
+                eprintln!("Connection error from {addr}: {e}");
             }
         });
     }
@@ -106,7 +106,7 @@ async fn handle_stream_scan(
         Err(e) => {
             write_json(
                 &mut writer,
-                &StreamEvent::error(&format!("Invalid scan params: {}", e)),
+                &StreamEvent::error(&format!("Invalid scan params: {e}")),
             )
             .await?;
             return Ok(());

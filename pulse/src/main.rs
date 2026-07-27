@@ -174,12 +174,11 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
         std::process::exit(1);
     }
 
-    let stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+    let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
         .await
         .map_err(|_| {
             format!(
-                "Pulse daemon is not running on port {}. Start it first with: pulse --daemon",
-                port
+                "Pulse daemon is not running on port {port}. Start it first with: pulse --daemon"
             )
         })?;
 
@@ -203,17 +202,16 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
 
 async fn handle_scan_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let mut payload: serde_json::Value =
-        serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;
+        serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     payload["operation"] = serde_json::json!("probe");
     payload["response"] = serde_json::json!("instant");
 
-    let stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+    let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
         .await
         .map_err(|_| {
             format!(
-                "Pulse daemon is not running on port {}. Start it first with: pulse --daemon",
-                port
+                "Pulse daemon is not running on port {port}. Start it first with: pulse --daemon"
             )
         })?;
     let _ = stream.set_nodelay(true);
@@ -225,7 +223,7 @@ async fn handle_scan_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn s
 
     let mut lines = BufReader::new(reader).lines();
     if let Some(line) = lines.next_line().await? {
-        println!("{}", line);
+        println!("{line}");
     }
 
     Ok(())

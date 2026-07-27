@@ -7,7 +7,7 @@ pub async fn sha512_from_string(string: String) -> Result<String, Box<dyn std::e
     let mut hasher = sha2::Sha512::new();
     hasher.update(string);
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(format!("{result:x}"))
 }
 
 // get sha512 hash of a file
@@ -22,5 +22,5 @@ pub async fn sha512_from_filepath(file_path: &str) -> Result<String, std::io::Er
         hasher.update(&buffer[..n]);
     }
     let hash_result = hasher.finalize();
-    Ok(format!("{:x}", hash_result))
+    Ok(format!("{hash_result:x}"))
 }
