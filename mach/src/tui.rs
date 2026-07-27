@@ -89,10 +89,18 @@ impl Tui {
     }
     pub async fn run(&mut self, mut terminal: ratatui::DefaultTerminal) -> Result<(), sqlx::Error> {
         while !self.halt {
-            if !self.config.output_path.is_empty() && self.output_written == false && self.status == "Completed" {
+            if !self.config.output_path.is_empty()
+                && self.output_written == false
+                && self.status == "Completed"
+            {
                 self.status = "Writing Output".to_string();
-                let export_results = crate::exporter::Exporter::new(self.scan_id, &self.db, &self.config.output_path)
-                    .export(&self.config.output_format.to_string()).await;
+                let export_results = crate::exporter::Exporter::new(
+                    self.scan_id,
+                    &self.db,
+                    &self.config.output_path,
+                )
+                .export(&self.config.output_format.to_string())
+                .await;
                 match export_results {
                     Ok(_) => {
                         self.output_written = true;

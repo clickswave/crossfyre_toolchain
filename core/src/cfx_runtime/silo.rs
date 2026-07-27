@@ -4,9 +4,8 @@ use pyo3::prelude::*;
 /// In the future this can resolve paths from Cloudflare R2 or a local cache.
 #[pyfunction]
 fn load(path: &str) -> PyResult<Vec<String>> {
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        pyo3::exceptions::PyFileNotFoundError::new_err(format!("{}: {}", path, e))
-    })?;
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| pyo3::exceptions::PyFileNotFoundError::new_err(format!("{}: {}", path, e)))?;
     Ok(contents
         .lines()
         .filter(|l| !l.is_empty())

@@ -125,7 +125,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fuzz_args = match cli.command {
         Some(Commands::Scan(args)) => args,
         Some(Commands::ScanExec(_)) | Some(Commands::Db(_)) | None => {
-            eprintln!("No command given. Use `mach scan`, `mach scan-exec`, `mach db`, or `mach --daemon`. Try --help.");
+            eprintln!(
+                "No command given. Use `mach scan`, `mach scan-exec`, `mach db`, or `mach --daemon`. Try --help."
+            );
             std::process::exit(1);
         }
     };
@@ -146,7 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if fuzz_args.launch_delay > 0 {
-        std::thread::sleep(std::time::Duration::from_secs(fuzz_args.launch_delay as u64));
+        std::thread::sleep(std::time::Duration::from_secs(
+            fuzz_args.launch_delay as u64,
+        ));
     }
 
     fuzz_args
@@ -190,7 +194,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Read the "ack" event to get operation_id and total
     let mut lines = BufReader::new(reader).lines();
-    let ack_line = lines.next_line().await?.ok_or("Daemon closed connection before ack")?;
+    let ack_line = lines
+        .next_line()
+        .await?
+        .ok_or("Daemon closed connection before ack")?;
     let ack: StreamEvent = serde_json::from_str(&ack_line)?;
 
     if ack.kind == "error" {
@@ -210,7 +217,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(ev) => {
                     let done = ev.kind == "done";
                     let _ = tx.send(ev);
-                    if done { break; }
+                    if done {
+                        break;
+                    }
                 }
                 Err(_) => {}
             }
@@ -257,8 +266,8 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
 
 async fn handle_fuzz_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the user's JSON, inject operation="probe" and response="instant"
-    let mut payload: serde_json::Value = serde_json::from_str(&args.json)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;
 
     payload["operation"] = serde_json::json!("probe");
     payload["response"] = serde_json::json!("instant");

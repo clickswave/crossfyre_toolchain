@@ -6,7 +6,6 @@ pub fn uuid() -> String {
 }
 
 pub fn user_agent(user_agents: Option<Vec<String>>) -> String {
-
     let mut rng = rand::rng();
     if let Some(agents) = user_agents {
         if !agents.is_empty() {

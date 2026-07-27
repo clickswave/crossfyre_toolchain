@@ -1,9 +1,9 @@
-use base64::Engine;
 use crate::libs::cli_args;
 use crate::libs::mach_db::Work;
-use reqwest::Client;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, COOKIE};
+use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use reqwest::Client;
+use reqwest::header::{AUTHORIZATION, COOKIE, HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Debug)]
 pub struct Prober {
@@ -35,7 +35,9 @@ pub enum ProbeError {
 impl std::fmt::Display for ProbeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ProbeError::UnsupportedMethod(method) => write!(f, "Unsupported HTTP method: {}", method),
+            ProbeError::UnsupportedMethod(method) => {
+                write!(f, "Unsupported HTTP method: {}", method)
+            }
             ProbeError::RequestFailed(err) => write!(f, "Request failed: {}", err),
         }
     }
@@ -58,7 +60,6 @@ impl Prober {
         } else {
             config.user_agent.clone()
         };
-
 
         let mut headers_map = HeaderMap::new();
 
@@ -103,7 +104,11 @@ impl Prober {
                         .map_err(|e| format!("Invalid basic auth header: {}", e))?,
                 );
             } else {
-                return Err(format!("Invalid basic_auth format '{}'. Use 'username:password'", config.basic_auth).into());
+                return Err(format!(
+                    "Invalid basic_auth format '{}'. Use 'username:password'",
+                    config.basic_auth
+                )
+                .into());
             }
         }
 
@@ -121,7 +126,11 @@ impl Prober {
         })
     }
 
-    pub async fn probe_url(&self, work: &Work, random_agent: bool) -> Result<ProbeResult, ProbeError> {
+    pub async fn probe_url(
+        &self,
+        work: &Work,
+        random_agent: bool,
+    ) -> Result<ProbeResult, ProbeError> {
         let url = &work.url;
         let method = &work.method;
 
@@ -173,19 +182,19 @@ impl Prober {
                 let headers = valid_response
                     .headers()
                     .iter()
-                    .map(|(name, value)| format!("{}: {}", name.as_str(), value.to_str().unwrap_or("")))
+                    .map(|(name, value)| {
+                        format!("{}: {}", name.as_str(), value.to_str().unwrap_or(""))
+                    })
                     .collect::<Vec<String>>();
                 let headers_length = headers.len().clone();
                 (Some(headers), headers_length as i64)
             }
             false => {
-                let headers_length = valid_response
-                    .headers()
-                    .len();
+                let headers_length = valid_response.headers().len();
 
                 dbg!(headers_length);
                 (None, headers_length as i64)
-            },
+            }
         };
         // if save_response_body is true, we need to get body as bytes anyway but,
         // if its false, check for content length first
@@ -194,12 +203,8 @@ impl Prober {
             true => {
                 let valid_body = valid_response.bytes().await;
                 match valid_body {
-                    Ok(bytes) => {
-                        (Some(bytes.to_vec()), bytes.len() as i64)
-                    }
-                    Err(_) => {
-                        (None, 0)
-                    }
+                    Ok(bytes) => (Some(bytes.to_vec()), bytes.len() as i64),
+                    Err(_) => (None, 0),
                 }
             }
             false => {
@@ -212,7 +217,7 @@ impl Prober {
                             Ok(bytes) => (None, bytes.len() as i64),
                             Err(_) => (None, 0),
                         }
-                    },
+                    }
                 }
             }
         };

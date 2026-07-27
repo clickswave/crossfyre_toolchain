@@ -2,9 +2,10 @@ use crate::scanner::StreamEvent;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
@@ -12,7 +13,6 @@ use ratatui::{
     widgets::{
         Block, Borders, Cell, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState,
     },
-    Frame, Terminal,
 };
 use std::io;
 use tokio::sync::mpsc;
@@ -76,9 +76,8 @@ impl AppState {
                                 subdomain,
                                 source: event.source.unwrap_or_default(),
                             });
-                            self.table_state.select(Some(
-                                self.found_subdomains.len().saturating_sub(1),
-                            ));
+                            self.table_state
+                                .select(Some(self.found_subdomains.len().saturating_sub(1)));
                         }
                     }
                     _ => self.not_found += 1,
@@ -180,11 +179,7 @@ fn render_home(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
         0.0
     };
     let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Progress"),
-        )
+        .block(Block::default().borders(Borders::ALL).title("Progress"))
         .gauge_style(Style::default().fg(Color::Cyan))
         .ratio(ratio)
         .label(format!("{} / {}", state.scanned, state.total));
@@ -202,21 +197,22 @@ fn render_home(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
         ),
         Span::raw("   "),
         Span::styled("Not Found: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(state.not_found.to_string(), Style::default().fg(Color::White)),
+        Span::styled(
+            state.not_found.to_string(),
+            Style::default().fg(Color::White),
+        ),
     ]))
     .block(Block::default().borders(Borders::ALL).title("Stats"));
     frame.render_widget(counters, chunks[1]);
 
     // Found subdomains table
-    let header_cells = ["Subdomain", "Source"]
-        .iter()
-        .map(|h| {
-            Cell::from(*h).style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-        });
+    let header_cells = ["Subdomain", "Source"].iter().map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+    });
     let table_header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = state
@@ -254,10 +250,7 @@ fn render_logs(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
                 _ => (Color::Cyan, "INF"),
             };
             ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", prefix),
-                    Style::default().fg(level_color),
-                ),
+                Span::styled(format!("[{}] ", prefix), Style::default().fg(level_color)),
                 Span::raw(entry.message.clone()),
             ]))
         })

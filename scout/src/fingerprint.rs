@@ -6,7 +6,7 @@
 use crate::signatures;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
 
@@ -28,9 +28,15 @@ pub struct FpParams {
     #[serde(default)]
     pub auth: Option<AuthSpec>,
 }
-fn d_timeout() -> u64 { 8000 }
-fn d_true() -> bool { true }
-fn d_tier() -> u8 { 2 }
+fn d_timeout() -> u64 {
+    8000
+}
+fn d_true() -> bool {
+    true
+}
+fn d_tier() -> u8 {
+    2
+}
 
 /// Request auth resolved from a credential (see core::creds `AuthContext`).
 #[derive(Debug, serde::Deserialize, Clone, Default)]
@@ -42,12 +48,13 @@ pub struct AuthSpec {
 }
 impl AuthSpec {
     pub fn to_header_map(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{HeaderMap, HeaderName, HeaderValue, COOKIE};
+        use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
         let mut hm = HeaderMap::new();
         for (k, v) in &self.headers {
-            if let (Ok(name), Ok(val)) =
-                (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v))
-            {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(k.as_bytes()),
+                HeaderValue::from_str(v),
+            ) {
                 hm.insert(name, val);
             }
         }
@@ -67,13 +74,17 @@ pub async fn run(params: FpParams, tx: mpsc::UnboundedSender<Value>) {
     let (scheme, host, port, url) = match normalize_target(&params.target) {
         Some(t) => t,
         None => {
-            let _ = tx.send(json!({"type":"error","message":format!("invalid target: {}", params.target)}));
+            let _ = tx.send(
+                json!({"type":"error","message":format!("invalid target: {}", params.target)}),
+            );
             return;
         }
     };
 
     let mut builder = Client::builder()
-        .timeout(std::time::Duration::from_millis(params.timeout_ms.max(1000)))
+        .timeout(std::time::Duration::from_millis(
+            params.timeout_ms.max(1000),
+        ))
         .redirect(if params.follow_redirects {
             reqwest::redirect::Policy::limited(5)
         } else {
@@ -157,7 +168,11 @@ pub async fn run(params: FpParams, tx: mpsc::UnboundedSender<Value>) {
         // "version-inferred" (a backported fix could make it a false positive).
         if let Some(ver) = d.version.as_deref().filter(|v| !v.is_empty()) {
             for rule in crate::cve::match_cves(&d.name, ver) {
-                let headline = if rule.title.is_empty() { rule.cve.clone() } else { rule.title.clone() };
+                let headline = if rule.title.is_empty() {
+                    rule.cve.clone()
+                } else {
+                    rule.title.clone()
+                };
                 let _ = tx.send(json!({
                     "type": "finding",
                     "data": {
@@ -250,7 +265,11 @@ fn normalize_target(t: &str) -> Option<(String, String, u16, String)> {
         t.to_string()
     } else if let Some((_, p)) = t.rsplit_once(':') {
         if p.chars().all(|c| c.is_ascii_digit()) && !p.is_empty() {
-            let scheme = if p == "443" || p == "8443" { "https" } else { "http" };
+            let scheme = if p == "443" || p == "8443" {
+                "https"
+            } else {
+                "http"
+            };
             format!("{}://{}", scheme, t)
         } else {
             format!("http://{}", t)

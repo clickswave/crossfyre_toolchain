@@ -89,7 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scan_args = match cli.command {
         Some(Commands::Scan(args)) => args,
         _ => {
-            eprintln!("No command given. Use `pulse scan`, `pulse scan-exec`, `pulse db`, or `pulse --daemon`. Try --help.");
+            eprintln!(
+                "No command given. Use `pulse scan`, `pulse scan-exec`, `pulse db`, or `pulse --daemon`. Try --help."
+            );
             std::process::exit(1);
         }
     };
@@ -131,7 +133,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Read the ack event
     let mut lines = BufReader::new(reader).lines();
-    let ack_line = lines.next_line().await?.ok_or("Daemon closed connection before ack")?;
+    let ack_line = lines
+        .next_line()
+        .await?
+        .ok_or("Daemon closed connection before ack")?;
     let ack: StreamEvent = serde_json::from_str(&ack_line)?;
 
     if ack.kind == "error" {
@@ -151,7 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(ev) => {
                     let done = ev.kind == "done";
                     let _ = tx.send(ev);
-                    if done { break; }
+                    if done {
+                        break;
+                    }
                 }
                 Err(_) => {}
             }
@@ -170,9 +177,14 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
         std::process::exit(1);
     }
 
-    let stream = TcpStream::connect(format!("127.0.0.1:{}", port)).await.map_err(|_| {
-        format!("Pulse daemon is not running on port {}. Start it first with: pulse --daemon", port)
-    })?;
+    let stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+        .await
+        .map_err(|_| {
+            format!(
+                "Pulse daemon is not running on port {}. Start it first with: pulse --daemon",
+                port
+            )
+        })?;
 
     let request = serde_json::json!({ "operation": "db_reset", "response": "instant" });
     let (reader, mut writer) = tokio::io::split(stream);
@@ -193,15 +205,20 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
 }
 
 async fn handle_scan_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let mut payload: serde_json::Value = serde_json::from_str(&args.json)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;
 
     payload["operation"] = serde_json::json!("probe");
     payload["response"] = serde_json::json!("instant");
 
-    let stream = TcpStream::connect(format!("127.0.0.1:{}", port)).await.map_err(|_| {
-        format!("Pulse daemon is not running on port {}. Start it first with: pulse --daemon", port)
-    })?;
+    let stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+        .await
+        .map_err(|_| {
+            format!(
+                "Pulse daemon is not running on port {}. Start it first with: pulse --daemon",
+                port
+            )
+        })?;
     let _ = stream.set_nodelay(true);
 
     let (reader, mut writer) = tokio::io::split(stream);

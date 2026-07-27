@@ -2,15 +2,17 @@ use crate::scanner::StreamEvent;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState},
-    Frame, Terminal,
+    widgets::{
+        Block, Borders, Cell, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    },
 };
 use std::io;
 use tokio::sync::mpsc;
@@ -80,7 +82,8 @@ impl AppState {
                                 body: event.body_length.unwrap_or(0),
                                 headers: event.headers_length.unwrap_or(0),
                             });
-                            self.table_state.select(Some(self.found_urls.len().saturating_sub(1)));
+                            self.table_state
+                                .select(Some(self.found_urls.len().saturating_sub(1)));
                         }
                     }
                     "not_found" => self.not_found += 1,
@@ -92,14 +95,23 @@ impl AppState {
                     level: event.log_level.unwrap_or_else(|| "info".to_string()),
                     message: event.message.unwrap_or_default(),
                 });
-                self.log_state.select(Some(self.logs.len().saturating_sub(1)));
+                self.log_state
+                    .select(Some(self.logs.len().saturating_sub(1)));
             }
             "done" => {
                 self.done = true;
-                if let Some(f) = event.found { self.found = f; }
-                if let Some(n) = event.not_found { self.not_found = n; }
-                if let Some(e) = event.error { self.errors = e; }
-                if let Some(t) = event.total { self.scanned = t; }
+                if let Some(f) = event.found {
+                    self.found = f;
+                }
+                if let Some(n) = event.not_found {
+                    self.not_found = n;
+                }
+                if let Some(e) = event.error {
+                    self.errors = e;
+                }
+                if let Some(t) = event.total {
+                    self.scanned = t;
+                }
                 self.logs.push(LogEntry {
                     level: "info".to_string(),
                     message: format!(
@@ -107,7 +119,8 @@ impl AppState {
                         self.found, self.not_found, self.errors
                     ),
                 });
-                self.log_state.select(Some(self.logs.len().saturating_sub(1)));
+                self.log_state
+                    .select(Some(self.logs.len().saturating_sub(1)));
             }
             _ => {}
         }
@@ -116,21 +129,39 @@ impl AppState {
 
 fn render_header<'a>(state: &'a AppState) -> Paragraph<'a> {
     let status_str = if state.done { "DONE" } else { "RUNNING" };
-    let status_color = if state.done { Color::Green } else { Color::Yellow };
+    let status_color = if state.done {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
     let home_style = if state.screen == Screen::Home {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else {
         Style::default().fg(Color::DarkGray)
     };
     let logs_style = if state.screen == Screen::Logs {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
     Paragraph::new(Line::from(vec![
-        Span::styled("  MACH  ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(status_str, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  MACH  ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            status_str,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("    "),
         Span::styled("[h] Home", home_style),
         Span::raw("  "),
@@ -168,10 +199,18 @@ fn render_home(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
     let counters = Paragraph::new(Line::from(vec![
         Span::raw("  "),
         Span::styled("Found: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(state.found.to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            state.found.to_string(),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("   "),
         Span::styled("Not Found: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(state.not_found.to_string(), Style::default().fg(Color::White)),
+        Span::styled(
+            state.not_found.to_string(),
+            Style::default().fg(Color::White),
+        ),
         Span::raw("   "),
         Span::styled("Errors: ", Style::default().fg(Color::DarkGray)),
         Span::styled(state.errors.to_string(), Style::default().fg(Color::Red)),
@@ -180,29 +219,42 @@ fn render_home(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
     frame.render_widget(counters, chunks[1]);
 
     // Found URLs table
-    let header_cells = ["Code", "Body", "Headers", "URL"]
-        .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+    let header_cells = ["Code", "Body", "Headers", "URL"].iter().map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+    });
     let table_header = Row::new(header_cells).height(1);
 
-    let rows: Vec<Row> = state.found_urls.iter().map(|fu| {
-        let code_color = match fu.code.chars().next() {
-            Some('2') => Color::Green,
-            Some('3') => Color::Yellow,
-            Some('4') | Some('5') => Color::Red,
-            _ => Color::White,
-        };
-        Row::new(vec![
-            Cell::from(fu.code.clone()).style(Style::default().fg(code_color)),
-            Cell::from(fu.body.to_string()),
-            Cell::from(fu.headers.to_string()),
-            Cell::from(fu.url.clone()),
-        ])
-    }).collect();
+    let rows: Vec<Row> = state
+        .found_urls
+        .iter()
+        .map(|fu| {
+            let code_color = match fu.code.chars().next() {
+                Some('2') => Color::Green,
+                Some('3') => Color::Yellow,
+                Some('4') | Some('5') => Color::Red,
+                _ => Color::White,
+            };
+            Row::new(vec![
+                Cell::from(fu.code.clone()).style(Style::default().fg(code_color)),
+                Cell::from(fu.body.to_string()),
+                Cell::from(fu.headers.to_string()),
+                Cell::from(fu.url.clone()),
+            ])
+        })
+        .collect();
 
     let table = Table::new(
         rows,
-        [Constraint::Length(6), Constraint::Length(10), Constraint::Length(10), Constraint::Min(0)],
+        [
+            Constraint::Length(6),
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Min(0),
+        ],
     )
     .header(table_header)
     .block(Block::default().borders(Borders::ALL).title("Found URLs"))
@@ -212,18 +264,22 @@ fn render_home(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::R
 }
 
 fn render_logs(frame: &mut Frame, state: &mut AppState, area: ratatui::layout::Rect) {
-    let items: Vec<ListItem> = state.logs.iter().map(|entry| {
-        let (level_color, prefix) = match entry.level.as_str() {
-            "error" => (Color::Red, "ERR"),
-            "warn"  => (Color::Yellow, "WRN"),
-            "debug" => (Color::DarkGray, "DBG"),
-            _       => (Color::Cyan, "INF"),
-        };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("[{}] ", prefix), Style::default().fg(level_color)),
-            Span::raw(entry.message.clone()),
-        ]))
-    }).collect();
+    let items: Vec<ListItem> = state
+        .logs
+        .iter()
+        .map(|entry| {
+            let (level_color, prefix) = match entry.level.as_str() {
+                "error" => (Color::Red, "ERR"),
+                "warn" => (Color::Yellow, "WRN"),
+                "debug" => (Color::DarkGray, "DBG"),
+                _ => (Color::Cyan, "INF"),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("[{}] ", prefix), Style::default().fg(level_color)),
+                Span::raw(entry.message.clone()),
+            ]))
+        })
+        .collect();
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Logs"))
@@ -268,11 +324,9 @@ pub async fn run(
     total: usize,
     poll_timeout: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    tokio::task::spawn_blocking(move || {
-        run_blocking(rx, operation_id, total, poll_timeout)
-    })
-    .await?
-    .map_err(|e| -> Box<dyn std::error::Error> { format!("{}", e).into() })
+    tokio::task::spawn_blocking(move || run_blocking(rx, operation_id, total, poll_timeout))
+        .await?
+        .map_err(|e| -> Box<dyn std::error::Error> { format!("{}", e).into() })
 }
 
 fn run_blocking(

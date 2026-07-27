@@ -21,4 +21,4 @@ mod imp;
 #[path = "baseline.rs"]
 mod imp;
 
-pub use imp::{bring_up, process_network_config, TunnelGuard};
+pub use imp::{TunnelGuard, bring_up, process_network_config};

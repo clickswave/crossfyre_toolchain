@@ -30,11 +30,7 @@ struct CfxContext {
 static CONTEXT: Mutex<Option<CfxContext>> = Mutex::new(None);
 
 /// Inject the NATS bridge context before running a .cfx script.
-pub fn inject(
-    node_id: String,
-    job_id: String,
-    tx: std::sync::mpsc::Sender<CfxMessage>,
-) {
+pub fn inject(node_id: String, job_id: String, tx: std::sync::mpsc::Sender<CfxMessage>) {
     *CONTEXT.lock().unwrap() = Some(CfxContext {
         node_id,
         job_id,
@@ -92,10 +88,7 @@ impl ServerHandle {
                 data: value,
             })
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to send result: {}",
-                    e
-                ))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send result: {}", e))
             })
     }
 
@@ -107,10 +100,7 @@ impl ServerHandle {
                 message: message.to_string(),
             })
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to send log: {}",
-                    e
-                ))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send log: {}", e))
             })
     }
 

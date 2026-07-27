@@ -110,7 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if !enum_args.disable_active_enum && enum_args.wordlist_path.is_empty() {
-        eprintln!("Error: --wordlist-path is required for active enumeration (or use --disable-active-enum / --interactive)");
+        eprintln!(
+            "Error: --wordlist-path is required for active enumeration (or use --disable-active-enum / --interactive)"
+        );
         std::process::exit(1);
     }
 
@@ -222,10 +224,7 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-async fn handle_enum_exec(
-    args: ScanExecArgs,
-    port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_enum_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the user's JSON, inject operation="probe" and response="instant"
     let mut payload: serde_json::Value =
         serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;

@@ -23,11 +23,10 @@ impl PulseDb {
             .await?;
 
         // Create pulse database if it doesn't exist
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'pulse')",
-        )
-        .fetch_one(&admin_pool)
-        .await?;
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'pulse')")
+                .fetch_one(&admin_pool)
+                .await?;
 
         if !exists {
             sqlx::query("CREATE DATABASE pulse")
@@ -63,8 +62,10 @@ impl PulseDb {
                 status          TEXT NOT NULL DEFAULT 'pending',
                 created_at      TEXT DEFAULT NOW()::TEXT,
                 updated_at      TEXT DEFAULT NOW()::TEXT
-            )"
-        ).execute(&self.pool).await?;
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS scan_entries (
@@ -79,8 +80,10 @@ impl PulseDb {
                 created_at      TEXT DEFAULT NOW()::TEXT,
                 updated_at      TEXT DEFAULT NOW()::TEXT,
                 UNIQUE (scan_id, host, port)
-            )"
-        ).execute(&self.pool).await?;
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS logs (
@@ -89,8 +92,10 @@ impl PulseDb {
                 level           TEXT DEFAULT 'info',
                 message         TEXT NOT NULL,
                 created_at      TEXT DEFAULT NOW()::TEXT
-            )"
-        ).execute(&self.pool).await?;
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS operations (
@@ -101,8 +106,10 @@ impl PulseDb {
                 result          TEXT,
                 created_at      TEXT DEFAULT NOW()::TEXT,
                 updated_at      TEXT DEFAULT NOW()::TEXT
-            )"
-        ).execute(&self.pool).await?;
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS probe_results (
@@ -116,8 +123,10 @@ impl PulseDb {
                 latency_ms      BIGINT DEFAULT 0,
                 created_at      TIMESTAMPTZ DEFAULT NOW(),
                 delete_after    TIMESTAMPTZ NOT NULL
-            )"
-        ).execute(&self.pool).await?;
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
@@ -158,11 +167,9 @@ impl PulseDb {
     }
 
     pub async fn truncate_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
-        sqlx::query(
-            "TRUNCATE probe_results, logs, scan_entries, operations, scans CASCADE",
-        )
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("TRUNCATE probe_results, logs, scan_entries, operations, scans CASCADE")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

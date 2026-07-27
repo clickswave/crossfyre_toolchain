@@ -7,7 +7,10 @@ pub async fn execute(
 ) -> Result<(), Vec<NegativeResult>> {
     let mut negatives = vec![];
     for port in ports {
-        let request = reqwest_client.get(format!("http://{domain}:{port}")).send().await;
+        let request = reqwest_client
+            .get(format!("http://{domain}:{port}"))
+            .send()
+            .await;
         match request {
             Ok(_) => return Ok(()),
             Err(e) => match e.is_timeout() {

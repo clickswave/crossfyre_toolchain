@@ -19,7 +19,11 @@ pub async fn serve(
     store: Arc<Store>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = cfg.http_addr.parse()?;
-    let ctx = Ctx { cfg, store, scheme: "http" };
+    let ctx = Ctx {
+        cfg,
+        store,
+        scheme: "http",
+    };
     let app = Router::new().fallback(capture).with_state(ctx);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("oast http capture on {addr}");
@@ -48,7 +52,11 @@ pub async fn serve_https(
     };
     let addr: SocketAddr = cfg.https_addr.parse()?;
     let tls = axum_server::tls_rustls::RustlsConfig::from_config(server_config);
-    let ctx = Ctx { cfg, store, scheme: "https" };
+    let ctx = Ctx {
+        cfg,
+        store,
+        scheme: "https",
+    };
     let app = api_router().fallback(capture).with_state(ctx);
     tracing::info!("oast https api+capture on {addr}");
     axum_server::bind_rustls(addr, tls)
@@ -71,7 +79,12 @@ async fn capture(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let full_host = host.split(':').next().unwrap_or(&host).trim().to_ascii_lowercase();
+    let full_host = host
+        .split(':')
+        .next()
+        .unwrap_or(&host)
+        .trim()
+        .to_ascii_lowercase();
 
     let mut raw = format!("{method} {uri}\n");
     for (k, v) in parts.headers.iter() {

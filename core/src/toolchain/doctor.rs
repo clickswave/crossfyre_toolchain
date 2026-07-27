@@ -3,7 +3,7 @@
 // plane, leftover OrionChain installs.
 
 use super::ui::{dim, done, error, fail, ok, section, step, title, warn};
-use super::{config, EXTENSION_PORTS};
+use super::{EXTENSION_PORTS, config};
 use std::path::Path;
 
 /// Render one check as a styled status line. Returns true when the check
@@ -22,7 +22,9 @@ fn check(label: &str, is_ok: bool, fix: &str) -> bool {
 }
 
 fn has_binary(name: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else { return false };
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
     std::env::split_paths(&path).any(|dir| dir.join(name).is_file())
 }
 
@@ -30,7 +32,8 @@ fn port_open(port: u16) -> bool {
     std::net::TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
         std::time::Duration::from_millis(300),
-    ).is_ok()
+    )
+    .is_ok()
 }
 
 pub async fn run(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -40,24 +43,52 @@ pub async fn run(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Host tooling -----------------------------------------------------
     section("Host tooling");
-    if !check("docker available", has_binary("docker"),
-        "install Docker (the toolchain database runs in a container)") { failed += 1; }
-    if !check("unzip available", has_binary("unzip"),
-        "install unzip (used to unpack extension downloads)") { failed += 1; }
+    if !check(
+        "docker available",
+        has_binary("docker"),
+        "install Docker (the toolchain database runs in a container)",
+    ) {
+        failed += 1;
+    }
+    if !check(
+        "unzip available",
+        has_binary("unzip"),
+        "install unzip (used to unpack extension downloads)",
+    ) {
+        failed += 1;
+    }
     #[cfg(target_os = "linux")]
-    if !check("iproute2 (`ip`) available", has_binary("ip"),
-        "install iproute2 (needed for VPN network namespaces)") { failed += 1; }
+    if !check(
+        "iproute2 (`ip`) available",
+        has_binary("ip"),
+        "install iproute2 (needed for VPN network namespaces)",
+    ) {
+        failed += 1;
+    }
 
     // -- Toolchain config ---------------------------------------------------
     section("Config");
     let config_path = config::get_config_path();
     if config_path.exists() {
-        let label = format!("toolchain config parses {}", dim(&format!("({})", config_path.display())));
-        if !check(&label, config::load_config().is_ok(),
-            "fix or delete the file; a fresh default is written on next init/db command") { failed += 1; }
+        let label = format!(
+            "toolchain config parses {}",
+            dim(&format!("({})", config_path.display()))
+        );
+        if !check(
+            &label,
+            config::load_config().is_ok(),
+            "fix or delete the file; a fresh default is written on next init/db command",
+        ) {
+            failed += 1;
+        }
     } else {
-        step(&format!("no toolchain config yet {}",
-            dim(&format!("({}) - created on first init", config_path.display()))));
+        step(&format!(
+            "no toolchain config yet {}",
+            dim(&format!(
+                "({}) - created on first init",
+                config_path.display()
+            ))
+        ));
     }
 
     // -- Daemons ------------------------------------------------------------
@@ -65,53 +96,91 @@ pub async fn run(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
     for (ext, port) in EXTENSION_PORTS {
         if config::is_extension_installed(ext) {
             let label = format!("{} daemon listening on {}", ext, port);
-            if !check(&label, port_open(*port),
-                &format!("crossfyre extension start {}", ext)) { failed += 1; }
+            if !check(
+                &label,
+                port_open(*port),
+                &format!("crossfyre extension start {}", ext),
+            ) {
+                failed += 1;
+            }
         } else {
             step(&format!("{} {}", ext, dim("not installed")));
         }
     }
     if let Ok(c) = config::load_config() {
         let label = format!("postgres listening on {}", c.postgres.port);
-        if !check(&label, port_open(c.postgres.port), "crossfyre db start") { failed += 1; }
+        if !check(&label, port_open(c.postgres.port), "crossfyre db start") {
+            failed += 1;
+        }
     }
 
     // -- Connectivity ---------------------------------------------------------
     section("Connectivity");
     let cdn = super::install::BASE_URL;
-    let cdn_ok = reqwest::get(format!("{}/manifest.json", cdn)).await
+    let cdn_ok = reqwest::get(format!("{}/manifest.json", cdn))
+        .await
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     let label = format!("release CDN reachable {}", dim(&format!("({})", cdn)));
-    if !check(&label, cdn_ok, "check network/DNS; installs and updates need this") { failed += 1; }
+    if !check(
+        &label,
+        cdn_ok,
+        "check network/DNS; installs and updates need this",
+    ) {
+        failed += 1;
+    }
 
     // Control plane, per registered node config.
     if let Ok(ids) = crate::discover_nodes(base) {
         for id in ids {
             let paths = crate::NodePaths::new(base, &id);
-            let Ok(text) = std::fs::read_to_string(&paths.config) else { continue };
-            let Ok(cfg) = toml::from_str::<crate::Config>(&text) else { continue };
+            let Ok(text) = std::fs::read_to_string(&paths.config) else {
+                continue;
+            };
+            let Ok(cfg) = toml::from_str::<crate::Config>(&text) else {
+                continue;
+            };
             let reachable = reqwest::Client::new()
                 .get(format!("{}/api/v1", cfg.api_url))
                 .timeout(std::time::Duration::from_secs(5))
-                .send().await.is_ok();
+                .send()
+                .await
+                .is_ok();
             let short = &id[..id.len().min(8)];
-            let label = format!("control plane reachable for node {} {}",
-                short, dim(&format!("({})", cfg.api_url)));
-            if !check(&label, reachable,
-                "check the api_url in this node's config and your network") { failed += 1; }
+            let label = format!(
+                "control plane reachable for node {} {}",
+                short,
+                dim(&format!("({})", cfg.api_url))
+            );
+            if !check(
+                &label,
+                reachable,
+                "check the api_url in this node's config and your network",
+            ) {
+                failed += 1;
+            }
         }
     } else {
-        step(&format!("no nodes registered yet {}", dim("(run `crossfyre node init`)")));
+        step(&format!(
+            "no nodes registered yet {}",
+            dim("(run `crossfyre node init`)")
+        ));
     }
 
     // -- Legacy OrionChain leftovers ------------------------------------------
     section("Legacy");
     let legacy_opt = Path::new("/opt/orionchain").exists();
-    let legacy_cfg = super::sudo_user::invoking_user_config_dir().join("orionchain").exists();
+    let legacy_cfg = super::sudo_user::invoking_user_config_dir()
+        .join("orionchain")
+        .exists();
     if legacy_opt || legacy_cfg {
         warn("legacy OrionChain install detected");
-        println!("      {}", dim("-> re-run `sudo crossfyre node init` to migrate, or remove /opt/orionchain and ~/.config/orionchain manually"));
+        println!(
+            "      {}",
+            dim(
+                "-> re-run `sudo crossfyre node init` to migrate, or remove /opt/orionchain and ~/.config/orionchain manually"
+            )
+        );
     } else {
         ok("no legacy OrionChain leftovers");
     }

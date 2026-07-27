@@ -80,7 +80,11 @@ fn version_in_range(v: &[u64], r: &CveRule) -> bool {
 /// non-numeric segment ("1.21.0" -> [1,21,0], "2.4.49" -> [2,4,49]).
 fn parse_ver(s: &str) -> Vec<u64> {
     let mut out = Vec::new();
-    for part in s.trim().trim_start_matches('v').split(['.', '-', '+', '_', ' ']) {
+    for part in s
+        .trim()
+        .trim_start_matches('v')
+        .split(['.', '-', '+', '_', ' '])
+    {
         if part.is_empty() {
             continue;
         }

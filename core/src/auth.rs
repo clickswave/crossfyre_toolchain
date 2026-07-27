@@ -170,12 +170,27 @@ pub struct LoginFlags {
 /// missing combinations (especially under `--no-prompt`). May prompt for a
 /// missing half of a username/password pair when interactive.
 fn resolve_method(flags: &mut LoginFlags) -> Result<Method, String> {
-    let has_key = flags.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
-    let has_user = flags.username.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
-    let has_pass = flags.password.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+    let has_key = flags
+        .api_key
+        .as_deref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    let has_user = flags
+        .username
+        .as_deref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    let has_pass = flags
+        .password
+        .as_deref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
 
     if has_key && (has_user || has_pass) {
-        return Err("Choose one login method: either --api-key, or --username/--password (not both).".into());
+        return Err(
+            "Choose one login method: either --api-key, or --username/--password (not both)."
+                .into(),
+        );
     }
 
     if has_key {
@@ -186,17 +201,25 @@ fn resolve_method(flags: &mut LoginFlags) -> Result<Method, String> {
         // A credential pair: fill the missing half interactively, else error.
         if !has_user {
             if flags.no_prompt {
-                return Err("--password was given without --username (and --no-prompt is set).".into());
+                return Err(
+                    "--password was given without --username (and --no-prompt is set).".into(),
+                );
             }
-            let u: String = dialoguer::Input::new().with_prompt("Username or email").interact_text()
+            let u: String = dialoguer::Input::new()
+                .with_prompt("Username or email")
+                .interact_text()
                 .map_err(|e| e.to_string())?;
             flags.username = Some(u);
         }
         if !has_pass {
             if flags.no_prompt {
-                return Err("--username was given without --password (and --no-prompt is set).".into());
+                return Err(
+                    "--username was given without --password (and --no-prompt is set).".into(),
+                );
             }
-            let p = dialoguer::Password::new().with_prompt("Password").interact()
+            let p = dialoguer::Password::new()
+                .with_prompt("Password")
+                .interact()
                 .map_err(|e| e.to_string())?;
             flags.password = Some(p);
         }
@@ -213,7 +236,11 @@ fn resolve_method(flags: &mut LoginFlags) -> Result<Method, String> {
     }
 
     // Interactive: let the operator choose.
-    let choices = ["Browser (open crossfyre.io to approve)", "API key", "Username & password"];
+    let choices = [
+        "Browser (open crossfyre.io to approve)",
+        "API key",
+        "Username & password",
+    ];
     let pick = dialoguer::Select::new()
         .with_prompt("How would you like to log in?")
         .items(&choices)
@@ -222,15 +249,21 @@ fn resolve_method(flags: &mut LoginFlags) -> Result<Method, String> {
         .map_err(|e| e.to_string())?;
     match pick {
         1 => {
-            let k: String = dialoguer::Input::new().with_prompt("Account API key").interact_text()
+            let k: String = dialoguer::Input::new()
+                .with_prompt("Account API key")
+                .interact_text()
                 .map_err(|e| e.to_string())?;
             flags.api_key = Some(k);
             Ok(Method::ApiKey)
         }
         2 => {
-            let u: String = dialoguer::Input::new().with_prompt("Username or email").interact_text()
+            let u: String = dialoguer::Input::new()
+                .with_prompt("Username or email")
+                .interact_text()
                 .map_err(|e| e.to_string())?;
-            let p = dialoguer::Password::new().with_prompt("Password").interact()
+            let p = dialoguer::Password::new()
+                .with_prompt("Password")
+                .interact()
                 .map_err(|e| e.to_string())?;
             flags.username = Some(u);
             flags.password = Some(p);
@@ -247,7 +280,10 @@ fn require_tos(flags: &LoginFlags) -> Result<(), String> {
         return Ok(());
     }
     if flags.no_prompt {
-        return Err("You must pass --agree-tos to accept the Terms of Service in non-interactive mode.".into());
+        return Err(
+            "You must pass --agree-tos to accept the Terms of Service in non-interactive mode."
+                .into(),
+        );
     }
     println!();
     section("Terms of Service");
@@ -271,7 +307,8 @@ pub async fn perform_login(
     data_dir: &Path,
     mut flags: LoginFlags,
 ) -> Result<Account, Box<dyn std::error::Error>> {
-    let method = resolve_method(&mut flags).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+    let method =
+        resolve_method(&mut flags).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     require_tos(&flags).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     let client = reqwest::Client::new();
@@ -307,14 +344,20 @@ type UserTriple = (String, String, String);
 
 fn user_from_data(body: &serde_json::Value) -> Result<UserTriple, Box<dyn std::error::Error>> {
     let u = &body["data"]["user"];
-    let id = u["id"].as_str().ok_or("login response missing user id")?.to_string();
+    let id = u["id"]
+        .as_str()
+        .ok_or("login response missing user id")?
+        .to_string();
     let username = u["username"].as_str().unwrap_or("").to_string();
     let email = u["email"].as_str().unwrap_or("").to_string();
     Ok((id, username, email))
 }
 
 fn body_message(body: &serde_json::Value) -> String {
-    body["message"].as_str().unwrap_or("Login failed").to_string()
+    body["message"]
+        .as_str()
+        .unwrap_or("Login failed")
+        .to_string()
 }
 
 async fn verify_key(
@@ -355,7 +398,10 @@ async fn password_login(
     if !ok {
         return Err(body_message(&body).into());
     }
-    let api_key = body["data"]["api_key"].as_str().ok_or("login response missing api_key")?.to_string();
+    let api_key = body["data"]["api_key"]
+        .as_str()
+        .ok_or("login response missing api_key")?
+        .to_string();
     let user = user_from_data(&body)?;
     Ok((api_key, user))
 }
@@ -378,7 +424,10 @@ async fn browser_login(
     }
     let body: serde_json::Value = res.json().await?;
     let d = &body["data"];
-    let device_code = d["device_code"].as_str().ok_or("device start: missing device_code")?.to_string();
+    let device_code = d["device_code"]
+        .as_str()
+        .ok_or("device start: missing device_code")?
+        .to_string();
     let verify_uri = d["verification_uri_complete"]
         .as_str()
         .or_else(|| d["verification_uri"].as_str())
@@ -413,7 +462,10 @@ async fn browser_login(
         let status = body["data"]["status"].as_str().unwrap_or("");
         match status {
             "approved" => {
-                let api_key = body["data"]["api_key"].as_str().ok_or("approval missing api_key")?.to_string();
+                let api_key = body["data"]["api_key"]
+                    .as_str()
+                    .ok_or("approval missing api_key")?
+                    .to_string();
                 let user = user_from_data(&body)?;
                 return Ok((api_key, user));
             }
@@ -436,7 +488,10 @@ pub async fn authorize_existing_node(
     force: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let res = client
-        .post(format!("{}/api/v1/authorize-node", api_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/v1/authorize-node",
+            api_url.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({ "api_key": node_key, "force": force }))
         .send()
         .await?;
@@ -458,7 +513,10 @@ pub async fn provision_node(
     name: Option<&str>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let res = client
-        .post(format!("{}/api/v1/cli/node/provision", account.api_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/v1/cli/node/provision",
+            account.api_url.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({
             "api_key": account.api_key,
             "hostname": hostname(),
@@ -481,7 +539,10 @@ pub async fn list_nodes(
     account: &Account,
 ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
     let res = client
-        .post(format!("{}/api/v1/cli/node/list", account.api_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/v1/cli/node/list",
+            account.api_url.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({ "api_key": account.api_key }))
         .send()
         .await?;
@@ -490,13 +551,19 @@ pub async fn list_nodes(
     if !ok {
         return Err(body_message(&body).into());
     }
-    Ok(body["data"]["nodes"].as_array().cloned().unwrap_or_default())
+    Ok(body["data"]["nodes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default())
 }
 
 // ---- command entrypoints -----------------------------------------------
 
 /// `crossfyre login`
-pub async fn run_login(data_dir: &Path, flags: LoginFlags) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_login(
+    data_dir: &Path,
+    flags: LoginFlags,
+) -> Result<(), Box<dyn std::error::Error>> {
     use crate::toolchain::ui::*;
     let host = flags
         .api_url
@@ -508,7 +575,11 @@ pub async fn run_login(data_dir: &Path, flags: LoginFlags) -> Result<(), Box<dyn
 
     let account = perform_login(data_dir, flags).await?;
 
-    let who = if account.username.is_empty() { &account.user_id } else { &account.username };
+    let who = if account.username.is_empty() {
+        &account.user_id
+    } else {
+        &account.username
+    };
     section("Session");
     field("account", &format!("{} <{}>", who, account.email));
     field("file", &account_path(data_dir).display().to_string());
@@ -538,7 +609,10 @@ pub fn run_logout(data_dir: &Path) {
     }
     if !touched.is_empty() {
         section("Extensions");
-        step(&format!("Stopped and disabled (no session): {}", touched.join(", ")));
+        step(&format!(
+            "Stopped and disabled (no session): {}",
+            touched.join(", ")
+        ));
         end();
     }
 
@@ -561,7 +635,11 @@ pub async fn ensure_logged_in(
 ) -> Result<Account, Box<dyn std::error::Error>> {
     use crate::toolchain::ui::*;
     if let Some(existing) = load_account(data_dir) {
-        let who = if existing.username.is_empty() { &existing.user_id } else { &existing.username };
+        let who = if existing.username.is_empty() {
+            &existing.user_id
+        } else {
+            &existing.username
+        };
         ok(&format!("Using saved login for {}.", who));
         return Ok(existing);
     }

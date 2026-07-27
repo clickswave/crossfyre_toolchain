@@ -41,7 +41,9 @@ pub fn seal_to_pubkey(pubkey_der_b64: &str, plaintext: &[u8]) -> Option<String> 
     let ct = cipher.encrypt(Nonce::from_slice(&nonce), plaintext).ok()?;
 
     // Wrap the data key with RSA-OAEP(SHA-256).
-    let enc_key = pubkey.encrypt(&mut OsRng, Oaep::new::<Sha256>(), &aes_key).ok()?;
+    let enc_key = pubkey
+        .encrypt(&mut OsRng, Oaep::new::<Sha256>(), &aes_key)
+        .ok()?;
 
     Some(
         serde_json::json!({

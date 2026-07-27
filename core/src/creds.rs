@@ -22,7 +22,7 @@
 //! re-login on every request.
 
 use base64::Engine as _;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -127,7 +127,11 @@ pub async fn resolve(
         secret: d["secret"].clone(),
         scope_hosts: d["scope_hosts"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
         resolved_auth: match &d["resolved_auth"] {
             Value::Object(_) => Some(d["resolved_auth"].clone()),
@@ -147,7 +151,10 @@ fn auth_context_from_json(v: &Value) -> AuthContext {
                 .collect()
         })
         .unwrap_or_default();
-    let cookies = v["cookies"].as_str().filter(|s| !s.is_empty()).map(String::from);
+    let cookies = v["cookies"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(String::from);
     AuthContext { headers, cookies }
 }
 
@@ -224,7 +231,10 @@ async fn login_flow(
     if login_url.is_empty() {
         return Err("login_flow credential has no login_url".into());
     }
-    let method = cfg["method"].as_str().unwrap_or("POST").to_ascii_uppercase();
+    let method = cfg["method"]
+        .as_str()
+        .unwrap_or("POST")
+        .to_ascii_uppercase();
     let user_field = cfg["username_field"].as_str().unwrap_or("username");
     let pass_field = cfg["password_field"].as_str().unwrap_or("password");
     let username = cred.secret["username"].as_str().unwrap_or("");
@@ -251,7 +261,10 @@ async fn login_flow(
         .build()
         .unwrap_or_else(|_| http.clone());
 
-    let as_json = cfg["content_type"].as_str().map(|c| c.contains("json")).unwrap_or(false)
+    let as_json = cfg["content_type"]
+        .as_str()
+        .map(|c| c.contains("json"))
+        .unwrap_or(false)
         || cfg["as_json"].as_bool().unwrap_or(false);
 
     let mut rb = match method.as_str() {
@@ -267,16 +280,25 @@ async fn login_flow(
         let body = form
             .iter()
             .map(|(k, v)| {
-                let val = v.as_str().map(String::from).unwrap_or_else(|| v.to_string());
+                let val = v
+                    .as_str()
+                    .map(String::from)
+                    .unwrap_or_else(|| v.to_string());
                 format!("{}={}", form_urlencode(k), form_urlencode(&val))
             })
             .collect::<Vec<_>>()
             .join("&");
-        rb.header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(body)
+        rb.header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(body)
     };
 
-    let resp = rb.send().await.map_err(|e| format!("login request failed: {e}"))?;
+    let resp = rb
+        .send()
+        .await
+        .map_err(|e| format!("login request failed: {e}"))?;
     let status = resp.status();
     let resp_headers = resp.headers().clone();
     let final_url = resp.url().clone();
@@ -296,7 +318,10 @@ async fn login_flow(
         _ => status.is_success() || status.is_redirection(),
     };
     if !ok {
-        return Err(format!("login did not succeed (status {})", status.as_u16()));
+        return Err(format!(
+            "login did not succeed (status {})",
+            status.as_u16()
+        ));
     }
 
     // Token extraction (optional). Otherwise rely on captured cookies.
@@ -313,9 +338,15 @@ async fn login_flow(
             _ => None,
         };
         if let Some(tok) = token.filter(|t| !t.is_empty()) {
-            let header_name = cfg["token_extract"]["header"].as_str().unwrap_or("Authorization");
+            let header_name = cfg["token_extract"]["header"]
+                .as_str()
+                .unwrap_or("Authorization");
             let scheme = cfg["token_extract"]["scheme"].as_str().unwrap_or("Bearer");
-            let value = if scheme.is_empty() { tok } else { format!("{scheme} {tok}") };
+            let value = if scheme.is_empty() {
+                tok
+            } else {
+                format!("{scheme} {tok}")
+            };
             headers.push((header_name.to_string(), value));
         }
     }
@@ -352,7 +383,11 @@ async fn oauth2_token(
     let client_id = cfg["client_id"].as_str().unwrap_or("");
     let scopes = match &cfg["scopes"] {
         Value::String(s) => s.clone(),
-        Value::Array(a) => a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" "),
+        Value::Array(a) => a
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
         _ => String::new(),
     };
     let audience = cfg["audience"].as_str().unwrap_or("");
@@ -385,7 +420,10 @@ async fn oauth2_token(
         .join("&");
     let resp = http
         .post(token_url)
-        .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
         .header(reqwest::header::ACCEPT, "application/json")
         .body(body)
         .send()
@@ -395,7 +433,10 @@ async fn oauth2_token(
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
         let snippet: String = text.chars().take(200).collect();
-        return Err(format!("token endpoint returned {} ({snippet})", status.as_u16()));
+        return Err(format!(
+            "token endpoint returned {} ({snippet})",
+            status.as_u16()
+        ));
     }
     let token = extract_json_path(&text, "access_token")
         .ok_or_else(|| "token response had no access_token".to_string())?;
@@ -475,7 +516,9 @@ fn form_urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{:02X}", b)),
         }
@@ -512,5 +555,6 @@ fn cookie_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<Stri
 /// The Cookie header value the jar would send to `url` (semicolon-joined).
 fn jar_cookie_header(jar: &reqwest::cookie::Jar, url: &reqwest::Url) -> Option<String> {
     use reqwest::cookie::CookieStore;
-    jar.cookies(url).and_then(|hv| hv.to_str().ok().map(String::from))
+    jar.cookies(url)
+        .and_then(|hv| hv.to_str().ok().map(String::from))
 }

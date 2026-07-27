@@ -52,7 +52,11 @@ async fn detect_public_ip() -> Option<String> {
         .timeout(std::time::Duration::from_secs(8))
         .build()
         .ok()?;
-    for url in ["https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"] {
+    for url in [
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://icanhazip.com",
+    ] {
         if let Ok(resp) = client.get(url).send().await {
             if let Ok(text) = resp.text().await {
                 let ip = text.trim().to_string();
@@ -70,10 +74,12 @@ async fn detect_public_ip() -> Option<String> {
 async fn delegation_live(domain: &str, ip: &str) -> bool {
     let probe = format!("cfxprobe{}.{}:80", rand_label(), domain);
     match tokio::net::lookup_host(&probe).await {
-        Ok(addrs) => addrs.filter_map(|a| match a.ip() {
-            std::net::IpAddr::V4(v4) => Some(v4.to_string()),
-            _ => None,
-        }).any(|got| got == ip),
+        Ok(addrs) => addrs
+            .filter_map(|a| match a.ip() {
+                std::net::IpAddr::V4(v4) => Some(v4.to_string()),
+                _ => None,
+            })
+            .any(|got| got == ip),
         Err(_) => false,
     }
 }
@@ -97,7 +103,9 @@ fn write_env(domain: &str, ip: &str) -> std::io::Result<()> {
          OAST_ACME_TXT_FILE={ACME_TXT}\n"
     );
     if Path::new(&crt).exists() && Path::new(&key).exists() {
-        body.push_str(&format!("OAST_HTTPS_ADDR=0.0.0.0:443\nOAST_TLS_CERT={crt}\nOAST_TLS_KEY={key}\n"));
+        body.push_str(&format!(
+            "OAST_HTTPS_ADDR=0.0.0.0:443\nOAST_TLS_CERT={crt}\nOAST_TLS_KEY={key}\n"
+        ));
     }
     std::fs::write(ENV_PATH, body)
 }
@@ -125,7 +133,11 @@ fn write_unit(exe: &Path) -> std::io::Result<()> {
 }
 
 fn systemctl(args: &[&str]) -> bool {
-    Command::new("systemctl").args(args).status().map(|s| s.success()).unwrap_or(false)
+    Command::new("systemctl")
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Print the DNS records the operator must add at their DNS provider to delegate
@@ -134,7 +146,9 @@ fn print_delegation(domain: &str, ip: &str) {
     let parent = domain.splitn(2, '.').nth(1).unwrap_or(domain);
     let sub = domain.strip_suffix(&format!(".{parent}")).unwrap_or(domain);
     println!();
-    step(&format!("Delegate {domain} to this box. In your DNS provider for {parent}, add:"));
+    step(&format!(
+        "Delegate {domain} to this box. In your DNS provider for {parent}, add:"
+    ));
     println!("      ns1.{domain}   A    {ip}          (glue: the box's authoritative NS)");
     println!("      {sub}          NS   ns1.{domain}   (delegate the zone to it)");
     println!();
@@ -151,7 +165,9 @@ pub async fn setup(exe: &Path, opts: SetupOpts) -> Result<(), Box<dyn std::error
     step("Resolving this box's public IP...");
     let ip = match opts.public_ip {
         Some(x) => x.trim().to_string(),
-        None => detect_public_ip().await.ok_or("could not auto-detect public IP; pass --public-ip")?,
+        None => detect_public_ip()
+            .await
+            .ok_or("could not auto-detect public IP; pass --public-ip")?,
     };
     ok(&format!("Public IP: {ip}"));
 
@@ -218,27 +234,43 @@ fn obtain_cert(domain: &str, email: &str) -> Result<(), Box<dyn std::error::Erro
     let status = Command::new("lego")
         .env("EXEC_PATH", ACME_HOOK)
         .args([
-            "--accept-tos", "--email", email,
-            "--dns", "exec", "--dns.disable-cp",
-            "--domains", &format!("*.{domain}"),
-            "--path", LEGO_PATH,
+            "--accept-tos",
+            "--email",
+            email,
+            "--dns",
+            "exec",
+            "--dns.disable-cp",
+            "--domains",
+            &format!("*.{domain}"),
+            "--path",
+            LEGO_PATH,
             "run",
         ])
         .status()?;
     if !status.success() {
-        return Err("lego failed to obtain the certificate (check delegation + that port 53 is reachable)".into());
+        return Err(
+            "lego failed to obtain the certificate (check delegation + that port 53 is reachable)"
+                .into(),
+        );
     }
     Ok(())
 }
 
 /// Ensure the `lego` ACME client is installed (download the static release if not).
 fn ensure_lego() -> Result<(), Box<dyn std::error::Error>> {
-    if Command::new("lego").arg("--version").status().map(|s| s.success()).unwrap_or(false) {
+    if Command::new("lego")
+        .arg("--version")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
         return Ok(());
     }
     step("Installing lego (ACME client)...");
     let ver = "4.17.4";
-    let url = format!("https://github.com/go-acme/lego/releases/download/v{ver}/lego_v{ver}_linux_amd64.tar.gz");
+    let url = format!(
+        "https://github.com/go-acme/lego/releases/download/v{ver}/lego_v{ver}_linux_amd64.tar.gz"
+    );
     // curl + tar are ubiquitous on Linux servers; shelling out keeps deps light.
     let sh = format!(
         "set -e; cd /tmp; curl -fsSL -o lego.tgz '{url}'; tar xzf lego.tgz lego; install -m0755 lego /usr/local/bin/lego; rm -f lego.tgz lego"
@@ -283,11 +315,15 @@ fn install_renewal(email: &str, domain: &str) -> Result<(), Box<dyn std::error::
 fn print_endpoint(domain: &str, tls: bool) {
     println!();
     if tls {
-        ok("Your OAST endpoint is ready. Add it in the dashboard (OAST Endpoints -> Add endpoint):");
+        ok(
+            "Your OAST endpoint is ready. Add it in the dashboard (OAST Endpoints -> Add endpoint):",
+        );
         println!("      Callback domain :  {domain}");
         println!("      Poll API URL    :  https://api.{domain}");
     } else {
-        warn("HTTPS is not enabled yet, so the endpoint is not usable by scans until TLS is obtained.");
+        warn(
+            "HTTPS is not enabled yet, so the endpoint is not usable by scans until TLS is obtained.",
+        );
         hint("Complete DNS delegation, then re-run `crossfyre oast setup` to finish TLS.");
     }
 }
@@ -299,14 +335,24 @@ pub fn status() -> Result<(), Box<dyn std::error::Error>> {
         hint("Run `crossfyre oast setup --domain oob.example.com` to stand one up.");
         return Ok(());
     }
-    let active = Command::new("systemctl").args(["is-active", "cf-oast"]).output()
+    let active = Command::new("systemctl")
+        .args(["is-active", "cf-oast"])
+        .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|_| "unknown".into());
-    if active == "active" { ok("cf-oast: active"); } else { warn(&format!("cf-oast: {active}")); }
+    if active == "active" {
+        ok("cf-oast: active");
+    } else {
+        warn(&format!("cf-oast: {active}"));
+    }
     if let Ok(env) = std::fs::read_to_string(ENV_PATH) {
         for line in env.lines() {
-            if let Some(d) = line.strip_prefix("OAST_DOMAIN=") { step(&format!("domain: {d}")); }
-            if line.starts_with("OAST_TLS_CERT=") { ok("TLS: enabled (HTTPS on 443)"); }
+            if let Some(d) = line.strip_prefix("OAST_DOMAIN=") {
+                step(&format!("domain: {d}"));
+            }
+            if line.starts_with("OAST_TLS_CERT=") {
+                ok("TLS: enabled (HTTPS on 443)");
+            }
         }
     }
     Ok(())

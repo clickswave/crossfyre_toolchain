@@ -495,14 +495,22 @@ fn to_str(v: &Val) -> String {
 mod tests {
     use super::*;
     fn ctx<'a>(status: u16, body: &'a str, headers: &'a str) -> Ctx<'a> {
-        Ctx { status_code: status, body, headers, content_length: body.len() }
+        Ctx {
+            status_code: status,
+            body,
+            headers,
+            content_length: body.len(),
+        }
     }
 
     #[test]
     fn basic() {
         let c = ctx(200, "hello admin world", "Server: nginx");
         assert!(eval_bool("status_code == 200", &c));
-        assert!(eval_bool("status_code == 200 && contains(body, \"admin\")", &c));
+        assert!(eval_bool(
+            "status_code == 200 && contains(body, \"admin\")",
+            &c
+        ));
         assert!(!eval_bool("status_code == 404", &c));
         assert!(eval_bool("len(body) > 5", &c));
         assert!(eval_bool("contains(tolower(header), \"nginx\")", &c));

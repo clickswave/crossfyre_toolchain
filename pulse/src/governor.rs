@@ -14,8 +14,8 @@
 //! plain snapshot each tick, so the policy stays testable without sockets and
 //! isn't pinned to this one engine.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
 
@@ -97,7 +97,8 @@ const NO_RTT: u64 = u64::MAX;
 impl Governor {
     pub fn new(initial_conc: usize, initial_timeout_ms: u64, limits: Limits) -> Arc<Self> {
         let initial_conc = initial_conc.clamp(limits.conc_floor, limits.conc_ceil);
-        let initial_timeout_ms = initial_timeout_ms.clamp(limits.timeout_floor_ms, limits.timeout_ceil_ms);
+        let initial_timeout_ms =
+            initial_timeout_ms.clamp(limits.timeout_floor_ms, limits.timeout_ceil_ms);
         Arc::new(Self {
             limiter: DynLimiter::new(initial_conc),
             timeout_ms: AtomicU64::new(initial_timeout_ms),
@@ -146,7 +147,12 @@ impl Governor {
                 // sticky min-RTT (the path's uncongested floor)
                 let mut cur = self.min_rtt_us.load(Ordering::Relaxed);
                 while us < cur {
-                    match self.min_rtt_us.compare_exchange_weak(cur, us, Ordering::Relaxed, Ordering::Relaxed) {
+                    match self.min_rtt_us.compare_exchange_weak(
+                        cur,
+                        us,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
                         Ok(_) => break,
                         Err(observed) => cur = observed,
                     }

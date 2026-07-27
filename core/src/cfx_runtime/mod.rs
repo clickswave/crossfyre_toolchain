@@ -1,8 +1,8 @@
-pub mod targets;
-pub mod extensions;
 pub mod cfxs;
-pub mod silo;
+pub mod extensions;
 pub mod nodes;
+pub mod silo;
+pub mod targets;
 
 use pyo3::prelude::*;
 

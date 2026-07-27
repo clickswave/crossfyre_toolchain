@@ -625,14 +625,18 @@ impl MachDb {
         .fetch_one(&self.pool)
         .await?;
 
-        let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM scan_entries WHERE scan_id = $1",
-        )
-        .bind(scan_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let total =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM scan_entries WHERE scan_id = $1")
+                .bind(scan_id)
+                .fetch_one(&self.pool)
+                .await?;
 
-        Ok((found as usize, not_found as usize, error as usize, total as usize))
+        Ok((
+            found as usize,
+            not_found as usize,
+            error as usize,
+            total as usize,
+        ))
     }
 
     pub async fn get_scan_results(
@@ -641,9 +645,15 @@ impl MachDb {
         limit: usize,
         offset: usize,
     ) -> Result<ScanResults, sqlx::Error> {
-        let found = self.fetch_found_scan_entries(scan_id, limit, offset).await?;
-        let not_found = self.fetch_not_found_scan_entries(scan_id, limit, offset).await?;
-        let error = self.fetch_error_scan_entries(scan_id, limit, offset).await?;
+        let found = self
+            .fetch_found_scan_entries(scan_id, limit, offset)
+            .await?;
+        let not_found = self
+            .fetch_not_found_scan_entries(scan_id, limit, offset)
+            .await?;
+        let error = self
+            .fetch_error_scan_entries(scan_id, limit, offset)
+            .await?;
         let (found_total, not_found_total, error_total, entries_total) =
             self.fetch_total_scan_entries(scan_id).await?;
 
@@ -822,10 +832,22 @@ impl MachDb {
     /// longer share (and reuse) one cached scan record. Words/wordlists are
     /// content-deduped and shared across scans, so they are intentionally kept.
     pub async fn delete_scan(&self, scan_id: i64) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM scan_entries WHERE scan_id = $1").bind(scan_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM logs WHERE scan_id = $1").bind(scan_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM urls WHERE scan_id = $1").bind(scan_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM scans WHERE id = $1").bind(scan_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM scan_entries WHERE scan_id = $1")
+            .bind(scan_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM logs WHERE scan_id = $1")
+            .bind(scan_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM urls WHERE scan_id = $1")
+            .bind(scan_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM scans WHERE id = $1")
+            .bind(scan_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -930,7 +952,15 @@ impl MachDb {
 
     /// Drop all mach tables (used by --recreate-db in CLI mode).
     pub async fn drop_tables(&self) -> Result<(), sqlx::Error> {
-        for table in &["operations", "logs", "scan_entries", "urls", "scans", "words", "wordlists"] {
+        for table in &[
+            "operations",
+            "logs",
+            "scan_entries",
+            "urls",
+            "scans",
+            "words",
+            "wordlists",
+        ] {
             sqlx::query(&format!("DROP TABLE IF EXISTS {} CASCADE", table))
                 .execute(&self.pool)
                 .await?;

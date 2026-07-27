@@ -1,5 +1,5 @@
 use clap::{Args as ClapArgs, Parser, Subcommand, ValueEnum};
-use dialoguer::{theme::ColorfulTheme, Confirm, Input};
+use dialoguer::{Confirm, Input, theme::ColorfulTheme};
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum LogLevel {

@@ -7,7 +7,7 @@
 
 use super::config::get_toolchain_dir;
 use super::sudo_user::cmd_as_invoking_user;
-use super::{install, service, EXTENSIONS};
+use super::{EXTENSIONS, install, service};
 use std::path::Path;
 
 pub fn run(purge: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +28,11 @@ pub fn run(purge: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     title(
         "Crossfyre uninstall",
-        if purge { "services, binaries, database, config" } else { "services, binaries, database" },
+        if purge {
+            "services, binaries, database, config"
+        } else {
+            "services, binaries, database"
+        },
     );
 
     // Extensions: stop, disable, deregister, delete binaries. Then the node
@@ -59,7 +63,10 @@ pub fn run(purge: bool) -> Result<(), Box<dyn std::error::Error>> {
     if purge {
         let dir = get_toolchain_dir();
         let _ = std::fs::remove_dir_all(&dir);
-        ok(&format!("Purged config root {} (node registrations included).", dir.display()));
+        ok(&format!(
+            "Purged config root {} (node registrations included).",
+            dir.display()
+        ));
     } else {
         warn(&format!(
             "Config root {} kept. Re-run with --purge to remove it.",
@@ -88,10 +95,15 @@ pub fn cleanup_legacy_orionchain() {
     #[cfg(target_os = "linux")]
     for tool in EXTENSIONS {
         let svc = format!("orion-{}.service", tool);
-        let _ = cmd_as_invoking_user("systemctl").args(["--user", "stop", &svc]).output();
-        let _ = cmd_as_invoking_user("systemctl").args(["--user", "disable", &svc]).output();
+        let _ = cmd_as_invoking_user("systemctl")
+            .args(["--user", "stop", &svc])
+            .output();
+        let _ = cmd_as_invoking_user("systemctl")
+            .args(["--user", "disable", &svc])
+            .output();
         let unit = super::sudo_user::invoking_user_home()
-            .join(".config/systemd/user").join(&svc);
+            .join(".config/systemd/user")
+            .join(&svc);
         if unit.exists() {
             let _ = std::fs::remove_file(&unit);
             println!("[migrate] Removed old service {}", svc);
@@ -99,7 +111,9 @@ pub fn cleanup_legacy_orionchain() {
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = cmd_as_invoking_user("systemctl").args(["--user", "daemon-reload"]).output();
+        let _ = cmd_as_invoking_user("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
     }
 
     #[cfg(target_os = "macos")]
@@ -125,7 +139,10 @@ pub fn cleanup_legacy_orionchain() {
     if legacy_bin.exists() {
         match std::fs::remove_dir_all(legacy_bin) {
             Ok(_) => println!("[migrate] Removed /opt/orionchain"),
-            Err(e) => eprintln!("[migrate] Could not remove /opt/orionchain: {} (remove it manually)", e),
+            Err(e) => eprintln!(
+                "[migrate] Could not remove /opt/orionchain: {} (remove it manually)",
+                e
+            ),
         }
     }
     if legacy_cfg.exists() {

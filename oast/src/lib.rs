@@ -63,15 +63,34 @@ impl Config {
             .and_then(|s| parse_ipv4(&s))
             .unwrap_or([127, 0, 0, 1]);
         let mut cfg = Self::new(domains, public_ip);
-        if let Ok(v) = std::env::var("OAST_HTTP_ADDR") { cfg.http_addr = v; }
-        if let Ok(v) = std::env::var("OAST_DNS_ADDR") { cfg.dns_addr = v; }
-        if let Ok(v) = std::env::var("OAST_POLL_ADDR") { cfg.poll_addr = v; }
-        if let Ok(v) = std::env::var("OAST_HTTPS_ADDR") { cfg.https_addr = v; }
-        if let Some(v) = std::env::var("OAST_TTL_SECS").ok().and_then(|s| s.parse().ok()) { cfg.ttl_secs = v; }
-        cfg.tls_cert = std::env::var("OAST_TLS_CERT").ok().filter(|s| !s.is_empty());
+        if let Ok(v) = std::env::var("OAST_HTTP_ADDR") {
+            cfg.http_addr = v;
+        }
+        if let Ok(v) = std::env::var("OAST_DNS_ADDR") {
+            cfg.dns_addr = v;
+        }
+        if let Ok(v) = std::env::var("OAST_POLL_ADDR") {
+            cfg.poll_addr = v;
+        }
+        if let Ok(v) = std::env::var("OAST_HTTPS_ADDR") {
+            cfg.https_addr = v;
+        }
+        if let Some(v) = std::env::var("OAST_TTL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            cfg.ttl_secs = v;
+        }
+        cfg.tls_cert = std::env::var("OAST_TLS_CERT")
+            .ok()
+            .filter(|s| !s.is_empty());
         cfg.tls_key = std::env::var("OAST_TLS_KEY").ok().filter(|s| !s.is_empty());
-        cfg.tls_certs = std::env::var("OAST_TLS_CERTS").ok().filter(|s| !s.is_empty());
-        cfg.acme_txt_file = std::env::var("OAST_ACME_TXT_FILE").ok().filter(|s| !s.is_empty());
+        cfg.tls_certs = std::env::var("OAST_TLS_CERTS")
+            .ok()
+            .filter(|s| !s.is_empty());
+        cfg.acme_txt_file = std::env::var("OAST_ACME_TXT_FILE")
+            .ok()
+            .filter(|s| !s.is_empty());
         cfg
     }
 

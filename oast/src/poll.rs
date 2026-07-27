@@ -42,7 +42,11 @@ pub async fn serve(
     store: Arc<Store>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr: SocketAddr = cfg.poll_addr.parse()?;
-    let ctx = Ctx { cfg, store, scheme: "http" };
+    let ctx = Ctx {
+        cfg,
+        store,
+        scheme: "http",
+    };
     let app = api_router().with_state(ctx);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("oast api on {addr}");

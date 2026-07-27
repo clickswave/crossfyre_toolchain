@@ -27,8 +27,9 @@ fn run_python(ctx: &JobContext) -> PyResult<()> {
         let globals = PyDict::new(py);
         globals.set_item("__name__", "__main__")?;
 
-        let code = CString::new(ctx.script.as_str())
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid script: {}", e)))?;
+        let code = CString::new(ctx.script.as_str()).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid script: {}", e))
+        })?;
         py.run(&code, Some(&globals), None)?;
 
         // Call run() if it exists
@@ -131,7 +132,7 @@ pub async fn execute_local(script_path: &str, targets: Vec<(String, String)>) ->
         Err(e) => {
             return ExecutionResult::Error {
                 message: format!("Cannot read '{}': {}", script_path, e),
-            }
+            };
         }
     };
 

@@ -8,11 +8,11 @@ use sysinfo::System;
 use tokio::sync::Semaphore;
 
 pub mod auth;
-pub mod creds;
-pub mod oast;
 pub mod cfx_runtime;
+pub mod creds;
 mod egress;
 pub mod executor;
+pub mod oast;
 pub mod toolchain;
 
 use toolchain::sudo_user::chown_to_invoking_user;
@@ -26,15 +26,22 @@ pub struct WorkflowMetrics {
     errored: std::sync::atomic::AtomicUsize,
 }
 
-static WORKFLOW_METRICS: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Arc<WorkflowMetrics>>>> = OnceLock::new();
+static WORKFLOW_METRICS: OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<WorkflowMetrics>>>,
+> = OnceLock::new();
 
 pub fn workflow_metrics(workflow_id: &str) -> Arc<WorkflowMetrics> {
-    let map = WORKFLOW_METRICS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let map =
+        WORKFLOW_METRICS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     let mut m = map.lock().unwrap();
     m.entry(workflow_id.to_string())
-        .or_insert_with(|| Arc::new(WorkflowMetrics {
-            in_flight: 0.into(), completed: 0.into(), errored: 0.into(),
-        }))
+        .or_insert_with(|| {
+            Arc::new(WorkflowMetrics {
+                in_flight: 0.into(),
+                completed: 0.into(),
+                errored: 0.into(),
+            })
+        })
         .clone()
 }
 
@@ -47,18 +54,31 @@ pub struct InFlightGuard {
 }
 impl InFlightGuard {
     fn start(metrics: Arc<WorkflowMetrics>) -> Self {
-        metrics.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Self { metrics, errored: false }
+        metrics
+            .in_flight
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self {
+            metrics,
+            errored: false,
+        }
     }
-    fn fail(&mut self) { self.errored = true; }
+    fn fail(&mut self) {
+        self.errored = true;
+    }
 }
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
-        self.metrics.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.metrics
+            .in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         if self.errored {
-            self.metrics.errored.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.metrics
+                .errored
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         } else {
-            self.metrics.completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.metrics
+                .completed
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -66,15 +86,21 @@ impl Drop for InFlightGuard {
 /// Workflows the operator has halted from the dashboard. Daemon spawn-tasks
 /// check this set after waking from the semaphore but before doing the work,
 /// so semaphore-queued probes don't fire after a halt.
-static CANCELLED_WORKFLOWS: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+static CANCELLED_WORKFLOWS: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    OnceLock::new();
 pub fn cancelled_workflows() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
     CANCELLED_WORKFLOWS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
 }
 pub fn is_workflow_cancelled(id: &str) -> bool {
-    cancelled_workflows().lock().map(|s| s.contains(id)).unwrap_or(false)
+    cancelled_workflows()
+        .lock()
+        .map(|s| s.contains(id))
+        .unwrap_or(false)
 }
 pub fn cancel_workflow(id: &str) {
-    if let Ok(mut s) = cancelled_workflows().lock() { s.insert(id.to_string()); }
+    if let Ok(mut s) = cancelled_workflows().lock() {
+        s.insert(id.to_string());
+    }
     // Drop this workflow's per-target pace state so the map doesn't accumulate.
     if let Some(map) = WORKFLOW_TARGET_PACE.get() {
         if let Ok(mut m) = map.lock() {
@@ -83,7 +109,9 @@ pub fn cancel_workflow(id: &str) {
     }
 }
 pub fn resume_workflow(id: &str) {
-    if let Ok(mut s) = cancelled_workflows().lock() { s.remove(id); }
+    if let Ok(mut s) = cancelled_workflows().lock() {
+        s.remove(id);
+    }
 }
 
 /// Heuristic: is a discovered content-discovery URL worth recursing into?
@@ -93,8 +121,12 @@ pub fn resume_workflow(id: &str) {
 /// (e.g. /admin, /api). Files like /robots.txt are skipped.
 fn looks_like_directory(found_url: &str, code: i64) -> bool {
     let path = found_url.split(['?', '#']).next().unwrap_or(found_url);
-    if path.ends_with('/') { return true; }
-    if matches!(code, 301 | 302 | 307 | 308) { return true; }
+    if path.ends_with('/') {
+        return true;
+    }
+    if matches!(code, 301 | 302 | 307 | 308) {
+        return true;
+    }
     let last = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
     !last.is_empty() && !last.contains('.')
 }
@@ -109,10 +141,15 @@ fn done_ops() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
     DONE_OPS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
 }
 pub fn op_is_done(op_id: &str) -> bool {
-    done_ops().lock().map(|s| s.contains(op_id)).unwrap_or(false)
+    done_ops()
+        .lock()
+        .map(|s| s.contains(op_id))
+        .unwrap_or(false)
 }
 pub fn mark_op_done(op_id: &str) {
-    if let Ok(mut s) = done_ops().lock() { s.insert(op_id.to_string()); }
+    if let Ok(mut s) = done_ops().lock() {
+        s.insert(op_id.to_string());
+    }
 }
 
 /// Per-workflow semaphore registry. Each workflow is sized at the user's
@@ -123,10 +160,13 @@ pub fn mark_op_done(op_id: &str) {
 ///
 /// Hard ceiling: pulse can't handle more than ~100 concurrent probes anyway,
 /// so we clamp on the upper end regardless of what the user typed.
-static WORKFLOW_SEMAPHORES: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Arc<Semaphore>>>> = OnceLock::new();
+static WORKFLOW_SEMAPHORES: OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<Semaphore>>>,
+> = OnceLock::new();
 
 pub fn workflow_semaphore(workflow_id: &str, tasks: usize) -> Arc<Semaphore> {
-    let map = WORKFLOW_SEMAPHORES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let map =
+        WORKFLOW_SEMAPHORES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     let mut m = map.lock().unwrap();
     m.entry(workflow_id.to_string())
         .or_insert_with(|| {
@@ -196,8 +236,15 @@ static WORKFLOW_TARGET_PACE: OnceLock<
 /// Get (or create) the coordinated pace for one `(workflow, host)`. `posture`
 /// and `base_delay` seed a fresh controller; existing paces are reused so
 /// adaptation persists across all of a workflow's chunks against that host.
-pub fn target_pace(workflow_id: &str, host: &str, posture: &str, base_delay: u64, max_tasks: u64) -> Arc<TargetPace> {
-    let map = WORKFLOW_TARGET_PACE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+pub fn target_pace(
+    workflow_id: &str,
+    host: &str,
+    posture: &str,
+    base_delay: u64,
+    max_tasks: u64,
+) -> Arc<TargetPace> {
+    let map = WORKFLOW_TARGET_PACE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     let mut m = map.lock().unwrap();
     m.entry((workflow_id.to_string(), host.to_string()))
         .or_insert_with(|| {
@@ -208,7 +255,9 @@ pub fn target_pace(workflow_id: &str, host: &str, posture: &str, base_delay: u64
             let caps = adaptive::Caps::for_target(mt);
             Arc::new(TargetPace {
                 window: std::sync::Mutex::new(adaptive::HealthWindow::for_target()),
-                controller: std::sync::Mutex::new(adaptive::RateController::new_optimistic(p, caps, base_delay)),
+                controller: std::sync::Mutex::new(adaptive::RateController::new_optimistic(
+                    p, caps, base_delay,
+                )),
                 delay_ms: std::sync::atomic::AtomicU64::new(base_delay),
                 tasks: std::sync::atomic::AtomicU64::new(mt as u64),
                 since_tick: std::sync::atomic::AtomicU64::new(0),
@@ -261,1592 +310,1891 @@ struct OpCtx {
 /// the run loop's `Some("operation")` arm (kept at its original indentation)
 /// so the pull-queue path can reuse it unchanged.
 async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
-    let op_id = cmd["operation_id"].as_str().unwrap_or("unknown").to_string();
+    let op_id = cmd["operation_id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
     let workflow_id = cmd["workflow_id"].as_str().unwrap_or("").to_string();
     let op_type = cmd["op_type"].as_str().unwrap_or("").to_string();
     let consumption = cmd["consumption"].as_str().unwrap_or("single").to_string();
     let pre_claimed = cmd["pre_claimed"].as_bool().unwrap_or(false);
     let data = cmd["data"].clone();
-    let OpCtx { pub_clone, status_subj, result_subj, node_id, http, api_url, api_key } = ctx;
+    let OpCtx {
+        pub_clone,
+        status_subj,
+        result_subj,
+        node_id,
+        http,
+        api_url,
+        api_key,
+    } = ctx;
 
-                                    // For distributed port-scan ops, gate on the workflow's
-                                    // per-workflow concurrency permit BEFORE claiming.
-                                    // This keeps unclaimed ops available to other
-                                    // nodes if this one is at capacity, and ensures
-                                    // we genuinely run only `tasks` probes at a time
-                                    // - the next op claims as soon as one finishes.
-                                    let _ws_permit = if op_type == "network-scan-ds" || op_type == "content-discovery-ds" {
-                                        // Port scans use `tasks`; content discovery uses
-                                        // `threads`. Either way it's the workflow-level
-                                        // concurrency the user picked in the wizard.
-                                        let n = data["tasks"].as_i64()
-                                            .or_else(|| data["threads"].as_i64())
-                                            .unwrap_or(10)
-                                            .max(1) as usize;
-                                        let sem = workflow_semaphore(&workflow_id, n);
-                                        Some(sem.acquire_owned().await.ok())
-                                    } else {
-                                        None
-                                    };
+    // For distributed port-scan ops, gate on the workflow's
+    // per-workflow concurrency permit BEFORE claiming.
+    // This keeps unclaimed ops available to other
+    // nodes if this one is at capacity, and ensures
+    // we genuinely run only `tasks` probes at a time
+    // - the next op claims as soon as one finishes.
+    let _ws_permit = if op_type == "network-scan-ds" || op_type == "content-discovery-ds" {
+        // Port scans use `tasks`; content discovery uses
+        // `threads`. Either way it's the workflow-level
+        // concurrency the user picked in the wizard.
+        let n = data["tasks"]
+            .as_i64()
+            .or_else(|| data["threads"].as_i64())
+            .unwrap_or(10)
+            .max(1) as usize;
+        let sem = workflow_semaphore(&workflow_id, n);
+        Some(sem.acquire_owned().await.ok())
+    } else {
+        None
+    };
 
-                                    // The operator may have halted this workflow
-                                    // while we were waiting on the semaphore. Drop
-                                    // the permit and exit without doing work.
-                                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
-                                        return;
+    // The operator may have halted this workflow
+    // while we were waiting on the semaphore. Drop
+    // the permit and exit without doing work.
+    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+        return;
+    }
+
+    // Already completed this op (a pause/resume or a
+    // re-dispatch can deliver an op
+    // whose first copy already ran). Don't probe twice -
+    // but DO re-publish the completion ack, because a
+    // re-dispatch usually means the original ack was
+    // lost. Silently returning is what
+    // leaves a scan parked at 9x% on lost acks.
+    if op_is_done(&op_id) {
+        let reack = serde_json::json!({
+            "type": "operation_completed",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "found_count": 0,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), reack.to_string().into())
+            .await;
+        return;
+    }
+
+    // Track in-flight count through the rest of the
+    // closure. Print a stat line on every claim so
+    // the operator can see the throttle in action -
+    // each line tells them which op just started
+    // and how many are now active vs done.
+    let _flight = if !workflow_id.is_empty() {
+        let m = workflow_metrics(&workflow_id);
+        let g = InFlightGuard::start(m.clone());
+        use std::sync::atomic::Ordering;
+        let ifl = m.in_flight.load(Ordering::Relaxed);
+        let done = m.completed.load(Ordering::Relaxed);
+        let fail = m.errored.load(Ordering::Relaxed);
+        let short = workflow_id.get(..8).unwrap_or(&workflow_id);
+        println!(
+            "[scan {}] claim in_flight={} done={} failed={}",
+            short, ifl, done, fail
+        );
+        Some(g)
+    } else {
+        None
+    };
+
+    // For single-consumption ops, try to claim
+    // it first - unless the controller marked it
+    // pre_claimed (1-node-assigned ops have no
+    // race to win, so we skip the HTTP round-trip).
+    if consumption == "single" && !pre_claimed {
+        let claim_res = http
+            .post(&format!("{}/api/v1/claim-operation", api_url))
+            .json(&serde_json::json!({
+                "operation_id": op_id,
+                "node_id": node_id,
+            }))
+            .send()
+            .await;
+
+        let claimed = match claim_res {
+            Ok(res) if res.status().is_success() => {
+                let body: serde_json::Value = res.json().await.unwrap_or_default();
+                body["data"]["claimed"].as_bool().unwrap_or(false)
+            }
+            _ => false,
+        };
+
+        use std::sync::atomic::Ordering;
+        if !claimed {
+            // Counter still tracked for the periodic
+            // snapshot below; per-event log dropped.
+            CLAIM_MISS.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        CLAIM_OK.fetch_add(1, Ordering::Relaxed);
+    } else if pre_claimed {
+        use std::sync::atomic::Ordering;
+        CLAIM_OK.fetch_add(1, Ordering::Relaxed);
+    }
+    // For content-discovery-*, talk directly to mach daemon
+    if op_type.starts_with("content-discovery-") {
+        let mode = data["mode"].as_str().unwrap_or("batch");
+
+        // Single-URL probe mode: one target per op
+        if mode == "probe" {
+            let probe_url = data["probe_url"].as_str().unwrap_or("");
+            let method = data["method"].as_str().unwrap_or("GET").to_lowercase();
+            let success_codes_str = data["success_codes"]
+                .as_str()
+                .unwrap_or("200,201,301,302,403");
+            let codes: Vec<u16> = success_codes_str
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+
+            // Per-slot pacing: sleep WHILE holding the semaphore
+            // permit so the wizard's "delay" actually throttles
+            // the rate. tasks=10 + delay=20ms => floor of ~500/sec.
+            let delay_ms = data["delay"].as_i64().unwrap_or(0).max(0) as u64;
+            if delay_ms > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            }
+
+            let mach_req = serde_json::json!({
+                "operation": "probe",
+                "response": "instant",
+                "url": probe_url,
+                "method": method,
+                "success_codes": codes,
+                "volatility": 0,
+                "operation_id": op_id,
+                // Wizard "Follow Redirects" toggle (default off).
+                "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(false),
+            });
+
+            let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
+            match conn {
+                Ok(stream) => {
+                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                    let (reader, mut writer) = stream.into_split();
+                    let mut req_str = serde_json::to_string(&mach_req).unwrap();
+                    req_str.push('\n');
+                    let _ = writer.write_all(req_str.as_bytes()).await;
+
+                    let mut lines = BufReader::new(reader).lines();
+                    // Bound the wait. If mach connects but never
+                    // answers (target stopped responding, or mach
+                    // wedged on this URL), don't deadlock the op
+                    // forever - time out and fall through to the
+                    // completion ack below so the scan advances.
+                    let read =
+                        tokio::time::timeout(std::time::Duration::from_secs(30), lines.next_line())
+                            .await;
+                    if let Ok(Ok(Some(line))) = read {
+                        if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let status = resp["status"].as_str().unwrap_or("");
+                            let code = resp["code"].as_i64().unwrap_or(0);
+                            let body_len = resp["body_length"].as_i64().unwrap_or(0);
+
+                            if status == "found" {
+                                let result_msg = serde_json::json!({
+                                    "type": "result",
+                                    "job_id": format!("{}-{}", workflow_id, op_id),
+                                    "workflow_id": workflow_id,
+                                    "data": {
+                                        "target": probe_url,
+                                        "type": "endpoint",
+                                        "status_code": code,
+                                        "body_length": body_len,
+                                        "source": "mach",
+                                        "operation_id": op_id,
+                                        "word": data["word"].as_str().unwrap_or(""),
                                     }
+                                });
+                                let _ = pub_clone
+                                    .publish(result_subj.clone(), result_msg.to_string().into())
+                                    .await;
+                                println!("[op] OK FOUND {} [{}]", probe_url, code);
+                            } else {
+                                // Not found - no result published
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[op] FAIL Cannot connect to mach daemon: {}", e);
+                }
+            }
 
-                                    // Already completed this op (a pause/resume or a
-                                    // re-dispatch can deliver an op
-                                    // whose first copy already ran). Don't probe twice -
-                                    // but DO re-publish the completion ack, because a
-                                    // re-dispatch usually means the original ack was
-                                    // lost. Silently returning is what
-                                    // leaves a scan parked at 9x% on lost acks.
-                                    if op_is_done(&op_id) {
-                                        let reack = serde_json::json!({
-                                            "type": "operation_completed",
+            // Signal completion for this single probe
+            let done_msg = serde_json::json!({
+                "type": "completed",
+                "job_id": format!("{}-{}", workflow_id, op_id),
+                "workflow_id": workflow_id,
+                "code": 0
+            });
+            let _ = pub_clone
+                .publish(result_subj, done_msg.to_string().into())
+                .await;
+
+            mark_op_done(&op_id);
+            let status_msg = serde_json::json!({
+                "type": "operation_completed",
+                "operation_id": op_id,
+                "workflow_id": workflow_id,
+                "found_count": if data["probe_url"].is_string() { 1 } else { 0 },
+                "node_id": node_id,
+            });
+            let _ = pub_clone
+                .publish(status_subj, status_msg.to_string().into())
+                .await;
+            return;
+        }
+
+        // Batch/stream mode: full scan via mach
+        let url = data["url"].as_str().unwrap_or("");
+        let method = data["method"].as_str().unwrap_or("GET");
+        let threads = data["threads"].as_i64().unwrap_or(10);
+        let success_codes_str = data["success_codes"]
+            .as_str()
+            .unwrap_or("200,201,301,302,403");
+
+        // Download wordlist - supports both formats:
+        // One input: "wordlist_url" (single presigned chunk URL)
+        // Or: "wordlists" array with [{ id, url }]
+        let mut wordlist_path = String::new();
+
+        if let Some(wl_url) = data["wordlist_url"].as_str() {
+            // single chunk URL
+            if !wl_url.is_empty() {
+                let tmp = format!("/tmp/cfx-wl-chunk-{}.txt", op_id);
+                println!("[op] Downloading wordlist chunk...");
+                if let Ok(resp) = reqwest::get(wl_url).await {
+                    if let Ok(body) = resp.text().await {
+                        let _ = std::fs::write(&tmp, &body);
+                        wordlist_path = tmp;
+                        let lines = body.lines().count();
+                        println!(
+                            "[op] OK Chunk downloaded ({} lines, {} bytes)",
+                            lines,
+                            body.len()
+                        );
+                    }
+                }
+            }
+        } else if let Some(wls) = data["wordlists"].as_array() {
+            // array of wordlists
+            if let Some(first) = wls.first() {
+                let dl_url = first["url"].as_str().unwrap_or("");
+                if !dl_url.is_empty() {
+                    let wl_id = first["id"].as_str().unwrap_or("wordlist");
+                    let tmp = format!("/tmp/cfx-wl-{}.txt", wl_id);
+                    println!("[op] Downloading wordlist: {}", wl_id);
+                    if let Ok(resp) = reqwest::get(dl_url).await {
+                        if let Ok(body) = resp.text().await {
+                            let _ = std::fs::write(&tmp, &body);
+                            wordlist_path = tmp;
+                            println!("[op] OK Wordlist downloaded ({} bytes)", body.len());
+                        }
+                    }
+                }
+            }
+        }
+
+        if wordlist_path.is_empty() {
+            // Fallback to local common.txt
+            wordlist_path = "/opt/crossfyre/wordlists/common.txt".to_string();
+            if !std::path::Path::new(&wordlist_path).exists() {
+                eprintln!("[op] FAIL No wordlist available");
+                let msg = serde_json::json!({
+                    "type": "completed", "job_id": op_id,
+                    "code": 1
+                });
+                let _ = pub_clone.publish(result_subj, msg.to_string().into()).await;
+                return;
+            }
+        }
+
+        // Build mach endpoint
+        // Parse success codes + pacing (shared across recursion levels).
+        let codes: Vec<u16> = success_codes_str
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        let delay = data["delay"].as_i64().unwrap_or(0).max(0);
+        // Resume vs fresh: a re-dispatched paused op sets data.resume=true,
+        // so mach RESUMES the chunk (fresh_start=false) instead of re-probing.
+        let resume = data["resume"].as_bool().unwrap_or(false);
+
+        // Recursive discovery (wizard toggle): when a directory is found,
+        // re-run the same wordlist inside it, up to recurse_depth levels.
+        // Gated behind recurse=true, so recurse=false is the exact same
+        // single-pass scan as before (frontier holds one item, none added).
+        let recurse = data["recurse"].as_bool().unwrap_or(false);
+        let recurse_depth = data["recurse_depth"].as_i64().unwrap_or(0).max(0) as usize;
+        // Adaptive engine flags (default off = current fixed pacing). mach
+        // reads these and, when set, runs the controller-driven path.
+        let adaptive_rate = data["adaptive_rate"].as_bool().unwrap_or(false);
+        let adaptive_resilience = data["adaptive_resilience"].as_bool().unwrap_or(false);
+        let posture = data["posture"].as_str().unwrap_or("balanced").to_string();
+        // When adaptive rate is on, the pace is shared across every chunk
+        // hitting this target host: it sets the engine's inter-probe delay
+        // (rate self-adaptation off) while each chunk still adapts resilience.
+        let cd_host = target_host(url);
+        // Coverage-first, feedback-driven concurrency. A CD workflow runs many
+        // chunks concurrently, each a mach scan, so an unbounded per-chunk
+        // `tasks` would multiply the combined volume against one target well
+        // past a healthy range and start dropping findings. The shared pace
+        // starts from the posture seed and adapts toward safety as the engine
+        // reports stress (probes that needed retries) that the final outcome
+        // would otherwise hide; always-retry resilience recovers transients.
+        let posture_cap = adaptive::coord::posture_cap(&posture) as i64;
+        let pace = if adaptive_rate {
+            Some(target_pace(
+                &workflow_id,
+                &cd_host,
+                &posture,
+                delay.max(0) as u64,
+                threads.max(1).min(posture_cap) as u64,
+            ))
+        } else {
+            None
+        };
+        let cd_tasks = pace.as_ref().map(|p| p.tasks() as i64).unwrap_or(threads);
+        if let Some(ref p) = pace {
+            println!(
+                "[op] shared pace: target={} posture={} tasks={}",
+                cd_host,
+                posture,
+                p.tasks()
+            );
+        }
+        // Traversal order: "depth" dives into each find immediately (push to
+        // front); anything else is breadth-first, finishing each level before
+        // the next (push to back). Default breadth-first.
+        let depth_first = data["recurse_order"].as_str() == Some("depth");
+        // Probe-level progress denominator for the initial pass (level-0
+        // chunk size, known up front). Recursion grows this live below.
+        let chunk_total = data["wordlist_lines"].as_i64().unwrap_or(0);
+
+        // Level 0 uses this node's assigned wordlist (a small chunk
+        // of the full list). Recursion into a discovered directory must instead try the
+        // FULL wordlist, or the chunk is far too small to find anything
+        // deeper. The control plane passes the full list as
+        // recurse_wordlist_url; download it once and use it for depth >= 1.
+        // If absent (e.g. when the full list already ships), fall back to the
+        // level-0 wordlist.
+        let mut recurse_wordlist_path = wordlist_path.clone();
+        let mut recurse_wl_lines: i64 = chunk_total; // per-directory probe count at deeper levels
+        if recurse {
+            if let Some(rw_url) = data["recurse_wordlist_url"].as_str() {
+                if !rw_url.is_empty() {
+                    let tmp = format!("/tmp/cfx-wl-recurse-{}.txt", op_id);
+                    if let Ok(resp) = reqwest::get(rw_url).await {
+                        if let Ok(body) = resp.text().await {
+                            let _ = std::fs::write(&tmp, &body);
+                            recurse_wordlist_path = tmp;
+                            recurse_wl_lines =
+                                body.lines().filter(|l| !l.trim().is_empty()).count() as i64;
+                            println!(
+                                "[op] recursion wordlist downloaded ({} lines)",
+                                recurse_wl_lines
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Live probe accounting. Recursion has no fixed total up front, so we
+        // grow `probes_total` by one full recurse-wordlist each time a new
+        // directory is queued, and count every probe in `probes_done`. This
+        // makes the dashboard bar actually move during recursion instead of
+        // sitting at a fixed 99%.
+        let mut probes_done: i64 = 0;
+        let mut probes_total: i64 = chunk_total.max(0);
+        let mut probes_tested: i64 = 0; // requests sent incl. retries (reported by mach)
+        let mut last_prog = std::time::Instant::now();
+
+        // Frontier of (base_url, depth). Level 0 = the assigned target.
+        let base0 = url.trim_end_matches('/').to_string();
+        let mut frontier: std::collections::VecDeque<(String, usize)> =
+            std::collections::VecDeque::new();
+        frontier.push_back((base0.clone(), 0usize));
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        visited.insert(base0);
+
+        let mut found_count = 0;
+        let mut cancelled = false;
+
+        while let Some((base, depth)) = frontier.pop_front() {
+            // Build the mach endpoint for this level.
+            let endpoint = if base.contains("::FUZZ::") {
+                base.clone()
+            } else {
+                format!("{}/::FUZZ::", base.trim_end_matches('/'))
+            };
+
+            // Level 0 = assigned chunk; deeper levels = full wordlist.
+            let level_wordlist = if depth == 0 {
+                wordlist_path.clone()
+            } else {
+                recurse_wordlist_path.clone()
+            };
+
+            println!(
+                "[op] mach scan (depth {}): {} method={} threads={} delay={}ms wordlist={} mode={}",
+                depth, endpoint, method, threads, delay, level_wordlist, mode
+            );
+
+            let mach_req = serde_json::json!({
+                "operation": "scan",
+                "response": "stream",
+                "endpoint": endpoint,
+                "wordlist": level_wordlist.clone(),
+                "method": method.to_lowercase(),
+                // Shared concurrency + pace when adaptive rate is on, else the
+                // fixed wizard values. Backing tasks off under stress keeps the
+                // combined volume against a target in a healthy range so results
+                // don't get dropped.
+                "tasks": cd_tasks,
+                "delay": pace.as_ref().map(|p| p.delay() as i64).unwrap_or(delay),
+                "success_status_codes": codes.clone(),
+                "fresh_start": !resume,
+                // The pace owns the rate now, so mach doesn't self-adapt it; it
+                // still runs the adaptive path for resilience when enabled.
+                "adaptive_rate": false,
+                "adaptive_resilience": adaptive_resilience,
+                "posture": posture,
+            });
+
+            let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
+            match conn {
+                Ok(stream) => {
+                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                    let (reader, mut writer) = stream.into_split();
+                    let mut req_str = serde_json::to_string(&mach_req).unwrap();
+                    req_str.push('\n');
+                    let _ = writer.write_all(req_str.as_bytes()).await;
+
+                    let mut lines = BufReader::new(reader).lines();
+
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        // Honor pause / halt / delete promptly (checked per probe event).
+                        if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+                            println!(
+                                "[op] content-discovery cancelled (workflow paused/deleted) - stopping mach stream"
+                            );
+                            cancelled = true;
+                            break;
+                        }
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let evt_type = event["type"].as_str().unwrap_or("");
+                            if evt_type == "result" {
+                                probes_done += 1;
+                            }
+                            if let Some(t) = event["tested"].as_i64() {
+                                probes_tested = t.max(probes_tested);
+                            }
+                            // mach's "ack" carries the real entry count it will probe.
+                            // Seed the total from it when the op didn't pre-set
+                            // wordlist_lines, so the progress
+                            // bar shows real probes instead of a 0/1 op fallback.
+                            if evt_type == "ack" {
+                                if let Some(t) = event["total"].as_i64() {
+                                    if t > probes_total {
+                                        probes_total = t;
+                                    }
+                                }
+                            }
+
+                            // Feed the shared pace from each probe. A probe that
+                            // needed retries hit raw stress even if it finally
+                            // recovered - that's the signal the final status/code
+                            // hides, and the one that must drive the backoff.
+                            if let Some(ref p) = pace {
+                                if evt_type == "result" {
+                                    let st = event["status"].as_str().unwrap_or("");
+                                    let cd = event["code"].as_i64().unwrap_or(0);
+                                    let retried = event["retries"].as_i64().unwrap_or(0) > 0;
+                                    let class = if retried {
+                                        adaptive::ProbeClass::RateLimited
+                                    } else {
+                                        classify_event(st, cd)
+                                    };
+                                    p.observe(class);
+                                }
+                            }
+
+                            match evt_type {
+                                "result" if event["status"].as_str() == Some("found") => {
+                                    found_count += 1;
+                                    let found_url =
+                                        event["url"].as_str().unwrap_or(url).to_string();
+                                    let code = event["code"].as_i64().unwrap_or(0);
+                                    let result_msg = serde_json::json!({
+                                        "type": "result",
+                                        "job_id": format!("{}-{}", workflow_id, op_id),
+                                        "workflow_id": workflow_id,
+                                        "data": {
+                                            "target": found_url.clone(),
+                                            "type": "endpoint",
+                                            "status_code": event["code"],
+                                            "body_length": event["body_length"],
+                                            "source": "mach",
                                             "operation_id": op_id,
+                                        }
+                                    });
+                                    let _ = pub_clone
+                                        .publish(result_subj.clone(), result_msg.to_string().into())
+                                        .await;
+
+                                    // Queue directory-like finds for the next level.
+                                    if recurse
+                                        && depth < recurse_depth
+                                        && looks_like_directory(&found_url, code)
+                                    {
+                                        let next = found_url.trim_end_matches('/').to_string();
+                                        if !next.is_empty()
+                                            && !next.contains("::FUZZ::")
+                                            && visited.insert(next.clone())
+                                        {
+                                            // This directory will be probed with the
+                                            // full recurse wordlist, so grow the total.
+                                            probes_total += recurse_wl_lines;
+                                            if depth_first {
+                                                frontier.push_front((next, depth + 1));
+                                            } else {
+                                                frontier.push_back((next, depth + 1));
+                                            }
+                                        }
+                                    }
+                                }
+                                "done" => {
+                                    println!(
+                                        "[op] OK Scan level complete (depth {}): {} found so far",
+                                        depth, found_count
+                                    );
+                                    break;
+                                }
+                                "error" => {
+                                    let msg = event["message"].as_str().unwrap_or("unknown error");
+                                    eprintln!("[op] FAIL mach error: {}", msg);
+                                    break;
+                                }
+                                _ => {} // ack, progress, not_found - skip
+                            }
+
+                            // Live probe progress. `probes_total` grows as new
+                            // directories are queued, so the bar keeps moving
+                            // through recursion instead of sitting at a fixed 99%.
+                            if last_prog.elapsed() >= std::time::Duration::from_millis(800) {
+                                let prog = serde_json::json!({
+                                    "type": "operation_progress",
+                                    "operation_id": op_id,
+                                    "workflow_id": workflow_id,
+                                    "processed": probes_done,
+                                    "total": probes_total,
+                                    "tested": probes_tested,
+                                    "node_id": node_id,
+                                });
+                                let _ = pub_clone
+                                    .publish(status_subj.clone(), prog.to_string().into())
+                                    .await;
+                                last_prog = std::time::Instant::now();
+                            }
+                        }
+                    }
+
+                    if cancelled {
+                        // Stop probing; do NOT mark done (resume re-dispatches it).
+                        drop(lines);
+                        drop(writer);
+                        return;
+                    }
+
+                    // Push current cumulative progress at the end of each level
+                    // so finished levels are reflected promptly (the in-loop emit
+                    // is throttled and a short level may not have fired one).
+                    let prog = serde_json::json!({
+                        "type": "operation_progress",
+                        "operation_id": op_id,
+                        "workflow_id": workflow_id,
+                        "processed": probes_done,
+                        "total": probes_total,
+                        "tested": probes_tested,
+                        "node_id": node_id,
+                    });
+                    let _ = pub_clone
+                        .publish(status_subj.clone(), prog.to_string().into())
+                        .await;
+                }
+                Err(e) => {
+                    eprintln!("[op] FAIL Cannot connect to mach daemon: {}", e);
+                    let msg = serde_json::json!({
+                        "type": "completed",
+                        "job_id": format!("{}-{}", workflow_id, op_id),
+                        "code": 1
+                    });
+                    let _ = pub_clone
+                        .publish(result_subj.clone(), msg.to_string().into())
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        // All recursion levels drained: completion + final progress + status.
+        let done_msg = serde_json::json!({
+            "type": "completed",
+            "job_id": format!("{}-{}", workflow_id, op_id),
+            "workflow_id": workflow_id,
+            "code": 0
+        });
+        let _ = pub_clone
+            .publish(result_subj.clone(), done_msg.to_string().into())
+            .await;
+
+        // Reconcile to 100%: everything queued has now been probed.
+        let final_prog = serde_json::json!({
+            "type": "operation_progress",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "processed": probes_total,
+            "total": probes_total,
+            "tested": probes_tested,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), final_prog.to_string().into())
+            .await;
+
+        mark_op_done(&op_id);
+        let status_msg = serde_json::json!({
+            "type": "operation_completed",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "found_count": found_count,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), status_msg.to_string().into())
+            .await;
+    } else if op_type.starts_with("web-crawl-") {
+        // Wordlist-free crawl via the mach daemon (port 4441),
+        // streaming discovered URLs into the shared asset graph.
+        let seed = data["seed"]
+            .as_str()
+            .or_else(|| data["target"].as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let mut crawl_req = serde_json::json!({
+            "operation": "crawl",
+            "response": "stream",
+            "seed": seed,
+        });
+        if let (Some(obj), Some(cr)) = (data.as_object(), crawl_req.as_object_mut()) {
+            for k in [
+                "same_host",
+                "include_subdomains",
+                "follow_external",
+                "scope_hosts",
+                "max_depth",
+                "max_pages",
+                "tasks",
+                "delay",
+                "timeout_ms",
+                "parse_js",
+                "exclude",
+                "posture",
+            ] {
+                if let Some(v) = obj.get(k) {
+                    cr.insert(k.to_string(), v.clone());
+                }
+            }
+        }
+
+        // Authenticated crawl: resolve an attached credential into
+        // request auth (headers/cookies) and hand it to mach.
+        if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
+            let host = target_host(&seed);
+            match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
+                Ok(auth) => {
+                    if let Some(cr) = crawl_req.as_object_mut() {
+                        cr.insert("auth".into(), auth);
+                    }
+                }
+                Err(e) => eprintln!("[op] web-crawl credential resolve failed ({cid}): {e}"),
+            }
+        }
+
+        let mut found_count: i64 = 0;
+        let mut processed: i64 = 0;
+        let mut total: i64 = 0;
+        let mut last_prog = std::time::Instant::now();
+
+        let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
+        match conn {
+            Ok(stream) => {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                let (reader, mut writer) = stream.into_split();
+                let mut req_str = serde_json::to_string(&crawl_req).unwrap();
+                req_str.push('\n');
+                let _ = writer.write_all(req_str.as_bytes()).await;
+
+                let mut lines = BufReader::new(reader).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+                        println!(
+                            "[op] web-crawl cancelled (workflow paused/deleted) - stopping mach stream"
+                        );
+                        drop(lines);
+                        drop(writer);
+                        return;
+                    }
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let event = match serde_json::from_str::<serde_json::Value>(&line) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    match event["type"].as_str().unwrap_or("") {
+                        "ack" => {
+                            if let Some(t) = event["total"].as_i64() {
+                                if t > total {
+                                    total = t;
+                                }
+                            }
+                        }
+                        "url" => {
+                            let url = event["url"].as_str().unwrap_or("");
+                            if url.is_empty() {
+                                continue;
+                            }
+                            found_count += 1;
+                            let result_msg = serde_json::json!({
+                                "type": "result",
+                                "job_id": format!("{}-{}", workflow_id, op_id),
+                                "workflow_id": workflow_id,
+                                "data": {
+                                    "target": url,
+                                    "url": url,
+                                    "type": "endpoint",
+                                    "source": "crawl",
+                                    "status_code": event["status_code"],
+                                    "method": event["method"],
+                                    "content_type": event["content_type"],
+                                    "params": event["params"],
+                                    "discovered_from": event["discovered_from"],
+                                    "depth": event["depth"],
+                                    "operation_id": op_id,
+                                }
+                            });
+                            let _ = pub_clone
+                                .publish(result_subj.clone(), result_msg.to_string().into())
+                                .await;
+                        }
+                        "progress" => {
+                            if let Some(p) = event["processed"].as_i64() {
+                                processed = p;
+                            }
+                            if let Some(t) = event["total"].as_i64() {
+                                if t > total {
+                                    total = t;
+                                }
+                            }
+                        }
+                        "done" => break,
+                        "error" => {
+                            eprintln!(
+                                "[op] FAIL mach crawl error: {}",
+                                event["message"].as_str().unwrap_or("unknown")
+                            );
+                            break;
+                        }
+                        _ => {}
+                    }
+
+                    if last_prog.elapsed() >= std::time::Duration::from_millis(800) {
+                        let prog = serde_json::json!({
+                            "type": "operation_progress",
+                            "operation_id": op_id,
+                            "workflow_id": workflow_id,
+                            "processed": processed,
+                            "total": total.max(processed),
+                            "node_id": node_id,
+                        });
+                        let _ = pub_clone
+                            .publish(status_subj.clone(), prog.to_string().into())
+                            .await;
+                        last_prog = std::time::Instant::now();
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[op] FAIL mach daemon unreachable on 127.0.0.1:4441 for crawl ({}). Is `mach --daemon` running?",
+                    e
+                );
+                let msg = serde_json::json!({
+                    "type": "completed",
+                    "job_id": format!("{}-{}", workflow_id, op_id),
+                    "code": 1
+                });
+                let _ = pub_clone
+                    .publish(result_subj.clone(), msg.to_string().into())
+                    .await;
+                return;
+            }
+        }
+
+        let done_msg = serde_json::json!({
+            "type": "completed",
+            "job_id": format!("{}-{}", workflow_id, op_id),
+            "workflow_id": workflow_id,
+            "code": 0
+        });
+        let _ = pub_clone
+            .publish(result_subj.clone(), done_msg.to_string().into())
+            .await;
+
+        let final_prog = serde_json::json!({
+            "type": "operation_progress",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "processed": processed.max(found_count),
+            "total": total.max(processed).max(found_count),
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), final_prog.to_string().into())
+            .await;
+
+        mark_op_done(&op_id);
+        let status_msg = serde_json::json!({
+            "type": "operation_completed",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "found_count": found_count,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), status_msg.to_string().into())
+            .await;
+    } else if op_type.starts_with("subdomain-enum-") {
+        // Subdomain enumeration via voyage daemon (port 4442)
+        let domain = data["domain"].as_str().unwrap_or("").to_string();
+        let threads = data["threads"].as_i64().unwrap_or(10);
+        let delay = data["delay"].as_i64().unwrap_or(0).max(0);
+        let disable_passive = data["disable_passive"].as_bool().unwrap_or(false);
+        let disable_active = data["disable_active"].as_bool().unwrap_or(false);
+
+        // Download wordlist for active enum if available
+        let mut wordlist_path = String::new();
+        if !disable_active {
+            if let Some(wl_url) = data["wordlist_url"].as_str() {
+                if !wl_url.is_empty() {
+                    let tmp = format!("/tmp/cfx-wl-sub-{}.txt", op_id);
+                    if let Ok(resp) = reqwest::get(wl_url).await {
+                        if let Ok(body) = resp.text().await {
+                            let _ = std::fs::write(&tmp, &body);
+                            wordlist_path = tmp;
+                        }
+                    }
+                }
+            } else if let Some(wls) = data["wordlists"].as_array() {
+                if let Some(first) = wls.first() {
+                    let dl_url = first["url"].as_str().unwrap_or("");
+                    if !dl_url.is_empty() {
+                        let tmp = format!(
+                            "/tmp/cfx-wl-sub-{}.txt",
+                            first["id"].as_str().unwrap_or("wl")
+                        );
+                        if let Ok(resp) = reqwest::get(dl_url).await {
+                            if let Ok(body) = resp.text().await {
+                                let _ = std::fs::write(&tmp, &body);
+                                wordlist_path = tmp;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!(
+            "[op] voyage enum: {} passive={} active={} threads={} delay={}ms",
+            domain, !disable_passive, !disable_active, threads, delay
+        );
+
+        // Recursive enumeration (wizard toggle): when a subdomain is
+        // found, enumerate ITS subdomains too, up to recurse_depth levels.
+        // Gated behind recurse=true, so recurse=false is the exact same
+        // single-pass enum as before (frontier holds one domain).
+        let recurse = data["recurse"].as_bool().unwrap_or(false);
+        let recurse_depth = data["recurse_depth"].as_i64().unwrap_or(0).max(0) as usize;
+
+        let mut frontier: std::collections::VecDeque<(String, usize)> =
+            std::collections::VecDeque::new();
+        frontier.push_back((domain.clone(), 0usize));
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        visited.insert(domain.clone());
+
+        let mut found_count = 0;
+        let mut cancelled = false;
+        // Live word accounting across ALL recursion levels. Each level's
+        // "ack" adds its candidate count to words_total, so the bar grows as
+        // found subdomains are queued for their own enumeration - instead of
+        // sitting at the initial wordlist size.
+        let phase = data["phase"]
+            .as_str()
+            .or_else(|| data["mode"].as_str())
+            .unwrap_or("active")
+            .to_string();
+        let mut words_done: i64 = 0;
+        let mut words_total: i64 = 0;
+        // Active candidates per domain (= wordlist size). Each subdomain we
+        // queue for recursion adds this to the total the moment it's found,
+        // so the bar climbs as discoveries come in (not only once the deeper
+        // enumeration starts).
+        let wl_lines: i64 = std::fs::read_to_string(&wordlist_path)
+            .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as i64)
+            .unwrap_or(0);
+        let mut last_prog = std::time::Instant::now();
+        let emit_progress = |processed: i64, total: i64, found: i64| {
+            let p = pub_clone.clone();
+            let subj = status_subj.clone();
+            let oid = op_id.clone();
+            let wid = workflow_id.to_string();
+            let ph = phase.clone();
+            let nid = node_id.clone();
+            async move {
+                let msg = serde_json::json!({
+                    "type": "operation_progress", "operation_id": oid, "workflow_id": wid,
+                    "phase": ph, "processed": processed, "total": total,
+                    "found_count": found, "node_id": nid,
+                });
+                let _ = p.publish(subj, msg.to_string().into()).await;
+            }
+        };
+
+        while let Some((cur_domain, depth)) = frontier.pop_front() {
+            let voyage_req = serde_json::json!({
+                "operation": "enum",
+                "response": "stream",
+                "domain": cur_domain.clone(),
+                "wordlist": wordlist_path.clone(),
+                "tasks": threads,
+                "delay": delay,
+                "fresh_start": true,
+                "disable_passive": disable_passive,
+                "disable_active": disable_active,
+                "dns_server": data["dns_server"].as_str().unwrap_or(""),
+                // Adaptive applies to the ACTIVE brute-force only.
+                "adaptive_rate": data["adaptive_rate"].as_bool().unwrap_or(false),
+                "adaptive_resilience": data["adaptive_resilience"].as_bool().unwrap_or(false),
+                "posture": data["posture"].as_str().unwrap_or("balanced"),
+            });
+
+            let conn = tokio::net::TcpStream::connect("127.0.0.1:4442").await;
+            match conn {
+                Ok(stream) => {
+                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                    let (reader, mut writer) = stream.into_split();
+                    let mut req_str = serde_json::to_string(&voyage_req).unwrap();
+                    req_str.push('\n');
+                    let _ = writer.write_all(req_str.as_bytes()).await;
+
+                    let mut lines = BufReader::new(reader).lines();
+
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+                            println!(
+                                "[op] subdomain enum cancelled (workflow paused) - stopping stream"
+                            );
+                            cancelled = true;
+                            break;
+                        }
+                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let evt_type = event["type"].as_str().unwrap_or("");
+
+                            match evt_type {
+                                "ack" => {
+                                    // Level 0's real candidate count seeds the total.
+                                    // Deeper levels were already added to the total when
+                                    // their subdomain was discovered (see enqueue below),
+                                    // so we don't double-count them here.
+                                    if depth == 0 {
+                                        words_total += event["total"].as_i64().unwrap_or(0);
+                                    }
+                                    emit_progress(words_done, words_total, found_count).await;
+                                }
+                                "result" => {
+                                    words_done += 1;
+                                    if event["status"].as_str() == Some("found") {
+                                        found_count += 1;
+                                        let subdomain =
+                                            event["subdomain"].as_str().unwrap_or("").to_string();
+                                        let source = event["source"].as_str().unwrap_or("unknown");
+                                        let result_msg = serde_json::json!({
+                                            "type": "result",
+                                            "job_id": format!("{}-{}", workflow_id, op_id),
                                             "workflow_id": workflow_id,
-                                            "found_count": 0,
-                                            "node_id": node_id,
+                                            "data": {
+                                                "target": subdomain.clone(),
+                                                "type": "subdomain",
+                                                "source": source,
+                                                "domain": domain.clone(),
+                                                "operation_id": op_id,
+                                            }
                                         });
                                         let _ = pub_clone
-                                            .publish(status_subj.clone(), reack.to_string().into())
-                                            .await;
-                                        return;
-                                    }
-
-                                    // Track in-flight count through the rest of the
-                                    // closure. Print a stat line on every claim so
-                                    // the operator can see the throttle in action -
-                                    // each line tells them which op just started
-                                    // and how many are now active vs done.
-                                    let _flight = if !workflow_id.is_empty() {
-                                        let m = workflow_metrics(&workflow_id);
-                                        let g = InFlightGuard::start(m.clone());
-                                        use std::sync::atomic::Ordering;
-                                        let ifl = m.in_flight.load(Ordering::Relaxed);
-                                        let done = m.completed.load(Ordering::Relaxed);
-                                        let fail = m.errored.load(Ordering::Relaxed);
-                                        let short = workflow_id.get(..8).unwrap_or(&workflow_id);
-                                        println!("[scan {}] claim in_flight={} done={} failed={}",
-                                                 short, ifl, done, fail);
-                                        Some(g)
-                                    } else { None };
-
-                                    // For single-consumption ops, try to claim
-                                    // it first - unless the controller marked it
-                                    // pre_claimed (1-node-assigned ops have no
-                                    // race to win, so we skip the HTTP round-trip).
-                                    if consumption == "single" && !pre_claimed {
-                                        let claim_res = http
-                                            .post(&format!("{}/api/v1/claim-operation", api_url))
-                                            .json(&serde_json::json!({
-                                                "operation_id": op_id,
-                                                "node_id": node_id,
-                                            }))
-                                            .send()
+                                            .publish(
+                                                result_subj.clone(),
+                                                result_msg.to_string().into(),
+                                            )
                                             .await;
 
-                                        let claimed = match claim_res {
-                                            Ok(res) if res.status().is_success() => {
-                                                let body: serde_json::Value = res.json().await.unwrap_or_default();
-                                                body["data"]["claimed"].as_bool().unwrap_or(false)
-                                            }
-                                            _ => false,
-                                        };
-
-                                        use std::sync::atomic::Ordering;
-                                        if !claimed {
-                                            // Counter still tracked for the periodic
-                                            // snapshot below; per-event log dropped.
-                                            CLAIM_MISS.fetch_add(1, Ordering::Relaxed);
-                                            return;
+                                        // Enumerate found subdomains at the next level.
+                                        if recurse
+                                            && depth < recurse_depth
+                                            && !subdomain.is_empty()
+                                            && subdomain != cur_domain
+                                            && visited.insert(subdomain.clone())
+                                        {
+                                            // Grow the total now, at discovery time, so the
+                                            // bar climbs as subdomains are found.
+                                            words_total += wl_lines;
+                                            frontier.push_back((subdomain, depth + 1));
                                         }
-                                        CLAIM_OK.fetch_add(1, Ordering::Relaxed);
-                                    } else if pre_claimed {
-                                        use std::sync::atomic::Ordering;
-                                        CLAIM_OK.fetch_add(1, Ordering::Relaxed);
                                     }
-                                    // For content-discovery-*, talk directly to mach daemon
-                                    if op_type.starts_with("content-discovery-") {
-                                        let mode = data["mode"].as_str().unwrap_or("batch");
-
-                                        // Single-URL probe mode: one target per op
-                                        if mode == "probe" {
-                                            let probe_url = data["probe_url"].as_str().unwrap_or("");
-                                            let method = data["method"].as_str().unwrap_or("GET").to_lowercase();
-                                            let success_codes_str = data["success_codes"].as_str().unwrap_or("200,201,301,302,403");
-                                            let codes: Vec<u16> = success_codes_str.split(',')
-                                                .filter_map(|s| s.trim().parse().ok()).collect();
-
-                                            // Per-slot pacing: sleep WHILE holding the semaphore
-                                            // permit so the wizard's "delay" actually throttles
-                                            // the rate. tasks=10 + delay=20ms => floor of ~500/sec.
-                                            let delay_ms = data["delay"].as_i64().unwrap_or(0).max(0) as u64;
-                                            if delay_ms > 0 {
-                                                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                                            }
-
-                                            let mach_req = serde_json::json!({
-                                                "operation": "probe",
-                                                "response": "instant",
-                                                "url": probe_url,
-                                                "method": method,
-                                                "success_codes": codes,
-                                                "volatility": 0,
-                                                "operation_id": op_id,
-                                                // Wizard "Follow Redirects" toggle (default off).
-                                                "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(false),
-                                            });
-
-                                            let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
-                                            match conn {
-                                                Ok(stream) => {
-                                                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                    let (reader, mut writer) = stream.into_split();
-                                                    let mut req_str = serde_json::to_string(&mach_req).unwrap();
-                                                    req_str.push('\n');
-                                                    let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                    let mut lines = BufReader::new(reader).lines();
-                                                    // Bound the wait. If mach connects but never
-                                                    // answers (target stopped responding, or mach
-                                                    // wedged on this URL), don't deadlock the op
-                                                    // forever - time out and fall through to the
-                                                    // completion ack below so the scan advances.
-                                                    let read = tokio::time::timeout(
-                                                        std::time::Duration::from_secs(30),
-                                                        lines.next_line(),
-                                                    )
-                                                    .await;
-                                                    if let Ok(Ok(Some(line))) = read {
-                                                        if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
-                                                            let status = resp["status"].as_str().unwrap_or("");
-                                                            let code = resp["code"].as_i64().unwrap_or(0);
-                                                            let body_len = resp["body_length"].as_i64().unwrap_or(0);
-
-                                                            if status == "found" {
-                                                                let result_msg = serde_json::json!({
-                                                                    "type": "result",
-                                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                    "workflow_id": workflow_id,
-                                                                    "data": {
-                                                                        "target": probe_url,
-                                                                        "type": "endpoint",
-                                                                        "status_code": code,
-                                                                        "body_length": body_len,
-                                                                        "source": "mach",
-                                                                        "operation_id": op_id,
-                                                                        "word": data["word"].as_str().unwrap_or(""),
-                                                                    }
-                                                                });
-                                                                let _ = pub_clone.publish(
-                                                                    result_subj.clone(),
-                                                                    result_msg.to_string().into()
-                                                                ).await;
-                                                                println!("[op] OK FOUND {} [{}]", probe_url, code);
-                                                            } else {
-                                                                // Not found - no result published
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("[op] FAIL Cannot connect to mach daemon: {}", e);
-                                                }
-                                            }
-
-                                            // Signal completion for this single probe
-                                            let done_msg = serde_json::json!({
-                                                "type": "completed",
-                                                "job_id": format!("{}-{}", workflow_id, op_id),
-                                                "workflow_id": workflow_id,
-                                                "code": 0
-                                            });
-                                            let _ = pub_clone.publish(result_subj, done_msg.to_string().into()).await;
-
-                                            mark_op_done(&op_id);
-                                            let status_msg = serde_json::json!({
-                                                "type": "operation_completed",
-                                                "operation_id": op_id,
-                                                "workflow_id": workflow_id,
-                                                "found_count": if data["probe_url"].is_string() { 1 } else { 0 },
-                                                "node_id": node_id,
-                                            });
-                                            let _ = pub_clone.publish(status_subj, status_msg.to_string().into()).await;
-                                            return;
-                                        }
-
-                                        // Batch/stream mode: full scan via mach
-                                        let url = data["url"].as_str().unwrap_or("");
-                                        let method = data["method"].as_str().unwrap_or("GET");
-                                        let threads = data["threads"].as_i64().unwrap_or(10);
-                                        let success_codes_str = data["success_codes"].as_str().unwrap_or("200,201,301,302,403");
-
-                                        // Download wordlist - supports both formats:
-                                        // One input: "wordlist_url" (single presigned chunk URL)
-                                        // Or: "wordlists" array with [{ id, url }]
-                                        let mut wordlist_path = String::new();
-
-                                        if let Some(wl_url) = data["wordlist_url"].as_str() {
-                                            // single chunk URL
-                                            if !wl_url.is_empty() {
-                                                let tmp = format!("/tmp/cfx-wl-chunk-{}.txt", op_id);
-                                                println!("[op] Downloading wordlist chunk...");
-                                                if let Ok(resp) = reqwest::get(wl_url).await {
-                                                    if let Ok(body) = resp.text().await {
-                                                        let _ = std::fs::write(&tmp, &body);
-                                                        wordlist_path = tmp;
-                                                        let lines = body.lines().count();
-                                                        println!("[op] OK Chunk downloaded ({} lines, {} bytes)", lines, body.len());
-                                                    }
-                                                }
-                                            }
-                                        } else if let Some(wls) = data["wordlists"].as_array() {
-                                            // array of wordlists
-                                            if let Some(first) = wls.first() {
-                                                let dl_url = first["url"].as_str().unwrap_or("");
-                                                if !dl_url.is_empty() {
-                                                    let wl_id = first["id"].as_str().unwrap_or("wordlist");
-                                                    let tmp = format!("/tmp/cfx-wl-{}.txt", wl_id);
-                                                    println!("[op] Downloading wordlist: {}", wl_id);
-                                                    if let Ok(resp) = reqwest::get(dl_url).await {
-                                                        if let Ok(body) = resp.text().await {
-                                                            let _ = std::fs::write(&tmp, &body);
-                                                            wordlist_path = tmp;
-                                                            println!("[op] OK Wordlist downloaded ({} bytes)", body.len());
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if wordlist_path.is_empty() {
-                                            // Fallback to local common.txt
-                                            wordlist_path = "/opt/crossfyre/wordlists/common.txt".to_string();
-                                            if !std::path::Path::new(&wordlist_path).exists() {
-                                                eprintln!("[op] FAIL No wordlist available");
-                                                let msg = serde_json::json!({
-                                                    "type": "completed", "job_id": op_id,
-                                                    "code": 1
-                                                });
-                                                let _ = pub_clone.publish(result_subj, msg.to_string().into()).await;
-                                                return;
-                                            }
-                                        }
-
-                                        // Build mach endpoint
-                                        // Parse success codes + pacing (shared across recursion levels).
-                                        let codes: Vec<u16> = success_codes_str.split(',')
-                                            .filter_map(|s| s.trim().parse().ok())
-                                            .collect();
-                                        let delay = data["delay"].as_i64().unwrap_or(0).max(0);
-                                        // Resume vs fresh: a re-dispatched paused op sets data.resume=true,
-                                        // so mach RESUMES the chunk (fresh_start=false) instead of re-probing.
-                                        let resume = data["resume"].as_bool().unwrap_or(false);
-
-                                        // Recursive discovery (wizard toggle): when a directory is found,
-                                        // re-run the same wordlist inside it, up to recurse_depth levels.
-                                        // Gated behind recurse=true, so recurse=false is the exact same
-                                        // single-pass scan as before (frontier holds one item, none added).
-                                        let recurse = data["recurse"].as_bool().unwrap_or(false);
-                                        let recurse_depth = data["recurse_depth"].as_i64().unwrap_or(0).max(0) as usize;
-                                        // Adaptive engine flags (default off = current fixed pacing). mach
-                                        // reads these and, when set, runs the controller-driven path.
-                                        let adaptive_rate = data["adaptive_rate"].as_bool().unwrap_or(false);
-                                        let adaptive_resilience = data["adaptive_resilience"].as_bool().unwrap_or(false);
-                                        let posture = data["posture"].as_str().unwrap_or("balanced").to_string();
-                                        // When adaptive rate is on, the pace is shared across every chunk
-                                        // hitting this target host: it sets the engine's inter-probe delay
-                                        // (rate self-adaptation off) while each chunk still adapts resilience.
-                                        let cd_host = target_host(url);
-                                        // Coverage-first, feedback-driven concurrency. A CD workflow runs many
-                                        // chunks concurrently, each a mach scan, so an unbounded per-chunk
-                                        // `tasks` would multiply the combined volume against one target well
-                                        // past a healthy range and start dropping findings. The shared pace
-                                        // starts from the posture seed and adapts toward safety as the engine
-                                        // reports stress (probes that needed retries) that the final outcome
-                                        // would otherwise hide; always-retry resilience recovers transients.
-                                        let posture_cap = adaptive::coord::posture_cap(&posture) as i64;
-                                        let pace = if adaptive_rate {
-                                            Some(target_pace(&workflow_id, &cd_host, &posture, delay.max(0) as u64, threads.max(1).min(posture_cap) as u64))
-                                        } else {
-                                            None
-                                        };
-                                        let cd_tasks = pace.as_ref().map(|p| p.tasks() as i64).unwrap_or(threads);
-                                        if let Some(ref p) = pace {
-                                            println!("[op] shared pace: target={} posture={} tasks={}", cd_host, posture, p.tasks());
-                                        }
-                                        // Traversal order: "depth" dives into each find immediately (push to
-                                        // front); anything else is breadth-first, finishing each level before
-                                        // the next (push to back). Default breadth-first.
-                                        let depth_first = data["recurse_order"].as_str() == Some("depth");
-                                        // Probe-level progress denominator for the initial pass (level-0
-                                        // chunk size, known up front). Recursion grows this live below.
-                                        let chunk_total = data["wordlist_lines"].as_i64().unwrap_or(0);
-
-                                        // Level 0 uses this node's assigned wordlist (a small chunk
-                                        // of the full list). Recursion into a discovered directory must instead try the
-                                        // FULL wordlist, or the chunk is far too small to find anything
-                                        // deeper. The control plane passes the full list as
-                                        // recurse_wordlist_url; download it once and use it for depth >= 1.
-                                        // If absent (e.g. when the full list already ships), fall back to the
-                                        // level-0 wordlist.
-                                        let mut recurse_wordlist_path = wordlist_path.clone();
-                                        let mut recurse_wl_lines: i64 = chunk_total; // per-directory probe count at deeper levels
-                                        if recurse {
-                                            if let Some(rw_url) = data["recurse_wordlist_url"].as_str() {
-                                                if !rw_url.is_empty() {
-                                                    let tmp = format!("/tmp/cfx-wl-recurse-{}.txt", op_id);
-                                                    if let Ok(resp) = reqwest::get(rw_url).await {
-                                                        if let Ok(body) = resp.text().await {
-                                                            let _ = std::fs::write(&tmp, &body);
-                                                            recurse_wordlist_path = tmp;
-                                                            recurse_wl_lines = body.lines().filter(|l| !l.trim().is_empty()).count() as i64;
-                                                            println!("[op] recursion wordlist downloaded ({} lines)", recurse_wl_lines);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Live probe accounting. Recursion has no fixed total up front, so we
-                                        // grow `probes_total` by one full recurse-wordlist each time a new
-                                        // directory is queued, and count every probe in `probes_done`. This
-                                        // makes the dashboard bar actually move during recursion instead of
-                                        // sitting at a fixed 99%.
-                                        let mut probes_done: i64 = 0;
-                                        let mut probes_total: i64 = chunk_total.max(0);
-                                        let mut probes_tested: i64 = 0; // requests sent incl. retries (reported by mach)
-                                        let mut last_prog = std::time::Instant::now();
-
-                                        // Frontier of (base_url, depth). Level 0 = the assigned target.
-                                        let base0 = url.trim_end_matches('/').to_string();
-                                        let mut frontier: std::collections::VecDeque<(String, usize)> =
-                                            std::collections::VecDeque::new();
-                                        frontier.push_back((base0.clone(), 0usize));
-                                        let mut visited: std::collections::HashSet<String> =
-                                            std::collections::HashSet::new();
-                                        visited.insert(base0);
-
-                                        let mut found_count = 0;
-                                        let mut cancelled = false;
-
-                                        while let Some((base, depth)) = frontier.pop_front() {
-                                            // Build the mach endpoint for this level.
-                                            let endpoint = if base.contains("::FUZZ::") {
-                                                base.clone()
-                                            } else {
-                                                format!("{}/::FUZZ::", base.trim_end_matches('/'))
-                                            };
-
-                                            // Level 0 = assigned chunk; deeper levels = full wordlist.
-                                            let level_wordlist = if depth == 0 { wordlist_path.clone() } else { recurse_wordlist_path.clone() };
-
-                                            println!("[op] mach scan (depth {}): {} method={} threads={} delay={}ms wordlist={} mode={}",
-                                                depth, endpoint, method, threads, delay, level_wordlist, mode);
-
-                                            let mach_req = serde_json::json!({
-                                                "operation": "scan",
-                                                "response": "stream",
-                                                "endpoint": endpoint,
-                                                "wordlist": level_wordlist.clone(),
-                                                "method": method.to_lowercase(),
-                                                // Shared concurrency + pace when adaptive rate is on, else the
-                                                // fixed wizard values. Backing tasks off under stress keeps the
-                                                // combined volume against a target in a healthy range so results
-                                                // don't get dropped.
-                                                "tasks": cd_tasks,
-                                                "delay": pace.as_ref().map(|p| p.delay() as i64).unwrap_or(delay),
-                                                "success_status_codes": codes.clone(),
-                                                "fresh_start": !resume,
-                                                // The pace owns the rate now, so mach doesn't self-adapt it; it
-                                                // still runs the adaptive path for resilience when enabled.
-                                                "adaptive_rate": false,
-                                                "adaptive_resilience": adaptive_resilience,
-                                                "posture": posture,
-                                            });
-
-                                            let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
-                                            match conn {
-                                                Ok(stream) => {
-                                                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                    let (reader, mut writer) = stream.into_split();
-                                                    let mut req_str = serde_json::to_string(&mach_req).unwrap();
-                                                    req_str.push('\n');
-                                                    let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                    let mut lines = BufReader::new(reader).lines();
-
-                                                    while let Ok(Some(line)) = lines.next_line().await {
-                                                        // Honor pause / halt / delete promptly (checked per probe event).
-                                                        if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
-                                                            println!("[op] content-discovery cancelled (workflow paused/deleted) - stopping mach stream");
-                                                            cancelled = true;
-                                                            break;
-                                                        }
-                                                        if line.trim().is_empty() { continue; }
-                                                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
-                                                            let evt_type = event["type"].as_str().unwrap_or("");
-                                                            if evt_type == "result" { probes_done += 1; }
-                                                            if let Some(t) = event["tested"].as_i64() { probes_tested = t.max(probes_tested); }
-                                                            // mach's "ack" carries the real entry count it will probe.
-                                                            // Seed the total from it when the op didn't pre-set
-                                                            // wordlist_lines, so the progress
-                                                            // bar shows real probes instead of a 0/1 op fallback.
-                                                            if evt_type == "ack" {
-                                                                if let Some(t) = event["total"].as_i64() {
-                                                                    if t > probes_total { probes_total = t; }
-                                                                }
-                                                            }
-
-                                                            // Feed the shared pace from each probe. A probe that
-                                                            // needed retries hit raw stress even if it finally
-                                                            // recovered - that's the signal the final status/code
-                                                            // hides, and the one that must drive the backoff.
-                                                            if let Some(ref p) = pace {
-                                                                if evt_type == "result" {
-                                                                    let st = event["status"].as_str().unwrap_or("");
-                                                                    let cd = event["code"].as_i64().unwrap_or(0);
-                                                                    let retried = event["retries"].as_i64().unwrap_or(0) > 0;
-                                                                    let class = if retried {
-                                                                        adaptive::ProbeClass::RateLimited
-                                                                    } else {
-                                                                        classify_event(st, cd)
-                                                                    };
-                                                                    p.observe(class);
-                                                                }
-                                                            }
-
-                                                            match evt_type {
-                                                                "result" if event["status"].as_str() == Some("found") => {
-                                                                    found_count += 1;
-                                                                    let found_url = event["url"].as_str().unwrap_or(url).to_string();
-                                                                    let code = event["code"].as_i64().unwrap_or(0);
-                                                                    let result_msg = serde_json::json!({
-                                                                        "type": "result",
-                                                                        "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                        "workflow_id": workflow_id,
-                                                                        "data": {
-                                                                            "target": found_url.clone(),
-                                                                            "type": "endpoint",
-                                                                            "status_code": event["code"],
-                                                                            "body_length": event["body_length"],
-                                                                            "source": "mach",
-                                                                            "operation_id": op_id,
-                                                                        }
-                                                                    });
-                                                                    let _ = pub_clone.publish(
-                                                                        result_subj.clone(),
-                                                                        result_msg.to_string().into()
-                                                                    ).await;
-
-                                                                    // Queue directory-like finds for the next level.
-                                                                    if recurse && depth < recurse_depth
-                                                                        && looks_like_directory(&found_url, code) {
-                                                                        let next = found_url.trim_end_matches('/').to_string();
-                                                                        if !next.is_empty() && !next.contains("::FUZZ::")
-                                                                            && visited.insert(next.clone()) {
-                                                                            // This directory will be probed with the
-                                                                            // full recurse wordlist, so grow the total.
-                                                                            probes_total += recurse_wl_lines;
-                                                                            if depth_first {
-                                                                                frontier.push_front((next, depth + 1));
-                                                                            } else {
-                                                                                frontier.push_back((next, depth + 1));
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                                "done" => {
-                                                                    println!("[op] OK Scan level complete (depth {}): {} found so far", depth, found_count);
-                                                                    break;
-                                                                }
-                                                                "error" => {
-                                                                    let msg = event["message"].as_str().unwrap_or("unknown error");
-                                                                    eprintln!("[op] FAIL mach error: {}", msg);
-                                                                    break;
-                                                                }
-                                                                _ => {} // ack, progress, not_found - skip
-                                                            }
-
-                                                            // Live probe progress. `probes_total` grows as new
-                                                            // directories are queued, so the bar keeps moving
-                                                            // through recursion instead of sitting at a fixed 99%.
-                                                            if last_prog.elapsed() >= std::time::Duration::from_millis(800) {
-                                                                let prog = serde_json::json!({
-                                                                    "type": "operation_progress",
-                                                                    "operation_id": op_id,
-                                                                    "workflow_id": workflow_id,
-                                                                    "processed": probes_done,
-                                                                    "total": probes_total,
-                                                                    "tested": probes_tested,
-                                                                    "node_id": node_id,
-                                                                });
-                                                                let _ = pub_clone.publish(status_subj.clone(), prog.to_string().into()).await;
-                                                                last_prog = std::time::Instant::now();
-                                                            }
-                                                        }
-                                                    }
-
-                                                    if cancelled {
-                                                        // Stop probing; do NOT mark done (resume re-dispatches it).
-                                                        drop(lines);
-                                                        drop(writer);
-                                                        return;
-                                                    }
-
-                                                    // Push current cumulative progress at the end of each level
-                                                    // so finished levels are reflected promptly (the in-loop emit
-                                                    // is throttled and a short level may not have fired one).
-                                                    let prog = serde_json::json!({
-                                                        "type": "operation_progress",
-                                                        "operation_id": op_id,
-                                                        "workflow_id": workflow_id,
-                                                        "processed": probes_done,
-                                                        "total": probes_total,
-                                                        "tested": probes_tested,
-                                                        "node_id": node_id,
-                                                    });
-                                                    let _ = pub_clone.publish(status_subj.clone(), prog.to_string().into()).await;
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("[op] FAIL Cannot connect to mach daemon: {}", e);
-                                                    let msg = serde_json::json!({
-                                                        "type": "completed",
-                                                        "job_id": format!("{}-{}", workflow_id, op_id),
-                                                        "code": 1
-                                                    });
-                                                    let _ = pub_clone.publish(result_subj.clone(), msg.to_string().into()).await;
-                                                    return;
-                                                }
-                                            }
-                                        }
-
-                                        // All recursion levels drained: completion + final progress + status.
-                                        let done_msg = serde_json::json!({
-                                            "type": "completed",
-                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                            "workflow_id": workflow_id,
-                                            "code": 0
-                                        });
-                                        let _ = pub_clone.publish(result_subj.clone(), done_msg.to_string().into()).await;
-
-                                        // Reconcile to 100%: everything queued has now been probed.
-                                        let final_prog = serde_json::json!({
-                                            "type": "operation_progress",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "processed": probes_total,
-                                            "total": probes_total,
-                                            "tested": probes_tested,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), final_prog.to_string().into()).await;
-
-                                        mark_op_done(&op_id);
-                                        let status_msg = serde_json::json!({
-                                            "type": "operation_completed",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "found_count": found_count,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), status_msg.to_string().into()).await;
-                                    } else if op_type.starts_with("web-crawl-") {
-                                        // Wordlist-free crawl via the mach daemon (port 4441),
-                                        // streaming discovered URLs into the shared asset graph.
-                                        let seed = data["seed"].as_str()
-                                            .or_else(|| data["target"].as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-
-                                        let mut crawl_req = serde_json::json!({
-                                            "operation": "crawl",
-                                            "response": "stream",
-                                            "seed": seed,
-                                        });
-                                        if let (Some(obj), Some(cr)) = (data.as_object(), crawl_req.as_object_mut()) {
-                                            for k in ["same_host", "include_subdomains", "follow_external",
-                                                      "scope_hosts", "max_depth", "max_pages", "tasks",
-                                                      "delay", "timeout_ms", "parse_js", "exclude", "posture"] {
-                                                if let Some(v) = obj.get(k) { cr.insert(k.to_string(), v.clone()); }
-                                            }
-                                        }
-
-                                        // Authenticated crawl: resolve an attached credential into
-                                        // request auth (headers/cookies) and hand it to mach.
-                                        if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
-                                            let host = target_host(&seed);
-                                            match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
-                                                Ok(auth) => {
-                                                    if let Some(cr) = crawl_req.as_object_mut() { cr.insert("auth".into(), auth); }
-                                                }
-                                                Err(e) => eprintln!("[op] web-crawl credential resolve failed ({cid}): {e}"),
-                                            }
-                                        }
-
-                                        let mut found_count: i64 = 0;
-                                        let mut processed: i64 = 0;
-                                        let mut total: i64 = 0;
-                                        let mut last_prog = std::time::Instant::now();
-
-                                        let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
-                                        match conn {
-                                            Ok(stream) => {
-                                                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                let (reader, mut writer) = stream.into_split();
-                                                let mut req_str = serde_json::to_string(&crawl_req).unwrap();
-                                                req_str.push('\n');
-                                                let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                let mut lines = BufReader::new(reader).lines();
-                                                while let Ok(Some(line)) = lines.next_line().await {
-                                                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
-                                                        println!("[op] web-crawl cancelled (workflow paused/deleted) - stopping mach stream");
-                                                        drop(lines);
-                                                        drop(writer);
-                                                        return;
-                                                    }
-                                                    if line.trim().is_empty() { continue; }
-                                                    let event = match serde_json::from_str::<serde_json::Value>(&line) {
-                                                        Ok(e) => e,
-                                                        Err(_) => continue,
-                                                    };
-                                                    match event["type"].as_str().unwrap_or("") {
-                                                        "ack" => {
-                                                            if let Some(t) = event["total"].as_i64() { if t > total { total = t; } }
-                                                        }
-                                                        "url" => {
-                                                            let url = event["url"].as_str().unwrap_or("");
-                                                            if url.is_empty() { continue; }
-                                                            found_count += 1;
-                                                            let result_msg = serde_json::json!({
-                                                                "type": "result",
-                                                                "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                "workflow_id": workflow_id,
-                                                                "data": {
-                                                                    "target": url,
-                                                                    "url": url,
-                                                                    "type": "endpoint",
-                                                                    "source": "crawl",
-                                                                    "status_code": event["status_code"],
-                                                                    "method": event["method"],
-                                                                    "content_type": event["content_type"],
-                                                                    "params": event["params"],
-                                                                    "discovered_from": event["discovered_from"],
-                                                                    "depth": event["depth"],
-                                                                    "operation_id": op_id,
-                                                                }
-                                                            });
-                                                            let _ = pub_clone.publish(result_subj.clone(), result_msg.to_string().into()).await;
-                                                        }
-                                                        "progress" => {
-                                                            if let Some(p) = event["processed"].as_i64() { processed = p; }
-                                                            if let Some(t) = event["total"].as_i64() { if t > total { total = t; } }
-                                                        }
-                                                        "done" => break,
-                                                        "error" => {
-                                                            eprintln!("[op] FAIL mach crawl error: {}", event["message"].as_str().unwrap_or("unknown"));
-                                                            break;
-                                                        }
-                                                        _ => {}
-                                                    }
-
-                                                    if last_prog.elapsed() >= std::time::Duration::from_millis(800) {
-                                                        let prog = serde_json::json!({
-                                                            "type": "operation_progress",
-                                                            "operation_id": op_id,
-                                                            "workflow_id": workflow_id,
-                                                            "processed": processed,
-                                                            "total": total.max(processed),
-                                                            "node_id": node_id,
-                                                        });
-                                                        let _ = pub_clone.publish(status_subj.clone(), prog.to_string().into()).await;
-                                                        last_prog = std::time::Instant::now();
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                eprintln!("[op] FAIL mach daemon unreachable on 127.0.0.1:4441 for crawl ({}). Is `mach --daemon` running?", e);
-                                                let msg = serde_json::json!({
-                                                    "type": "completed",
-                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                    "code": 1
-                                                });
-                                                let _ = pub_clone.publish(result_subj.clone(), msg.to_string().into()).await;
-                                                return;
-                                            }
-                                        }
-
-                                        let done_msg = serde_json::json!({
-                                            "type": "completed",
-                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                            "workflow_id": workflow_id,
-                                            "code": 0
-                                        });
-                                        let _ = pub_clone.publish(result_subj.clone(), done_msg.to_string().into()).await;
-
-                                        let final_prog = serde_json::json!({
-                                            "type": "operation_progress",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "processed": processed.max(found_count),
-                                            "total": total.max(processed).max(found_count),
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), final_prog.to_string().into()).await;
-
-                                        mark_op_done(&op_id);
-                                        let status_msg = serde_json::json!({
-                                            "type": "operation_completed",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "found_count": found_count,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), status_msg.to_string().into()).await;
-                                    } else if op_type.starts_with("subdomain-enum-") {
-                                        // Subdomain enumeration via voyage daemon (port 4442)
-                                        let domain = data["domain"].as_str().unwrap_or("").to_string();
-                                        let threads = data["threads"].as_i64().unwrap_or(10);
-                                        let delay = data["delay"].as_i64().unwrap_or(0).max(0);
-                                        let disable_passive = data["disable_passive"].as_bool().unwrap_or(false);
-                                        let disable_active = data["disable_active"].as_bool().unwrap_or(false);
-
-                                        // Download wordlist for active enum if available
-                                        let mut wordlist_path = String::new();
-                                        if !disable_active {
-                                            if let Some(wl_url) = data["wordlist_url"].as_str() {
-                                                if !wl_url.is_empty() {
-                                                    let tmp = format!("/tmp/cfx-wl-sub-{}.txt", op_id);
-                                                    if let Ok(resp) = reqwest::get(wl_url).await {
-                                                        if let Ok(body) = resp.text().await {
-                                                            let _ = std::fs::write(&tmp, &body);
-                                                            wordlist_path = tmp;
-                                                        }
-                                                    }
-                                                }
-                                            } else if let Some(wls) = data["wordlists"].as_array() {
-                                                if let Some(first) = wls.first() {
-                                                    let dl_url = first["url"].as_str().unwrap_or("");
-                                                    if !dl_url.is_empty() {
-                                                        let tmp = format!("/tmp/cfx-wl-sub-{}.txt", first["id"].as_str().unwrap_or("wl"));
-                                                        if let Ok(resp) = reqwest::get(dl_url).await {
-                                                            if let Ok(body) = resp.text().await {
-                                                                let _ = std::fs::write(&tmp, &body);
-                                                                wordlist_path = tmp;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        println!("[op] voyage enum: {} passive={} active={} threads={} delay={}ms",
-                                            domain, !disable_passive, !disable_active, threads, delay);
-
-                                        // Recursive enumeration (wizard toggle): when a subdomain is
-                                        // found, enumerate ITS subdomains too, up to recurse_depth levels.
-                                        // Gated behind recurse=true, so recurse=false is the exact same
-                                        // single-pass enum as before (frontier holds one domain).
-                                        let recurse = data["recurse"].as_bool().unwrap_or(false);
-                                        let recurse_depth = data["recurse_depth"].as_i64().unwrap_or(0).max(0) as usize;
-
-                                        let mut frontier: std::collections::VecDeque<(String, usize)> =
-                                            std::collections::VecDeque::new();
-                                        frontier.push_back((domain.clone(), 0usize));
-                                        let mut visited: std::collections::HashSet<String> =
-                                            std::collections::HashSet::new();
-                                        visited.insert(domain.clone());
-
-                                        let mut found_count = 0;
-                                        let mut cancelled = false;
-                                        // Live word accounting across ALL recursion levels. Each level's
-                                        // "ack" adds its candidate count to words_total, so the bar grows as
-                                        // found subdomains are queued for their own enumeration - instead of
-                                        // sitting at the initial wordlist size.
-                                        let phase = data["phase"].as_str().or_else(|| data["mode"].as_str()).unwrap_or("active").to_string();
-                                        let mut words_done: i64 = 0;
-                                        let mut words_total: i64 = 0;
-                                        // Active candidates per domain (= wordlist size). Each subdomain we
-                                        // queue for recursion adds this to the total the moment it's found,
-                                        // so the bar climbs as discoveries come in (not only once the deeper
-                                        // enumeration starts).
-                                        let wl_lines: i64 = std::fs::read_to_string(&wordlist_path)
-                                            .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as i64)
-                                            .unwrap_or(0);
-                                        let mut last_prog = std::time::Instant::now();
-                                        let emit_progress = |processed: i64, total: i64, found: i64| {
-                                            let p = pub_clone.clone();
-                                            let subj = status_subj.clone();
-                                            let oid = op_id.clone();
-                                            let wid = workflow_id.to_string();
-                                            let ph = phase.clone();
-                                            let nid = node_id.clone();
-                                            async move {
-                                                let msg = serde_json::json!({
-                                                    "type": "operation_progress", "operation_id": oid, "workflow_id": wid,
-                                                    "phase": ph, "processed": processed, "total": total,
-                                                    "found_count": found, "node_id": nid,
-                                                });
-                                                let _ = p.publish(subj, msg.to_string().into()).await;
-                                            }
-                                        };
-
-                                        while let Some((cur_domain, depth)) = frontier.pop_front() {
-                                            let voyage_req = serde_json::json!({
-                                                "operation": "enum",
-                                                "response": "stream",
-                                                "domain": cur_domain.clone(),
-                                                "wordlist": wordlist_path.clone(),
-                                                "tasks": threads,
-                                                "delay": delay,
-                                                "fresh_start": true,
-                                                "disable_passive": disable_passive,
-                                                "disable_active": disable_active,
-                                                "dns_server": data["dns_server"].as_str().unwrap_or(""),
-                                                // Adaptive applies to the ACTIVE brute-force only.
-                                                "adaptive_rate": data["adaptive_rate"].as_bool().unwrap_or(false),
-                                                "adaptive_resilience": data["adaptive_resilience"].as_bool().unwrap_or(false),
-                                                "posture": data["posture"].as_str().unwrap_or("balanced"),
-                                            });
-
-                                            let conn = tokio::net::TcpStream::connect("127.0.0.1:4442").await;
-                                            match conn {
-                                                Ok(stream) => {
-                                                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                    let (reader, mut writer) = stream.into_split();
-                                                    let mut req_str = serde_json::to_string(&voyage_req).unwrap();
-                                                    req_str.push('\n');
-                                                    let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                    let mut lines = BufReader::new(reader).lines();
-
-                                                    while let Ok(Some(line)) = lines.next_line().await {
-                                                        if line.trim().is_empty() { continue; }
-                                                        if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
-                                                            println!("[op] subdomain enum cancelled (workflow paused) - stopping stream");
-                                                            cancelled = true;
-                                                            break;
-                                                        }
-                                                        if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
-                                                            let evt_type = event["type"].as_str().unwrap_or("");
-
-                                                            match evt_type {
-                                                                "ack" => {
-                                                                    // Level 0's real candidate count seeds the total.
-                                                                    // Deeper levels were already added to the total when
-                                                                    // their subdomain was discovered (see enqueue below),
-                                                                    // so we don't double-count them here.
-                                                                    if depth == 0 {
-                                                                        words_total += event["total"].as_i64().unwrap_or(0);
-                                                                    }
-                                                                    emit_progress(words_done, words_total, found_count).await;
-                                                                }
-                                                                "result" => {
-                                                                    words_done += 1;
-                                                                    if event["status"].as_str() == Some("found") {
-                                                                        found_count += 1;
-                                                                        let subdomain = event["subdomain"].as_str().unwrap_or("").to_string();
-                                                                        let source = event["source"].as_str().unwrap_or("unknown");
-                                                                        let result_msg = serde_json::json!({
-                                                                            "type": "result",
-                                                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                            "workflow_id": workflow_id,
-                                                                            "data": {
-                                                                                "target": subdomain.clone(),
-                                                                                "type": "subdomain",
-                                                                                "source": source,
-                                                                                "domain": domain.clone(),
-                                                                                "operation_id": op_id,
-                                                                            }
-                                                                        });
-                                                                        let _ = pub_clone.publish(result_subj.clone(), result_msg.to_string().into()).await;
-
-                                                                        // Enumerate found subdomains at the next level.
-                                                                        if recurse && depth < recurse_depth
-                                                                            && !subdomain.is_empty() && subdomain != cur_domain
-                                                                            && visited.insert(subdomain.clone()) {
-                                                                            // Grow the total now, at discovery time, so the
-                                                                            // bar climbs as subdomains are found.
-                                                                            words_total += wl_lines;
-                                                                            frontier.push_back((subdomain, depth + 1));
-                                                                        }
-                                                                    }
-                                                                    if last_prog.elapsed() >= std::time::Duration::from_millis(1500) {
-                                                                        emit_progress(words_done, words_total, found_count).await;
-                                                                        last_prog = std::time::Instant::now();
-                                                                    }
-                                                                }
-                                                                "done" => {
-                                                                    println!("[op] OK Enum level complete (depth {}): {} found so far", depth, found_count);
-                                                                    emit_progress(words_done, words_total, found_count).await;
-                                                                    break;
-                                                                }
-                                                                "error" => {
-                                                                    let msg = event["message"].as_str().unwrap_or("unknown");
-                                                                    eprintln!("[op] FAIL voyage error: {}", msg);
-                                                                    break;
-                                                                }
-                                                                _ => {}
-                                                            }
-                                                        }
-                                                    }
-
-                                                    if cancelled {
-                                                        drop(lines);
-                                                        drop(writer);
-                                                        return;
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("[op] FAIL Cannot connect to voyage daemon: {}", e);
-                                                    let msg = serde_json::json!({
-                                                        "type": "completed",
-                                                        "job_id": format!("{}-{}", workflow_id, op_id),
-                                                        "workflow_id": workflow_id,
-                                                        "code": 1
-                                                    });
-                                                    let _ = pub_clone.publish(result_subj.clone(), msg.to_string().into()).await;
-                                                    return;
-                                                }
-                                            }
-                                        }
-
-                                        // Reconcile to 100%: every queued candidate has been tried.
-                                        emit_progress(words_total, words_total, found_count).await;
-
-                                        let done_msg = serde_json::json!({
-                                            "type": "completed",
-                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                            "workflow_id": workflow_id,
-                                            "code": 0
-                                        });
-                                        let _ = pub_clone.publish(result_subj.clone(), done_msg.to_string().into()).await;
-
-                                        mark_op_done(&op_id);
-                                        let status_msg = serde_json::json!({
-                                            "type": "operation_completed",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "found_count": found_count,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), status_msg.to_string().into()).await;
-                                    } else if op_type.starts_with("network-scan-") {
-                                        // Single-port probe mode: data has host+port
-                                        if let Some(host) = data["host"].as_str().map(|s| s.to_string()) {
-                                            let port = data["port"].as_u64().unwrap_or(0) as u16;
-                                            let timeout_ms = data["timeout"].as_i64().unwrap_or(2000);
-                                            let delay_ms = data["delay"].as_i64().unwrap_or(0).max(0) as u64;
-                                            let service_detection = data["service_detection"].as_bool().unwrap_or(true);
-
-                                            // Per-probe delay - sleeps WHILE holding the
-                                            // semaphore permit, so it actually paces the
-                                            // workflow's effective rate. e.g. tasks=10 +
-                                            // delay=20ms => floor of ~500 probes/sec
-                                            // (10 / 20ms = 500/s).
-                                            if delay_ms > 0 {
-                                                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                                            }
-
-                                            // Use the same `scan` engine path the batch modes use, just
-                                            // with a single-port array, so it shares the
-                                            // exact same code in pulse that's been validated to
-                                            // find every open port - the older `probe` mode had
-                                            // a subtle reliability gap where some opens were
-                                            // returned as the default-closed when run_connect_scan's
-                                            // result event raced with the channel close.
-                                            // Concurrency is already gated by `_ws_permit`.
-                                            let pulse_req = serde_json::json!({
-                                                "operation": "scan",
-                                                "response": "instant",
-                                                "save": false,
-                                                "targets": [host],
-                                                "ports": [port],
-                                                "tasks": 1,
-                                                "timeout": timeout_ms,
-                                                "service_detection": service_detection,
-                                            });
-
-                                            let short_op = op_id.get(..8).unwrap_or(&op_id).to_string();
-                                            // Log every probe response while we're debugging the
-                                            // discrepancy between scan modes. Noisy but definitive: we'll
-                                            // see exactly what pulse says about every port and
-                                            // can grep for known-open ones (53, 80, 5432, etc).
-                                            let log_sample = true;
-                                            let mut found_count = 0;
-                                            let conn = tokio::net::TcpStream::connect("127.0.0.1:4443").await;
-                                            match conn {
-                                                Ok(stream) => {
-                                                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                    // RST-close so this per-op connection to pulse doesn't pile
-                                                    // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
-                                                    let _ = stream.set_linger(Some(std::time::Duration::ZERO));
-                                                    let (reader, mut writer) = stream.into_split();
-                                                    let mut req_str = serde_json::to_string(&pulse_req).unwrap();
-                                                    req_str.push('\n');
-                                                    if log_sample {
-                                                        println!("[ds {} {}:{}] -> probe sent ({} bytes)", short_op, host, port, req_str.len());
-                                                    }
-                                                    if let Err(e) = writer.write_all(req_str.as_bytes()).await {
-                                                        eprintln!("[ds {} {}:{}] write failed: {}", short_op, host, port, e);
-                                                    }
-
-                                                    let mut lines = BufReader::new(reader).lines();
-                                                    match lines.next_line().await {
-                                                        Ok(Some(line)) => {
-                                                            // Always log a snippet of the raw response on the
-                                                            // sampled probes so we can see the actual shape.
-                                                            if log_sample {
-                                                                let snippet = &line[..line.len().min(250)];
-                                                                println!("[ds {} {}:{}] <- pulse: {}", short_op, host, port, snippet);
-                                                            }
-                                                            if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
-                                                                let results_arr = resp["results"].as_array().cloned().unwrap_or_default();
-                                                                if log_sample {
-                                                                    println!("[ds {} {}:{}] parsed: results.len={}, top.status={:?}",
-                                                                        short_op, host, port,
-                                                                        results_arr.len(),
-                                                                        resp["status"].as_str().unwrap_or("?"));
-                                                                }
-                                                                if let Some(result) = results_arr.first() {
-                                                                    let status = result["status"].as_str().unwrap_or("");
-                                                                    if status == "open" || status == "filtered" {
-                                                                        found_count = 1;
-                                                                        let msg = serde_json::json!({
-                                                                            "type": "result",
-                                                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                            "workflow_id": workflow_id,
-                                                                            "operation_id": op_id,
-                                                                            "data": {
-                                                                                "host": host,
-                                                                                "port": port,
-                                                                                "status": status,
-                                                                                "service": result["service"],
-                                                                                "banner": result["banner"],
-                                                                                "latency_ms": result["latency_ms"],
-                                                                            }
-                                                                        });
-                                                                        match pub_clone.publish(result_subj.clone(), msg.to_string().into()).await {
-                                                                            Err(e) => eprintln!("[ds {} {}:{}] result publish failed: {}", short_op, host, port, e),
-                                                                            Ok(_)  => println!("[ds {} {}:{}] OPEN service={} latency={}",
-                                                                                short_op, host, port,
-                                                                                result["service"].as_str().unwrap_or("?"),
-                                                                                result["latency_ms"].as_u64().unwrap_or(0)),
-                                                                        }
-                                                                    }
-                                                                }
-                                                                if resp.get("results").is_none() && resp.get("status").and_then(|s| s.as_str()) != Some("error") {
-                                                                    eprintln!("[ds {} {}:{}] WEIRD response (no results field): {}", short_op, host, port, &line[..line.len().min(300)]);
-                                                                }
-                                                            } else {
-                                                                eprintln!("[ds {} {}:{}] non-JSON response: {}", short_op, host, port, &line[..line.len().min(300)]);
-                                                            }
-                                                        }
-                                                        Ok(None) => {
-                                                            eprintln!("[ds {} {}:{}] pulse closed connection without response", short_op, host, port);
-                                                        }
-                                                        Err(e) => {
-                                                            eprintln!("[ds {} {}:{}] read error: {}", short_op, host, port, e);
-                                                        }
-                                                    }
-
-                                                    let done_msg = serde_json::json!({
-                                                        "type": "completed",
-                                                        "job_id": format!("{}-{}", workflow_id, op_id),
-                                                        "workflow_id": workflow_id,
-                                                        "code": 0
-                                                    });
-                                                    if let Err(e) = pub_clone.publish(result_subj, done_msg.to_string().into()).await {
-                                                        eprintln!("[ds {} {}:{}] completed publish failed: {}", short_op, host, port, e);
-                                                    } else if log_sample {
-                                                        println!("[ds {} {}:{}] -> completed published (found={})", short_op, host, port, found_count);
-                                                    }
-
-                                                    mark_op_done(&op_id);
-                                                    let status_msg = serde_json::json!({
-                                                        "type": "operation_completed",
-                                                        "operation_id": op_id,
-                                                        "workflow_id": workflow_id,
-                                                        "found_count": found_count,
-                                                        "node_id": node_id,
-                                                    });
-                                                    if let Err(e) = pub_clone.publish(status_subj, status_msg.to_string().into()).await {
-                                                        eprintln!("[ds {} {}:{}] operation_completed publish failed: {}", short_op, host, port, e);
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    // The workflow view already shows a "Fix" button
-                                                    // based on the heartbeat-reported extension_status,
-                                                    // so we don't spam node_logs here. Just rate-limited
-                                                    // local stderr for operator-side debugging.
-                                                    use std::sync::atomic::{AtomicU64, Ordering};
-                                                    static LAST_LOG: AtomicU64 = AtomicU64::new(0);
-                                                    let now_secs = std::time::SystemTime::now()
-                                                        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                                                    if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
-                                                        LAST_LOG.store(now_secs, Ordering::Relaxed);
-                                                        eprintln!("[op] FAIL pulse daemon unreachable on 127.0.0.1:4443 ({}). Is `pulse --daemon` running? (suppressing further messages for 60s)", e);
-                                                    }
-                                                    let msg = serde_json::json!({
-                                                        "type": "completed",
-                                                        "job_id": format!("{}-{}", workflow_id, op_id),
-                                                        "workflow_id": workflow_id,
-                                                        "code": 1
-                                                    });
-                                                    let _ = pub_clone.publish(result_subj, msg.to_string().into()).await;
-                                                }
-                                            }
-                                            return;
-                                        }
-
-                                        // Batch scan mode: data has targets+ports arrays
-                                        let targets: Vec<String> = data["targets"]
-                                            .as_array()
-                                            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-                                            .unwrap_or_default();
-                                        let ports_value = data["ports"].clone();
-                                        let tasks = data["tasks"].as_i64().unwrap_or(100);
-                                        let timeout = data["timeout"].as_i64().unwrap_or(2000);
-                                        let delay = data["delay"].as_i64().unwrap_or(0).max(0);
-                                        let service_detection = data["service_detection"].as_bool().unwrap_or(true);
-                                        // Adaptive rate governor: default on. When on, pulse tunes
-                                        // concurrency/timeout/retries live from loss+RTT (tasks is
-                                        // just the seed); when off it uses the fixed tasks/timeout.
-                                        let adaptive = data["adaptive"].as_bool().unwrap_or(true);
-                                        let max_concurrency = data["max_concurrency"].as_i64();
-                                        // Posture caps how aggressive the governor may get (stealth |
-                                        // balanced | throughput). Passed straight through to pulse.
-                                        let posture = data["posture"].as_str().unwrap_or("balanced").to_string();
-
-                                        println!("[op] pulse scan: {} targets, ports={}, {} tasks, delay={}ms, adaptive={} posture={}",
-                                            targets.len(), ports_value, tasks, delay, adaptive, posture);
-
-                                        let mut pulse_req = serde_json::json!({
-                                            "operation": "scan",
-                                            "response": "stream",
-                                            "save": false,
-                                            "targets": targets,
-                                            "ports": ports_value,
-                                            "tasks": tasks,
-                                            "timeout": timeout,
-                                            "delay": delay,
-                                            "service_detection": service_detection,
-                                            "adaptive": adaptive,
-                                            "posture": posture,
-                                        });
-                                        if let Some(mc) = max_concurrency {
-                                            pulse_req["max_concurrency"] = serde_json::json!(mc);
-                                        }
-
-                                        let conn = tokio::net::TcpStream::connect("127.0.0.1:4443").await;
-                                        match conn {
-                                            Ok(stream) => {
-                                                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                // RST-close so this per-op connection to pulse doesn't pile
-                                                // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
-                                                let _ = stream.set_linger(Some(std::time::Duration::ZERO));
-                                                let (reader, mut writer) = stream.into_split();
-                                                let mut req_str = serde_json::to_string(&pulse_req).unwrap();
-                                                req_str.push('\n');
-                                                let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                let mut lines = BufReader::new(reader).lines();
-                                                let mut found_count = 0;
-                                                let mut total_events = 0;
-
-                                                while let Ok(Some(line)) = lines.next_line().await {
-                                                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
-                                                        total_events += 1;
-                                                        let event_type = event["type"].as_str().unwrap_or("");
-
-                                                        match event_type {
-                                                            "result" => {
-                                                                // Only report open/filtered ports as findings (skip closed to reduce noise)
-                                                                if event["status"].as_str() == Some("closed") { continue; }
-                                                                found_count += 1;
-                                                                let result_msg = serde_json::json!({
-                                                                    "type": "result",
-                                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                    "workflow_id": workflow_id,
-                                                                    "operation_id": op_id,
-                                                                    "data": {
-                                                                        "host": event["host"],
-                                                                        "port": event["port"],
-                                                                        "status": event["status"],
-                                                                        "service": event["service"],
-                                                                        "banner": event["banner"],
-                                                                        "latency_ms": event["latency_ms"],
-                                                                    }
-                                                                });
-                                                                let _ = pub_clone.publish(
-                                                                    result_subj.clone(),
-                                                                    result_msg.to_string().into()
-                                                                ).await;
-                                                            }
-                                                            "progress" => {
-                                                                // Probe-level progress from pulse: forward as
-                                                                // operation_progress so the workflow bar can show
-                                                                // "N / total_ports" instead of a coarse per-op count.
-                                                                let processed = event["processed"].as_i64().unwrap_or(0);
-                                                                let total = event["total"].as_i64().unwrap_or(0);
-                                                                let prog_msg = serde_json::json!({
-                                                                    "type": "operation_progress",
-                                                                    "operation_id": op_id,
-                                                                    "workflow_id": workflow_id,
-                                                                    "processed": processed,
-                                                                    "total": total,
-                                                                    "node_id": node_id,
-                                                                });
-                                                                let _ = pub_clone.publish(status_subj.clone(), prog_msg.to_string().into()).await;
-                                                            }
-                                                            "done" => {
-                                                                println!("[op] OK Scan complete: {} open ports found ({} events)", found_count, total_events);
-                                                                break;
-                                                            }
-                                                            "error" => {
-                                                                let msg = event["message"].as_str().unwrap_or("unknown");
-                                                                eprintln!("[op] FAIL pulse error: {}", msg);
-                                                                break;
-                                                            }
-                                                            _ => {}
-                                                        }
-                                                    }
-                                                }
-
-                                                let done_msg = serde_json::json!({
-                                                    "type": "completed",
-                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                    "workflow_id": workflow_id,
-                                                    "code": 0
-                                                });
-                                                let _ = pub_clone.publish(result_subj, done_msg.to_string().into()).await;
-
-                                                mark_op_done(&op_id);
-                                                let status_msg = serde_json::json!({
-                                                    "type": "operation_completed",
-                                                    "operation_id": op_id,
-                                                    "workflow_id": workflow_id,
-                                                    "found_count": found_count,
-                                                    "node_id": node_id,
-                                                });
-                                                let _ = pub_clone.publish(status_subj, status_msg.to_string().into()).await;
-                                            }
-                                            Err(e) => {
-                                                use std::sync::atomic::{AtomicU64, Ordering};
-                                                static LAST_LOG: AtomicU64 = AtomicU64::new(0);
-                                                let now_secs = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                                                if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
-                                                    LAST_LOG.store(now_secs, Ordering::Relaxed);
-                                                    eprintln!("[op] FAIL Cannot connect to pulse daemon: {} (suppressing further messages for 60s)", e);
-                                                }
-                                                let msg = serde_json::json!({
-                                                    "type": "completed",
-                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                    "workflow_id": workflow_id,
-                                                    "code": 1
-                                                });
-                                                let _ = pub_clone.publish(result_subj, msg.to_string().into()).await;
-                                            }
-                                        }
-                                    } else if op_type.starts_with("vuln-scan-") {
-                                        // Vulnerability detection via the cortex daemon (port 4445).
-                                        // Cortex streams already-confirmed `finding` events; the node
-                                        // stamps operation_id and relays them into the asset graph.
-                                        let target = data["target"].as_str()
-                                            .or_else(|| data["url"].as_str())
-                                            .or_else(|| data["seed"].as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        let sev_arr = data["severity"].as_array().cloned().unwrap_or_default();
-
-                                        let host = target_host(&target);
-                                        let mode = data["mode"].as_str().unwrap_or("scan");
-                                        let cortex_req = if mode == "authz" {
-                                            // Authorization testing (BOLA/BFLA): resolve the identity
-                                            // matrix and hand cortex the endpoints + identities.
-                                            let idents = data["identities"].as_array().cloned().unwrap_or_default();
-                                            let resolved = creds::resolve_identities(&http, &api_url, &api_key, &idents, &host).await;
-                                            serde_json::json!({
-                                                "operation": "authz",
-                                                "response": "stream",
-                                                "target": target,
-                                                "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(10000),
-                                                "endpoints": data["endpoints"].clone(),
-                                                "identities": resolved,
-                                            })
-                                        } else {
-                                            // Standard vuln scan. Optionally authenticated via a single
-                                            // attached credential.
-                                            let mut req = serde_json::json!({
-                                                "operation": "scan",
-                                                "response": "stream",
-                                                "target": target,
-                                                "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(10000),
-                                                "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(true),
-                                                "severity": sev_arr,
-                                                "templates_dir": data["templates_dir"].clone(),
-                                            });
-                                            if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
-                                                match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
-                                                    Ok(auth) => { if let Some(cr) = req.as_object_mut() { cr.insert("auth".into(), auth); } }
-                                                    Err(e) => eprintln!("[op] vuln-scan credential resolve failed ({cid}): {e}"),
-                                                }
-                                            }
-                                            // OAST endpoint for out-of-band (blind) confirmation. Default
-                                            // ("" / "managed") resolves to the managed pool; a UUID to a BYO
-                                            // endpoint; "off" disables OOB. The node hands cortex the
-                                            // resolved { domains, api_url }; cortex registers/polls directly.
-                                            let oast_ep = data["oast_endpoint_id"].as_str().unwrap_or("");
-                                            match oast::resolve(&http, &api_url, &api_key, oast_ep).await {
-                                                Ok(Some((domains, poll_url))) => {
-                                                    if let Some(cr) = req.as_object_mut() {
-                                                        cr.insert("oast".into(), serde_json::json!({ "domains": domains, "api_url": poll_url }));
-                                                    }
-                                                }
-                                                Ok(None) => {}
-                                                Err(e) => eprintln!("[op] vuln-scan oast resolve failed ({oast_ep}): {e}"),
-                                            }
-                                            req
-                                        };
-
-                                        let mut found_count: i64 = 0;
-                                        let mut processed: i64 = 0;
-                                        let mut total: i64 = 0;
-                                        let mut last_prog = std::time::Instant::now();
-                                        let conn = tokio::net::TcpStream::connect("127.0.0.1:4445").await;
-                                        match conn {
-                                            Ok(stream) => {
-                                                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                let (reader, mut writer) = stream.into_split();
-                                                let mut req_str = serde_json::to_string(&cortex_req).unwrap();
-                                                req_str.push('\n');
-                                                let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                let mut lines = BufReader::new(reader).lines();
-                                                while let Ok(Some(line)) = lines.next_line().await {
-                                                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
-                                                        drop(lines);
-                                                        drop(writer);
-                                                        return;
-                                                    }
-                                                    if line.trim().is_empty() { continue; }
-                                                    let event = match serde_json::from_str::<serde_json::Value>(&line) {
-                                                        Ok(e) => e,
-                                                        Err(_) => continue,
-                                                    };
-                                                    match event["type"].as_str().unwrap_or("") {
-                                                        "finding" => {
-                                                            found_count += 1;
-                                                            let mut fdata = event["data"].clone();
-                                                            if let Some(obj) = fdata.as_object_mut() {
-                                                                obj.insert("operation_id".to_string(), serde_json::json!(op_id));
-                                                            }
-                                                            let result_msg = serde_json::json!({
-                                                                "type": "result",
-                                                                "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                "workflow_id": workflow_id,
-                                                                "data": fdata,
-                                                            });
-                                                            let _ = pub_clone.publish(result_subj.clone(), result_msg.to_string().into()).await;
-                                                        }
-                                                        "progress" => {
-                                                            if let Some(p) = event["processed"].as_i64() { processed = p; }
-                                                            if let Some(t) = event["total"].as_i64() { if t > total { total = t; } }
-                                                        }
-                                                        "done" => break,
-                                                        "error" => {
-                                                            eprintln!("[op] FAIL cortex error: {}", event["message"].as_str().unwrap_or("unknown"));
-                                                            break;
-                                                        }
-                                                        _ => {}
-                                                    }
-
-                                                    if last_prog.elapsed() >= std::time::Duration::from_millis(800) {
-                                                        let prog = serde_json::json!({
-                                                            "type": "operation_progress",
-                                                            "operation_id": op_id,
-                                                            "workflow_id": workflow_id,
-                                                            "processed": processed,
-                                                            "total": total.max(processed),
-                                                            "node_id": node_id,
-                                                        });
-                                                        let _ = pub_clone.publish(status_subj.clone(), prog.to_string().into()).await;
-                                                        last_prog = std::time::Instant::now();
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                eprintln!("[op] FAIL cortex daemon unreachable on 127.0.0.1:4445 ({}). Is `cortex --daemon` running?", e);
-                                                let msg = serde_json::json!({
-                                                    "type": "completed",
-                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                    "code": 1
-                                                });
-                                                let _ = pub_clone.publish(result_subj.clone(), msg.to_string().into()).await;
-                                                return;
-                                            }
-                                        }
-
-                                        let done_msg = serde_json::json!({
-                                            "type": "completed",
-                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                            "workflow_id": workflow_id,
-                                            "code": 0
-                                        });
-                                        let _ = pub_clone.publish(result_subj.clone(), done_msg.to_string().into()).await;
-
-                                        let final_prog = serde_json::json!({
-                                            "type": "operation_progress",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "processed": processed.max(1),
-                                            "total": total.max(processed).max(1),
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), final_prog.to_string().into()).await;
-
-                                        mark_op_done(&op_id);
-                                        let status_msg = serde_json::json!({
-                                            "type": "operation_completed",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "found_count": found_count,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), status_msg.to_string().into()).await;
-                                    } else if op_type.starts_with("service-enum-") {
-                                        // Web/service fingerprinting via the scout daemon (port 4444).
-                                        // Scout streams `finding` events whose `data` is the finding
-                                        // verbatim; the node just stamps operation_id and relays them.
-                                        let target = data["target"].as_str()
-                                            .or_else(|| data["seed"].as_str())
-                                            .or_else(|| data["url"].as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-
-                                        let mut scout_req = serde_json::json!({
-                                            "operation": "fingerprint",
-                                            "response": "stream",
-                                            "target": target,
-                                            "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(8000),
-                                            "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(true),
-                                            "favicon": data["favicon"].as_bool().unwrap_or(true),
-                                            "depth_tier": data["depth_tier"].as_i64().unwrap_or(2),
-                                        });
-
-                                        // Authenticated fingerprinting: resolve an attached credential
-                                        // into request auth and hand it to scout.
-                                        if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
-                                            let host = target_host(&target);
-                                            match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
-                                                Ok(auth) => {
-                                                    if let Some(cr) = scout_req.as_object_mut() { cr.insert("auth".into(), auth); }
-                                                }
-                                                Err(e) => eprintln!("[op] service-enum credential resolve failed ({cid}): {e}"),
-                                            }
-                                        }
-
-                                        let mut found_count: i64 = 0;
-                                        let conn = tokio::net::TcpStream::connect("127.0.0.1:4444").await;
-                                        match conn {
-                                            Ok(stream) => {
-                                                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-                                                let (reader, mut writer) = stream.into_split();
-                                                let mut req_str = serde_json::to_string(&scout_req).unwrap();
-                                                req_str.push('\n');
-                                                let _ = writer.write_all(req_str.as_bytes()).await;
-
-                                                let mut lines = BufReader::new(reader).lines();
-                                                while let Ok(Some(line)) = lines.next_line().await {
-                                                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
-                                                        drop(lines);
-                                                        drop(writer);
-                                                        return;
-                                                    }
-                                                    if line.trim().is_empty() { continue; }
-                                                    let event = match serde_json::from_str::<serde_json::Value>(&line) {
-                                                        Ok(e) => e,
-                                                        Err(_) => continue,
-                                                    };
-                                                    match event["type"].as_str().unwrap_or("") {
-                                                        "finding" => {
-                                                            found_count += 1;
-                                                            let mut fdata = event["data"].clone();
-                                                            if let Some(obj) = fdata.as_object_mut() {
-                                                                obj.insert("operation_id".to_string(), serde_json::json!(op_id));
-                                                            }
-                                                            let result_msg = serde_json::json!({
-                                                                "type": "result",
-                                                                "job_id": format!("{}-{}", workflow_id, op_id),
-                                                                "workflow_id": workflow_id,
-                                                                "data": fdata,
-                                                            });
-                                                            let _ = pub_clone.publish(result_subj.clone(), result_msg.to_string().into()).await;
-                                                        }
-                                                        "done" => break,
-                                                        "error" => {
-                                                            eprintln!("[op] FAIL scout error: {}", event["message"].as_str().unwrap_or("unknown"));
-                                                            break;
-                                                        }
-                                                        _ => {}
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                eprintln!("[op] FAIL scout daemon unreachable on 127.0.0.1:4444 ({}). Is `scout --daemon` running?", e);
-                                                let msg = serde_json::json!({
-                                                    "type": "completed",
-                                                    "job_id": format!("{}-{}", workflow_id, op_id),
-                                                    "code": 1
-                                                });
-                                                let _ = pub_clone.publish(result_subj.clone(), msg.to_string().into()).await;
-                                                return;
-                                            }
-                                        }
-
-                                        let done_msg = serde_json::json!({
-                                            "type": "completed",
-                                            "job_id": format!("{}-{}", workflow_id, op_id),
-                                            "workflow_id": workflow_id,
-                                            "code": 0
-                                        });
-                                        let _ = pub_clone.publish(result_subj.clone(), done_msg.to_string().into()).await;
-
-                                        let final_prog = serde_json::json!({
-                                            "type": "operation_progress",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "processed": 1,
-                                            "total": 1,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), final_prog.to_string().into()).await;
-
-                                        mark_op_done(&op_id);
-                                        let status_msg = serde_json::json!({
-                                            "type": "operation_completed",
-                                            "operation_id": op_id,
-                                            "workflow_id": workflow_id,
-                                            "found_count": found_count,
-                                            "node_id": node_id,
-                                        });
-                                        let _ = pub_clone.publish(status_subj.clone(), status_msg.to_string().into()).await;
-                                    } else {
-                                        println!("[op] Unknown op_type: {}", op_type);
+                                    if last_prog.elapsed() >= std::time::Duration::from_millis(1500)
+                                    {
+                                        emit_progress(words_done, words_total, found_count).await;
+                                        last_prog = std::time::Instant::now();
                                     }
+                                }
+                                "done" => {
+                                    println!(
+                                        "[op] OK Enum level complete (depth {}): {} found so far",
+                                        depth, found_count
+                                    );
+                                    emit_progress(words_done, words_total, found_count).await;
+                                    break;
+                                }
+                                "error" => {
+                                    let msg = event["message"].as_str().unwrap_or("unknown");
+                                    eprintln!("[op] FAIL voyage error: {}", msg);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    if cancelled {
+                        drop(lines);
+                        drop(writer);
+                        return;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[op] FAIL Cannot connect to voyage daemon: {}", e);
+                    let msg = serde_json::json!({
+                        "type": "completed",
+                        "job_id": format!("{}-{}", workflow_id, op_id),
+                        "workflow_id": workflow_id,
+                        "code": 1
+                    });
+                    let _ = pub_clone
+                        .publish(result_subj.clone(), msg.to_string().into())
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        // Reconcile to 100%: every queued candidate has been tried.
+        emit_progress(words_total, words_total, found_count).await;
+
+        let done_msg = serde_json::json!({
+            "type": "completed",
+            "job_id": format!("{}-{}", workflow_id, op_id),
+            "workflow_id": workflow_id,
+            "code": 0
+        });
+        let _ = pub_clone
+            .publish(result_subj.clone(), done_msg.to_string().into())
+            .await;
+
+        mark_op_done(&op_id);
+        let status_msg = serde_json::json!({
+            "type": "operation_completed",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "found_count": found_count,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), status_msg.to_string().into())
+            .await;
+    } else if op_type.starts_with("network-scan-") {
+        // Single-port probe mode: data has host+port
+        if let Some(host) = data["host"].as_str().map(|s| s.to_string()) {
+            let port = data["port"].as_u64().unwrap_or(0) as u16;
+            let timeout_ms = data["timeout"].as_i64().unwrap_or(2000);
+            let delay_ms = data["delay"].as_i64().unwrap_or(0).max(0) as u64;
+            let service_detection = data["service_detection"].as_bool().unwrap_or(true);
+
+            // Per-probe delay - sleeps WHILE holding the
+            // semaphore permit, so it actually paces the
+            // workflow's effective rate. e.g. tasks=10 +
+            // delay=20ms => floor of ~500 probes/sec
+            // (10 / 20ms = 500/s).
+            if delay_ms > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            }
+
+            // Use the same `scan` engine path the batch modes use, just
+            // with a single-port array, so it shares the
+            // exact same code in pulse that's been validated to
+            // find every open port - the older `probe` mode had
+            // a subtle reliability gap where some opens were
+            // returned as the default-closed when run_connect_scan's
+            // result event raced with the channel close.
+            // Concurrency is already gated by `_ws_permit`.
+            let pulse_req = serde_json::json!({
+                "operation": "scan",
+                "response": "instant",
+                "save": false,
+                "targets": [host],
+                "ports": [port],
+                "tasks": 1,
+                "timeout": timeout_ms,
+                "service_detection": service_detection,
+            });
+
+            let short_op = op_id.get(..8).unwrap_or(&op_id).to_string();
+            // Log every probe response while we're debugging the
+            // discrepancy between scan modes. Noisy but definitive: we'll
+            // see exactly what pulse says about every port and
+            // can grep for known-open ones (53, 80, 5432, etc).
+            let log_sample = true;
+            let mut found_count = 0;
+            let conn = tokio::net::TcpStream::connect("127.0.0.1:4443").await;
+            match conn {
+                Ok(stream) => {
+                    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                    // RST-close so this per-op connection to pulse doesn't pile
+                    // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
+                    let _ = stream.set_linger(Some(std::time::Duration::ZERO));
+                    let (reader, mut writer) = stream.into_split();
+                    let mut req_str = serde_json::to_string(&pulse_req).unwrap();
+                    req_str.push('\n');
+                    if log_sample {
+                        println!(
+                            "[ds {} {}:{}] -> probe sent ({} bytes)",
+                            short_op,
+                            host,
+                            port,
+                            req_str.len()
+                        );
+                    }
+                    if let Err(e) = writer.write_all(req_str.as_bytes()).await {
+                        eprintln!("[ds {} {}:{}] write failed: {}", short_op, host, port, e);
+                    }
+
+                    let mut lines = BufReader::new(reader).lines();
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            // Always log a snippet of the raw response on the
+                            // sampled probes so we can see the actual shape.
+                            if log_sample {
+                                let snippet = &line[..line.len().min(250)];
+                                println!(
+                                    "[ds {} {}:{}] <- pulse: {}",
+                                    short_op, host, port, snippet
+                                );
+                            }
+                            if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&line) {
+                                let results_arr =
+                                    resp["results"].as_array().cloned().unwrap_or_default();
+                                if log_sample {
+                                    println!(
+                                        "[ds {} {}:{}] parsed: results.len={}, top.status={:?}",
+                                        short_op,
+                                        host,
+                                        port,
+                                        results_arr.len(),
+                                        resp["status"].as_str().unwrap_or("?")
+                                    );
+                                }
+                                if let Some(result) = results_arr.first() {
+                                    let status = result["status"].as_str().unwrap_or("");
+                                    if status == "open" || status == "filtered" {
+                                        found_count = 1;
+                                        let msg = serde_json::json!({
+                                            "type": "result",
+                                            "job_id": format!("{}-{}", workflow_id, op_id),
+                                            "workflow_id": workflow_id,
+                                            "operation_id": op_id,
+                                            "data": {
+                                                "host": host,
+                                                "port": port,
+                                                "status": status,
+                                                "service": result["service"],
+                                                "banner": result["banner"],
+                                                "latency_ms": result["latency_ms"],
+                                            }
+                                        });
+                                        match pub_clone
+                                            .publish(result_subj.clone(), msg.to_string().into())
+                                            .await
+                                        {
+                                            Err(e) => eprintln!(
+                                                "[ds {} {}:{}] result publish failed: {}",
+                                                short_op, host, port, e
+                                            ),
+                                            Ok(_) => println!(
+                                                "[ds {} {}:{}] OPEN service={} latency={}",
+                                                short_op,
+                                                host,
+                                                port,
+                                                result["service"].as_str().unwrap_or("?"),
+                                                result["latency_ms"].as_u64().unwrap_or(0)
+                                            ),
+                                        }
+                                    }
+                                }
+                                if resp.get("results").is_none()
+                                    && resp.get("status").and_then(|s| s.as_str()) != Some("error")
+                                {
+                                    eprintln!(
+                                        "[ds {} {}:{}] WEIRD response (no results field): {}",
+                                        short_op,
+                                        host,
+                                        port,
+                                        &line[..line.len().min(300)]
+                                    );
+                                }
+                            } else {
+                                eprintln!(
+                                    "[ds {} {}:{}] non-JSON response: {}",
+                                    short_op,
+                                    host,
+                                    port,
+                                    &line[..line.len().min(300)]
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            eprintln!(
+                                "[ds {} {}:{}] pulse closed connection without response",
+                                short_op, host, port
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("[ds {} {}:{}] read error: {}", short_op, host, port, e);
+                        }
+                    }
+
+                    let done_msg = serde_json::json!({
+                        "type": "completed",
+                        "job_id": format!("{}-{}", workflow_id, op_id),
+                        "workflow_id": workflow_id,
+                        "code": 0
+                    });
+                    if let Err(e) = pub_clone
+                        .publish(result_subj, done_msg.to_string().into())
+                        .await
+                    {
+                        eprintln!(
+                            "[ds {} {}:{}] completed publish failed: {}",
+                            short_op, host, port, e
+                        );
+                    } else if log_sample {
+                        println!(
+                            "[ds {} {}:{}] -> completed published (found={})",
+                            short_op, host, port, found_count
+                        );
+                    }
+
+                    mark_op_done(&op_id);
+                    let status_msg = serde_json::json!({
+                        "type": "operation_completed",
+                        "operation_id": op_id,
+                        "workflow_id": workflow_id,
+                        "found_count": found_count,
+                        "node_id": node_id,
+                    });
+                    if let Err(e) = pub_clone
+                        .publish(status_subj, status_msg.to_string().into())
+                        .await
+                    {
+                        eprintln!(
+                            "[ds {} {}:{}] operation_completed publish failed: {}",
+                            short_op, host, port, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    // The workflow view already shows a "Fix" button
+                    // based on the heartbeat-reported extension_status,
+                    // so we don't spam node_logs here. Just rate-limited
+                    // local stderr for operator-side debugging.
+                    use std::sync::atomic::{AtomicU64, Ordering};
+                    static LAST_LOG: AtomicU64 = AtomicU64::new(0);
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
+                        LAST_LOG.store(now_secs, Ordering::Relaxed);
+                        eprintln!(
+                            "[op] FAIL pulse daemon unreachable on 127.0.0.1:4443 ({}). Is `pulse --daemon` running? (suppressing further messages for 60s)",
+                            e
+                        );
+                    }
+                    let msg = serde_json::json!({
+                        "type": "completed",
+                        "job_id": format!("{}-{}", workflow_id, op_id),
+                        "workflow_id": workflow_id,
+                        "code": 1
+                    });
+                    let _ = pub_clone.publish(result_subj, msg.to_string().into()).await;
+                }
+            }
+            return;
+        }
+
+        // Batch scan mode: data has targets+ports arrays
+        let targets: Vec<String> = data["targets"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let ports_value = data["ports"].clone();
+        let tasks = data["tasks"].as_i64().unwrap_or(100);
+        let timeout = data["timeout"].as_i64().unwrap_or(2000);
+        let delay = data["delay"].as_i64().unwrap_or(0).max(0);
+        let service_detection = data["service_detection"].as_bool().unwrap_or(true);
+        // Adaptive rate governor: default on. When on, pulse tunes
+        // concurrency/timeout/retries live from loss+RTT (tasks is
+        // just the seed); when off it uses the fixed tasks/timeout.
+        let adaptive = data["adaptive"].as_bool().unwrap_or(true);
+        let max_concurrency = data["max_concurrency"].as_i64();
+        // Posture caps how aggressive the governor may get (stealth |
+        // balanced | throughput). Passed straight through to pulse.
+        let posture = data["posture"].as_str().unwrap_or("balanced").to_string();
+
+        println!(
+            "[op] pulse scan: {} targets, ports={}, {} tasks, delay={}ms, adaptive={} posture={}",
+            targets.len(),
+            ports_value,
+            tasks,
+            delay,
+            adaptive,
+            posture
+        );
+
+        let mut pulse_req = serde_json::json!({
+            "operation": "scan",
+            "response": "stream",
+            "save": false,
+            "targets": targets,
+            "ports": ports_value,
+            "tasks": tasks,
+            "timeout": timeout,
+            "delay": delay,
+            "service_detection": service_detection,
+            "adaptive": adaptive,
+            "posture": posture,
+        });
+        if let Some(mc) = max_concurrency {
+            pulse_req["max_concurrency"] = serde_json::json!(mc);
+        }
+
+        let conn = tokio::net::TcpStream::connect("127.0.0.1:4443").await;
+        match conn {
+            Ok(stream) => {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                // RST-close so this per-op connection to pulse doesn't pile
+                // up TIME_WAIT sockets and exhaust ephemeral ports on a big scan.
+                let _ = stream.set_linger(Some(std::time::Duration::ZERO));
+                let (reader, mut writer) = stream.into_split();
+                let mut req_str = serde_json::to_string(&pulse_req).unwrap();
+                req_str.push('\n');
+                let _ = writer.write_all(req_str.as_bytes()).await;
+
+                let mut lines = BufReader::new(reader).lines();
+                let mut found_count = 0;
+                let mut total_events = 0;
+
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+                        total_events += 1;
+                        let event_type = event["type"].as_str().unwrap_or("");
+
+                        match event_type {
+                            "result" => {
+                                // Only report open/filtered ports as findings (skip closed to reduce noise)
+                                if event["status"].as_str() == Some("closed") {
+                                    continue;
+                                }
+                                found_count += 1;
+                                let result_msg = serde_json::json!({
+                                    "type": "result",
+                                    "job_id": format!("{}-{}", workflow_id, op_id),
+                                    "workflow_id": workflow_id,
+                                    "operation_id": op_id,
+                                    "data": {
+                                        "host": event["host"],
+                                        "port": event["port"],
+                                        "status": event["status"],
+                                        "service": event["service"],
+                                        "banner": event["banner"],
+                                        "latency_ms": event["latency_ms"],
+                                    }
+                                });
+                                let _ = pub_clone
+                                    .publish(result_subj.clone(), result_msg.to_string().into())
+                                    .await;
+                            }
+                            "progress" => {
+                                // Probe-level progress from pulse: forward as
+                                // operation_progress so the workflow bar can show
+                                // "N / total_ports" instead of a coarse per-op count.
+                                let processed = event["processed"].as_i64().unwrap_or(0);
+                                let total = event["total"].as_i64().unwrap_or(0);
+                                let prog_msg = serde_json::json!({
+                                    "type": "operation_progress",
+                                    "operation_id": op_id,
+                                    "workflow_id": workflow_id,
+                                    "processed": processed,
+                                    "total": total,
+                                    "node_id": node_id,
+                                });
+                                let _ = pub_clone
+                                    .publish(status_subj.clone(), prog_msg.to_string().into())
+                                    .await;
+                            }
+                            "done" => {
+                                println!(
+                                    "[op] OK Scan complete: {} open ports found ({} events)",
+                                    found_count, total_events
+                                );
+                                break;
+                            }
+                            "error" => {
+                                let msg = event["message"].as_str().unwrap_or("unknown");
+                                eprintln!("[op] FAIL pulse error: {}", msg);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                let done_msg = serde_json::json!({
+                    "type": "completed",
+                    "job_id": format!("{}-{}", workflow_id, op_id),
+                    "workflow_id": workflow_id,
+                    "code": 0
+                });
+                let _ = pub_clone
+                    .publish(result_subj, done_msg.to_string().into())
+                    .await;
+
+                mark_op_done(&op_id);
+                let status_msg = serde_json::json!({
+                    "type": "operation_completed",
+                    "operation_id": op_id,
+                    "workflow_id": workflow_id,
+                    "found_count": found_count,
+                    "node_id": node_id,
+                });
+                let _ = pub_clone
+                    .publish(status_subj, status_msg.to_string().into())
+                    .await;
+            }
+            Err(e) => {
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static LAST_LOG: AtomicU64 = AtomicU64::new(0);
+                let now_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
+                    LAST_LOG.store(now_secs, Ordering::Relaxed);
+                    eprintln!(
+                        "[op] FAIL Cannot connect to pulse daemon: {} (suppressing further messages for 60s)",
+                        e
+                    );
+                }
+                let msg = serde_json::json!({
+                    "type": "completed",
+                    "job_id": format!("{}-{}", workflow_id, op_id),
+                    "workflow_id": workflow_id,
+                    "code": 1
+                });
+                let _ = pub_clone.publish(result_subj, msg.to_string().into()).await;
+            }
+        }
+    } else if op_type.starts_with("vuln-scan-") {
+        // Vulnerability detection via the cortex daemon (port 4445).
+        // Cortex streams already-confirmed `finding` events; the node
+        // stamps operation_id and relays them into the asset graph.
+        let target = data["target"]
+            .as_str()
+            .or_else(|| data["url"].as_str())
+            .or_else(|| data["seed"].as_str())
+            .unwrap_or("")
+            .to_string();
+        let sev_arr = data["severity"].as_array().cloned().unwrap_or_default();
+
+        let host = target_host(&target);
+        let mode = data["mode"].as_str().unwrap_or("scan");
+        let cortex_req = if mode == "authz" {
+            // Authorization testing (BOLA/BFLA): resolve the identity
+            // matrix and hand cortex the endpoints + identities.
+            let idents = data["identities"].as_array().cloned().unwrap_or_default();
+            let resolved =
+                creds::resolve_identities(&http, &api_url, &api_key, &idents, &host).await;
+            serde_json::json!({
+                "operation": "authz",
+                "response": "stream",
+                "target": target,
+                "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(10000),
+                "endpoints": data["endpoints"].clone(),
+                "identities": resolved,
+            })
+        } else {
+            // Standard vuln scan. Optionally authenticated via a single
+            // attached credential.
+            let mut req = serde_json::json!({
+                "operation": "scan",
+                "response": "stream",
+                "target": target,
+                "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(10000),
+                "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(true),
+                "severity": sev_arr,
+                "templates_dir": data["templates_dir"].clone(),
+            });
+            if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
+                match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
+                    Ok(auth) => {
+                        if let Some(cr) = req.as_object_mut() {
+                            cr.insert("auth".into(), auth);
+                        }
+                    }
+                    Err(e) => eprintln!("[op] vuln-scan credential resolve failed ({cid}): {e}"),
+                }
+            }
+            // OAST endpoint for out-of-band (blind) confirmation. Default
+            // ("" / "managed") resolves to the managed pool; a UUID to a BYO
+            // endpoint; "off" disables OOB. The node hands cortex the
+            // resolved { domains, api_url }; cortex registers/polls directly.
+            let oast_ep = data["oast_endpoint_id"].as_str().unwrap_or("");
+            match oast::resolve(&http, &api_url, &api_key, oast_ep).await {
+                Ok(Some((domains, poll_url))) => {
+                    if let Some(cr) = req.as_object_mut() {
+                        cr.insert(
+                            "oast".into(),
+                            serde_json::json!({ "domains": domains, "api_url": poll_url }),
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("[op] vuln-scan oast resolve failed ({oast_ep}): {e}"),
+            }
+            req
+        };
+
+        let mut found_count: i64 = 0;
+        let mut processed: i64 = 0;
+        let mut total: i64 = 0;
+        let mut last_prog = std::time::Instant::now();
+        let conn = tokio::net::TcpStream::connect("127.0.0.1:4445").await;
+        match conn {
+            Ok(stream) => {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                let (reader, mut writer) = stream.into_split();
+                let mut req_str = serde_json::to_string(&cortex_req).unwrap();
+                req_str.push('\n');
+                let _ = writer.write_all(req_str.as_bytes()).await;
+
+                let mut lines = BufReader::new(reader).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+                        drop(lines);
+                        drop(writer);
+                        return;
+                    }
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let event = match serde_json::from_str::<serde_json::Value>(&line) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    match event["type"].as_str().unwrap_or("") {
+                        "finding" => {
+                            found_count += 1;
+                            let mut fdata = event["data"].clone();
+                            if let Some(obj) = fdata.as_object_mut() {
+                                obj.insert("operation_id".to_string(), serde_json::json!(op_id));
+                            }
+                            let result_msg = serde_json::json!({
+                                "type": "result",
+                                "job_id": format!("{}-{}", workflow_id, op_id),
+                                "workflow_id": workflow_id,
+                                "data": fdata,
+                            });
+                            let _ = pub_clone
+                                .publish(result_subj.clone(), result_msg.to_string().into())
+                                .await;
+                        }
+                        "progress" => {
+                            if let Some(p) = event["processed"].as_i64() {
+                                processed = p;
+                            }
+                            if let Some(t) = event["total"].as_i64() {
+                                if t > total {
+                                    total = t;
+                                }
+                            }
+                        }
+                        "done" => break,
+                        "error" => {
+                            eprintln!(
+                                "[op] FAIL cortex error: {}",
+                                event["message"].as_str().unwrap_or("unknown")
+                            );
+                            break;
+                        }
+                        _ => {}
+                    }
+
+                    if last_prog.elapsed() >= std::time::Duration::from_millis(800) {
+                        let prog = serde_json::json!({
+                            "type": "operation_progress",
+                            "operation_id": op_id,
+                            "workflow_id": workflow_id,
+                            "processed": processed,
+                            "total": total.max(processed),
+                            "node_id": node_id,
+                        });
+                        let _ = pub_clone
+                            .publish(status_subj.clone(), prog.to_string().into())
+                            .await;
+                        last_prog = std::time::Instant::now();
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[op] FAIL cortex daemon unreachable on 127.0.0.1:4445 ({}). Is `cortex --daemon` running?",
+                    e
+                );
+                let msg = serde_json::json!({
+                    "type": "completed",
+                    "job_id": format!("{}-{}", workflow_id, op_id),
+                    "code": 1
+                });
+                let _ = pub_clone
+                    .publish(result_subj.clone(), msg.to_string().into())
+                    .await;
+                return;
+            }
+        }
+
+        let done_msg = serde_json::json!({
+            "type": "completed",
+            "job_id": format!("{}-{}", workflow_id, op_id),
+            "workflow_id": workflow_id,
+            "code": 0
+        });
+        let _ = pub_clone
+            .publish(result_subj.clone(), done_msg.to_string().into())
+            .await;
+
+        let final_prog = serde_json::json!({
+            "type": "operation_progress",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "processed": processed.max(1),
+            "total": total.max(processed).max(1),
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), final_prog.to_string().into())
+            .await;
+
+        mark_op_done(&op_id);
+        let status_msg = serde_json::json!({
+            "type": "operation_completed",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "found_count": found_count,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), status_msg.to_string().into())
+            .await;
+    } else if op_type.starts_with("service-enum-") {
+        // Web/service fingerprinting via the scout daemon (port 4444).
+        // Scout streams `finding` events whose `data` is the finding
+        // verbatim; the node just stamps operation_id and relays them.
+        let target = data["target"]
+            .as_str()
+            .or_else(|| data["seed"].as_str())
+            .or_else(|| data["url"].as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let mut scout_req = serde_json::json!({
+            "operation": "fingerprint",
+            "response": "stream",
+            "target": target,
+            "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(8000),
+            "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(true),
+            "favicon": data["favicon"].as_bool().unwrap_or(true),
+            "depth_tier": data["depth_tier"].as_i64().unwrap_or(2),
+        });
+
+        // Authenticated fingerprinting: resolve an attached credential
+        // into request auth and hand it to scout.
+        if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
+            let host = target_host(&target);
+            match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
+                Ok(auth) => {
+                    if let Some(cr) = scout_req.as_object_mut() {
+                        cr.insert("auth".into(), auth);
+                    }
+                }
+                Err(e) => eprintln!("[op] service-enum credential resolve failed ({cid}): {e}"),
+            }
+        }
+
+        let mut found_count: i64 = 0;
+        let conn = tokio::net::TcpStream::connect("127.0.0.1:4444").await;
+        match conn {
+            Ok(stream) => {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                let (reader, mut writer) = stream.into_split();
+                let mut req_str = serde_json::to_string(&scout_req).unwrap();
+                req_str.push('\n');
+                let _ = writer.write_all(req_str.as_bytes()).await;
+
+                let mut lines = BufReader::new(reader).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if !workflow_id.is_empty() && is_workflow_cancelled(&workflow_id) {
+                        drop(lines);
+                        drop(writer);
+                        return;
+                    }
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let event = match serde_json::from_str::<serde_json::Value>(&line) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    match event["type"].as_str().unwrap_or("") {
+                        "finding" => {
+                            found_count += 1;
+                            let mut fdata = event["data"].clone();
+                            if let Some(obj) = fdata.as_object_mut() {
+                                obj.insert("operation_id".to_string(), serde_json::json!(op_id));
+                            }
+                            let result_msg = serde_json::json!({
+                                "type": "result",
+                                "job_id": format!("{}-{}", workflow_id, op_id),
+                                "workflow_id": workflow_id,
+                                "data": fdata,
+                            });
+                            let _ = pub_clone
+                                .publish(result_subj.clone(), result_msg.to_string().into())
+                                .await;
+                        }
+                        "done" => break,
+                        "error" => {
+                            eprintln!(
+                                "[op] FAIL scout error: {}",
+                                event["message"].as_str().unwrap_or("unknown")
+                            );
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[op] FAIL scout daemon unreachable on 127.0.0.1:4444 ({}). Is `scout --daemon` running?",
+                    e
+                );
+                let msg = serde_json::json!({
+                    "type": "completed",
+                    "job_id": format!("{}-{}", workflow_id, op_id),
+                    "code": 1
+                });
+                let _ = pub_clone
+                    .publish(result_subj.clone(), msg.to_string().into())
+                    .await;
+                return;
+            }
+        }
+
+        let done_msg = serde_json::json!({
+            "type": "completed",
+            "job_id": format!("{}-{}", workflow_id, op_id),
+            "workflow_id": workflow_id,
+            "code": 0
+        });
+        let _ = pub_clone
+            .publish(result_subj.clone(), done_msg.to_string().into())
+            .await;
+
+        let final_prog = serde_json::json!({
+            "type": "operation_progress",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "processed": 1,
+            "total": 1,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), final_prog.to_string().into())
+            .await;
+
+        mark_op_done(&op_id);
+        let status_msg = serde_json::json!({
+            "type": "operation_completed",
+            "operation_id": op_id,
+            "workflow_id": workflow_id,
+            "found_count": found_count,
+            "node_id": node_id,
+        });
+        let _ = pub_clone
+            .publish(status_subj.clone(), status_msg.to_string().into())
+            .await;
+    } else {
+        println!("[op] Unknown op_type: {}", op_type);
+    }
 }
 
 /// Counts claim outcomes so we can log progress summaries instead of per-op spam.
 static CLAIM_OK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static CLAIM_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-
 
 #[derive(Subcommand, Debug)]
 pub enum DbCommands {
@@ -1909,14 +2257,18 @@ pub struct NetworkConfig {
     wg_public_key: Option<String>,
 }
 
-pub fn default_nats_url() -> String { "nats://localhost:4222".to_string() }
+pub fn default_nats_url() -> String {
+    "nats://localhost:4222".to_string()
+}
 
 /// Resolve the data directory for this invocation. Order of preference:
 ///   1. `--data-dir <PATH>` (if provided)
 ///   2. `$SUDO_USER`'s home + `.config/crossfyre`  - keeps the user's data
 ///      visible when they `sudo crossfyre node up`
 ///   3. `dirs::config_dir()/crossfyre`
-pub fn resolve_data_dir(cli_arg: Option<&std::path::Path>) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+pub fn resolve_data_dir(
+    cli_arg: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     if let Some(p) = cli_arg {
         return Ok(p.to_path_buf());
     }
@@ -1951,11 +2303,15 @@ pub fn home_for_user(name: &str) -> Option<std::path::PathBuf> {
             return None;
         }
         let cstr = std::ffi::CStr::from_ptr(dir_ptr);
-        Some(std::path::PathBuf::from(cstr.to_string_lossy().into_owned()))
+        Some(std::path::PathBuf::from(
+            cstr.to_string_lossy().into_owned(),
+        ))
     }
 }
 #[cfg(not(unix))]
-pub fn home_for_user(_name: &str) -> Option<std::path::PathBuf> { None }
+pub fn home_for_user(_name: &str) -> Option<std::path::PathBuf> {
+    None
+}
 
 /// When running under `sudo`, `chown` files we just wrote back to the
 /// invoking user so they aren't suddenly owned by root. Best effort - log
@@ -1980,9 +2336,13 @@ pub fn chown_tree_to_sudo_user(dir: &std::path::Path) {
 /// warning - things still work, but on-disk artifacts end up owned by root.
 pub fn print_privilege_banner(needs_root: bool) {
     let euid = unsafe { libc::geteuid() };
-    let sudo_user = std::env::var("SUDO_USER").ok().filter(|s| !s.is_empty() && s != "root");
+    let sudo_user = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|s| !s.is_empty() && s != "root");
     if euid == 0 && sudo_user.is_none() {
-        eprintln!("[security] WARNING: launched as plain root. Re-run with `sudo crossfyre ...` from your user shell.");
+        eprintln!(
+            "[security] WARNING: launched as plain root. Re-run with `sudo crossfyre ...` from your user shell."
+        );
     } else if euid != 0 && needs_root {
         eprintln!("Please re-run with sudo:");
         eprintln!("  sudo crossfyre node up");
@@ -2034,14 +2394,16 @@ pub fn discover_nodes(base: &std::path::Path) -> Result<Vec<String>, Box<dyn std
         return Err(format!(
             "config root {:?} does not exist - run `crossfyre node init` first",
             base
-        ).into());
+        )
+        .into());
     }
     let nd = nodes_dir(base);
     if !nd.is_dir() {
         return Err(format!(
             "{:?} is missing - run `crossfyre node init` to register a node",
             nd
-        ).into());
+        )
+        .into());
     }
 
     let mut ids = Vec::new();
@@ -2050,14 +2412,20 @@ pub fn discover_nodes(base: &std::path::Path) -> Result<Vec<String>, Box<dyn std
         if path.extension().and_then(|e| e.to_str()) != Some("toml") {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         // Validate it parses as a node config so `--boot` doesn't spawn a
         // daemon that's just going to die on a malformed file.
-        match fs::read_to_string(&path).map_err(|e| e.to_string())
+        match fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
             .and_then(|s| toml::from_str::<Config>(&s).map_err(|e| e.to_string()))
         {
             Ok(_) => ids.push(stem.to_string()),
-            Err(e) => eprintln!("[boot] WARNING: skipping {:?} - not a valid node config: {}", path, e),
+            Err(e) => eprintln!(
+                "[boot] WARNING: skipping {:?} - not a valid node config: {}",
+                path, e
+            ),
         }
     }
     ids.sort();
@@ -2073,8 +2441,12 @@ pub fn migrate_legacy_config(base: &std::path::Path) {
     if !legacy.is_file() {
         return;
     }
-    let Ok(text) = fs::read_to_string(&legacy) else { return };
-    let Ok(cfg) = toml::from_str::<Config>(&text) else { return };
+    let Ok(text) = fs::read_to_string(&legacy) else {
+        return;
+    };
+    let Ok(cfg) = toml::from_str::<Config>(&text) else {
+        return;
+    };
     let paths = NodePaths::new(base, &cfg.node_id);
     if paths.config.exists() {
         return; // already migrated
@@ -2093,8 +2465,6 @@ pub fn migrate_legacy_config(base: &std::path::Path) {
         chown_tree_to_sudo_user(&nodes_dir(base));
     }
 }
-
-
 
 /// How often `up` re-scans `nodes.d` to pick up nodes registered (or
 /// removed) after it started. 2s keeps a freshly `--init`'d node coming
@@ -2135,7 +2505,10 @@ pub fn spawn_node_daemon(
 /// and started without restarting the supervisor - and a node whose `.toml`
 /// is removed is stopped. A SIGINT/SIGTERM to the supervisor is forwarded to
 /// every child so the whole fleet tears down (tunnels and isolation) together.
-pub async fn run_boot(force: bool, base: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_boot(
+    force: bool,
+    base: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Booting Crossfyre nodes from {:?}...", base);
 
     // Pull a pre-nodes.d single-node install into the new layout if present.
@@ -2250,7 +2623,9 @@ pub async fn run_boot(force: bool, base: &std::path::Path) -> Result<(), Box<dyn
     // (Drop guards) runs, give the fleet a moment, then hard-reap.
     for (id, child) in &children {
         #[cfg(unix)]
-        unsafe { libc::kill(child.id() as i32, libc::SIGTERM); }
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGTERM);
+        }
         println!("[boot] Sent SIGTERM to node {} (pid {})", id, child.id());
     }
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -2347,7 +2722,13 @@ pub async fn run_node_list(
 
     section("Fleet");
     // Dim column header, aligned to the symbol + columns of the rows below.
-    println!("    {}", dim(&format!("  {:<38} {:<18} {:<9} {}", "ID", "NAME", "STATUS", "IP")));
+    println!(
+        "    {}",
+        dim(&format!(
+            "  {:<38} {:<18} {:<9} {}",
+            "ID", "NAME", "STATUS", "IP"
+        ))
+    );
     for n in &nodes {
         let id = n["id"].as_str().unwrap_or("-");
         let name = n["name"].as_str().unwrap_or("-");
@@ -2362,7 +2743,12 @@ pub async fn run_node_list(
         let pad = 9usize.saturating_sub(status.len());
         println!(
             "    {} {:<38} {:<18} {}{} {}",
-            sym, id, name, status_cell, " ".repeat(pad), ip
+            sym,
+            id,
+            name,
+            status_cell,
+            " ".repeat(pad),
+            ip
         );
     }
     end();
@@ -2406,15 +2792,29 @@ pub async fn run_node_remove(
             [id] => {
                 println!("  {}", dim("Nodes"));
                 match remove_node_files(base, id) {
-                    Ok(_) => println!("{}", row(&check(), id, "", &format!("{GREEN}removed{RESET}"))),
-                    Err(e) => println!("{}", row(&bang(), id, "", &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string())))),
+                    Ok(_) => println!(
+                        "{}",
+                        row(&check(), id, "", &format!("{GREEN}removed{RESET}"))
+                    ),
+                    Err(e) => println!(
+                        "{}",
+                        row(
+                            &bang(),
+                            id,
+                            "",
+                            &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))
+                        )
+                    ),
                 }
                 println!();
                 println!("  {}", dim(after));
                 println!();
             }
             [] => {
-                println!("  {} No registered node matches {BOLD}{want}{RESET}.", bang());
+                println!(
+                    "  {} No registered node matches {BOLD}{want}{RESET}.",
+                    bang()
+                );
                 println!("  {}", dim("Registered nodes"));
                 for id in &ids {
                     println!("{}", row(&dot(), id, "", ""));
@@ -2423,7 +2823,10 @@ pub async fn run_node_remove(
                 std::process::exit(1);
             }
             _ => {
-                println!("  {} {BOLD}{want}{RESET} matches several nodes, be more specific:", bang());
+                println!(
+                    "  {} {BOLD}{want}{RESET} matches several nodes, be more specific:",
+                    bang()
+                );
                 for m in &matches {
                     println!("{}", row(&dot(), m, "", ""));
                 }
@@ -2441,12 +2844,20 @@ pub async fn run_node_remove(
         for id in &ids {
             match remove_node_files(base, id) {
                 Ok(_) => {
-                    println!("{}", row(&check(), id, "", &format!("{GREEN}removed{RESET}")));
+                    println!(
+                        "{}",
+                        row(&check(), id, "", &format!("{GREEN}removed{RESET}"))
+                    );
                     removed += 1;
                 }
                 Err(e) => println!(
                     "{}",
-                    row(&bang(), id, "", &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string())))
+                    row(
+                        &bang(),
+                        id,
+                        "",
+                        &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))
+                    )
                 ),
             }
         }
@@ -2473,7 +2884,10 @@ pub async fn run_node_remove(
             {
                 Some(c) => c,
                 None => {
-                    println!("{}", row(&bang(), id, "", &dim("unreadable config, skipped")));
+                    println!(
+                        "{}",
+                        row(&bang(), id, "", &dim("unreadable config, skipped"))
+                    );
                     continue;
                 }
             };
@@ -2483,15 +2897,41 @@ pub async fn run_node_remove(
                 .send()
                 .await;
             match res {
-                Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => match remove_node_files(base, id) {
-                    Ok(_) => {
-                        println!("{}", row(&check(), id, "", &format!("{GREEN}removed{RESET}  {}", dim("not on server"))));
-                        removed += 1;
+                Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                    match remove_node_files(base, id) {
+                        Ok(_) => {
+                            println!(
+                                "{}",
+                                row(
+                                    &check(),
+                                    id,
+                                    "",
+                                    &format!("{GREEN}removed{RESET}  {}", dim("not on server"))
+                                )
+                            );
+                            removed += 1;
+                        }
+                        Err(e) => println!(
+                            "{}",
+                            row(
+                                &bang(),
+                                id,
+                                "",
+                                &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string()))
+                            )
+                        ),
                     }
-                    Err(e) => println!("{}", row(&bang(), id, "", &format!("{YELLOW}failed{RESET} {}", dim(&e.to_string())))),
-                },
+                }
                 Ok(_) => println!("{}", row(&dot(), id, "", &dim("kept, still on the server"))),
-                Err(e) => println!("{}", row(&bang(), id, "", &dim(&format!("unreachable, skipped ({e})")))),
+                Err(e) => println!(
+                    "{}",
+                    row(
+                        &bang(),
+                        id,
+                        "",
+                        &dim(&format!("unreachable, skipped ({e})"))
+                    )
+                ),
             }
         }
         println!();
@@ -2506,9 +2946,21 @@ pub async fn run_node_remove(
 
     // ── No target given: show the choices ───────────────────────────────
     println!("  {}", dim("Choose what to remove:"));
-    println!("    {} crossfyre node remove {BOLD}<node-id>{RESET}    {}", dot(), dim("one node"));
-    println!("    {} crossfyre node remove {BOLD}--inactive{RESET}   {}", dot(), dim("nodes deleted in the dashboard"));
-    println!("    {} crossfyre node remove {BOLD}--all{RESET}        {}", dot(), dim("every node on this host"));
+    println!(
+        "    {} crossfyre node remove {BOLD}<node-id>{RESET}    {}",
+        dot(),
+        dim("one node")
+    );
+    println!(
+        "    {} crossfyre node remove {BOLD}--inactive{RESET}   {}",
+        dot(),
+        dim("nodes deleted in the dashboard")
+    );
+    println!(
+        "    {} crossfyre node remove {BOLD}--all{RESET}        {}",
+        dot(),
+        dim("every node on this host")
+    );
     println!();
     println!("  {}", dim("Registered nodes"));
     for id in &ids {
@@ -2528,7 +2980,9 @@ pub async fn run_init(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::toolchain::ui::*;
 
-    let host = api_url.trim_start_matches("https://").trim_start_matches("http://");
+    let host = api_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     title("Crossfyre node init", host);
     field("Control plane", api_url);
     field("Data directory", &data_dir.display().to_string());
@@ -2555,7 +3009,10 @@ pub async fn run_init(
         let node_name = json_resp["node_name"].as_str().unwrap_or("unknown");
         let last_seen = json_resp["last_seen"].as_str().unwrap_or("unknown");
         end();
-        error(&format!("Node '{}' is already running elsewhere", node_name));
+        error(&format!(
+            "Node '{}' is already running elsewhere",
+            node_name
+        ));
         field("Last heartbeat", last_seen);
         hint("Run with --force to disconnect it and take over:");
         hint("  crossfyre node init --force");
@@ -2568,13 +3025,9 @@ pub async fn run_init(
         .to_string();
     ok(&format!("Node {} verified", dim(&node_id)));
 
-    let nats_nkey_seed = json_resp["nats_nkey_seed"]
-        .as_str()
-        .map(|s| s.to_string());
+    let nats_nkey_seed = json_resp["nats_nkey_seed"].as_str().map(|s| s.to_string());
 
-    let nats_user_jwt = json_resp["nats_user_jwt"]
-        .as_str()
-        .map(|s| s.to_string());
+    let nats_user_jwt = json_resp["nats_user_jwt"].as_str().map(|s| s.to_string());
 
     // Resolve per-node on-disk paths (honors --data-dir / $SUDO_USER so the
     // config root stays the invoking user's home). Each node gets its own
@@ -2630,7 +3083,10 @@ pub async fn run_init(
     fs::write(config_path, config_toml)?;
     end();
     section("Configure");
-    ok(&format!("Config saved {}", dim(&config_path.display().to_string())));
+    ok(&format!(
+        "Config saved {}",
+        dim(&config_path.display().to_string())
+    ));
 
     // Write session file (placeholder empty file for now)
     let session_path = config_dir.join("session");
@@ -2652,8 +3108,11 @@ pub async fn run_init(
     let stable_exe = match toolchain::install::ensure_self_installed() {
         Ok(p) => p,
         Err(e) => {
-            warn(&format!("could not install binary to {} ({}), continuing from current path",
-                toolchain::config::get_bin_dir().display(), e));
+            warn(&format!(
+                "could not install binary to {} ({}), continuing from current path",
+                toolchain::config::get_bin_dir().display(),
+                e
+            ));
             std::env::current_exe()?
         }
     };
@@ -2685,7 +3144,10 @@ pub async fn run_init(
             Ok(()) => ok(&format!("{} installed and started", ext)),
             Err(e) => {
                 fail(&format!("{} install failed: {}", ext, e));
-                hint(&format!("Run manually: crossfyre extension install {}", ext));
+                hint(&format!(
+                    "Run manually: crossfyre extension install {}",
+                    ext
+                ));
             }
         }
     }
@@ -2720,7 +3182,8 @@ pub async fn run_init(
     }
 
     // Update node status on the server
-    let status_res = client.post(format!("{}/api/v1/node-status", api_url))
+    let status_res = client
+        .post(format!("{}/api/v1/node-status", api_url))
         .json(&serde_json::json!({
             "api_key": &node_api_key,
             "status": "initialized",
@@ -2731,10 +3194,16 @@ pub async fn run_init(
         .await;
 
     if let Err(e) = status_res {
-        warn(&format!("could not update initialization status on the server: {}", e));
+        warn(&format!(
+            "could not update initialization status on the server: {}",
+            e
+        ));
     } else if let Ok(res) = status_res {
         if !res.status().is_success() {
-            warn(&format!("server returned {} updating initialization status", res.status()));
+            warn(&format!(
+                "server returned {} updating initialization status",
+                res.status()
+            ));
         }
     }
 
@@ -2767,7 +3236,9 @@ pub fn is_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
 #[cfg(not(unix))]
-pub fn is_root() -> bool { false }
+pub fn is_root() -> bool {
+    false
+}
 
 pub fn which_binary(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
@@ -2822,7 +3293,8 @@ pub async fn refresh_node_state(
         return Err(format!(
             "node '{}' is already running elsewhere (last heartbeat {}). Use --force to take over.",
             node_name, last_seen
-        ).into());
+        )
+        .into());
     }
 
     if let Some(jwt) = json_resp["nats_user_jwt"].as_str() {
@@ -2838,7 +3310,10 @@ pub async fn refresh_node_state(
     let new_network = egress::process_network_config(&json_resp["network_config"], net_dir);
     if new_network != config.network {
         if let Some(ref n) = new_network {
-            println!("[network] Tunnel selection: {} (updated from controller).", n.kind);
+            println!(
+                "[network] Tunnel selection: {} (updated from controller).",
+                n.kind
+            );
         } else {
             println!("[network] No tunnel configured (cleared by controller).");
         }
@@ -2900,13 +3375,21 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
             let proc_path = format!("/proc/{}", existing_pid);
             if std::path::Path::new(&proc_path).exists() {
                 if force {
-                    println!("  --force: Terminating existing daemon (PID {})...", existing_pid);
+                    println!(
+                        "  --force: Terminating existing daemon (PID {})...",
+                        existing_pid
+                    );
                     // SIGTERM the old process
-                    unsafe { libc::kill(existing_pid as i32, libc::SIGTERM); }
+                    unsafe {
+                        libc::kill(existing_pid as i32, libc::SIGTERM);
+                    }
                     // Give it a moment to exit
                     tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
                 } else {
-                    eprintln!("\n  A daemon is already running for node {}.", paths.node_id);
+                    eprintln!(
+                        "\n  A daemon is already running for node {}.",
+                        paths.node_id
+                    );
                     eprintln!("  PID            : {}", existing_pid);
                     eprintln!("\n  Take it over with:");
                     eprintln!("  crossfyre node daemon {} --force\n", paths.node_id);
@@ -2922,11 +3405,12 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     // Remove PID file on exit (best-effort via a drop guard)
     struct PidGuard(std::path::PathBuf);
     impl Drop for PidGuard {
-        fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
     }
     let _pid_guard = PidGuard(pid_path);
     // ------------------------------------------------------------------
-
 
     // Check if this node's configuration exists
     let config_path = paths.config.clone();
@@ -2952,7 +3436,10 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     // for the same NATS subjects).
     if let Err(e) = refresh_node_state(&mut config, &config_path, &paths.network_dir, force).await {
         if e.downcast_ref::<NodeDeleted>().is_some() {
-            eprintln!("\n  Node {} not found on the server (deleted in the dashboard, or its key was revoked).", paths.node_id);
+            eprintln!(
+                "\n  Node {} not found on the server (deleted in the dashboard, or its key was revoked).",
+                paths.node_id
+            );
             eprintln!("  Stopping - this node will not be retried.");
             eprintln!("  Clean it up locally with:");
             eprintln!("    crossfyre node remove {}", paths.node_id);
@@ -2960,7 +3447,10 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
             std::process::exit(1);
         }
         eprintln!("\n  Cannot start daemon: {}", e);
-        eprintln!("  crossfyre node daemon {} --force   # take over this node", paths.node_id);
+        eprintln!(
+            "  crossfyre node daemon {} --force   # take over this node",
+            paths.node_id
+        );
         std::process::exit(1);
     }
 
@@ -2979,42 +3469,46 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
 
     // Connect to NATS
     let nats_url = config.nats_url.as_str();
-    
+
     // Require JWT credentials - NATS is in operator mode, anonymous connections are rejected
     let (jwt_str, seed_str) = match (&config.nats_user_jwt, &config.nats_nkey_seed) {
         (Some(j), Some(s)) if !j.is_empty() && !s.is_empty() => (j.clone(), s.clone()),
         _ => {
             eprintln!("ERROR: nats_user_jwt or nats_nkey_seed is missing from this node's config.");
-            eprintln!("       Run `crossfyre node init` to register this node and get fresh credentials.");
+            eprintln!(
+                "       Run `crossfyre node init` to register this node and get fresh credentials."
+            );
             std::process::exit(1);
         }
     };
-    
+
     println!("Authenticating to Jetstream with dynamically issued User JWT & Seed...");
     let key_pair = std::sync::Arc::new(
         nkeys::KeyPair::from_seed(seed_str.as_str())
-            .expect("Invalid nats_nkey_seed in config.toml")
+            .expect("Invalid nats_nkey_seed in config.toml"),
     );
-    let opts = async_nats::ConnectOptions::with_jwt(
-        jwt_str,
-        move |nonce: Vec<u8>| {
-            let kp = key_pair.clone();
-            async move {
-                kp.sign(&nonce).map_err(|e| async_nats::AuthError::new(e))
-            }
-        }
-    )
+    let opts = async_nats::ConnectOptions::with_jwt(jwt_str, move |nonce: Vec<u8>| {
+        let kp = key_pair.clone();
+        async move { kp.sign(&nonce).map_err(|e| async_nats::AuthError::new(e)) }
+    })
     // Increase the subscriber buffer so large bursts (e.g. a 65k-op scan)
     // don't overflow and drop messages as "slow consumer".
     .subscription_capacity(1_000_000);
 
-    let nats_client = opts.connect(nats_url).await
-        .map_err(|e| { eprintln!("ERROR: Failed to connect to NATS: {}", e); e })?;
+    let nats_client = opts.connect(nats_url).await.map_err(|e| {
+        eprintln!("ERROR: Failed to connect to NATS: {}", e);
+        e
+    })?;
 
     // Subscribe to the job/control channel for this node
     let job_subject = format!("cfx.jobs.{}", config.node_id);
-    let mut job_sub = nats_client.subscribe(job_subject.clone()).await
-        .map_err(|e| { eprintln!("ERROR: Failed to subscribe to {}: {}", job_subject, e); e })?;
+    let mut job_sub = nats_client
+        .subscribe(job_subject.clone())
+        .await
+        .map_err(|e| {
+            eprintln!("ERROR: Failed to subscribe to {}: {}", job_subject, e);
+            e
+        })?;
 
     // Keep a clone for publishing status updates (nats_client is cheap to clone)
     let publisher = nats_client.clone();
@@ -3028,9 +3522,9 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     sys.refresh_all();
 
     let hostname = sysinfo::System::host_name().unwrap_or_else(|| "unknown".into());
-    let os_name  = sysinfo::System::long_os_version().unwrap_or_else(|| "unknown".into());
-    let arch     = std::env::consts::ARCH.to_string();
-    let kernel   = sysinfo::System::kernel_version().unwrap_or_else(|| "unknown".into());
+    let os_name = sysinfo::System::long_os_version().unwrap_or_else(|| "unknown".into());
+    let arch = std::env::consts::ARCH.to_string();
+    let kernel = sysinfo::System::kernel_version().unwrap_or_else(|| "unknown".into());
     let cpu_cores = sys.cpus().len() as i64;
     // Machine fingerprint seed so co-located nodes group into one host.
     let host_seed_str = host_seed();
@@ -3039,13 +3533,16 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     let ip = {
         use std::net::UdpSocket;
         UdpSocket::bind("0.0.0.0:0")
-            .and_then(|s| { s.connect("8.8.8.8:80")?; s.local_addr() })
+            .and_then(|s| {
+                s.connect("8.8.8.8:80")?;
+                s.local_addr()
+            })
             .map(|a| a.ip().to_string())
             .unwrap_or_else(|_| "unknown".into())
     };
 
     let ram_total = sys.total_memory() as i64;
-    let ram_used  = sys.used_memory() as i64;
+    let ram_used = sys.used_memory() as i64;
     let ram_avail = (sys.total_memory().saturating_sub(sys.used_memory())) as i64;
     let cpu_usage = sys.global_cpu_usage() as i64;
 
@@ -3053,7 +3550,10 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     use sysinfo::Networks;
     let mut nets = Networks::new_with_refreshed_list();
     let (mut last_rx, mut last_tx) = nets.iter().fold((0i64, 0i64), |(rx, tx), (_, n)| {
-        (rx + n.total_received() as i64, tx + n.total_transmitted() as i64)
+        (
+            rx + n.total_received() as i64,
+            tx + n.total_transmitted() as i64,
+        )
     });
 
     // -- Send full host_status on first connect ------------------------------
@@ -3094,14 +3594,22 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     match validate_res {
         Ok(res) if res.status() == 401 => {
             eprintln!("\n[EVICTION] API key has been revoked. This node is no longer authorized.");
-            eprintln!("           Run `crossfyre node init` again to re-register with a valid key.");
+            eprintln!(
+                "           Run `crossfyre node init` again to re-register with a valid key."
+            );
             std::process::exit(1);
         }
         Ok(res) if !res.status().is_success() => {
-            eprintln!("Warning: Server returned {} on startup. Continuing...", res.status());
+            eprintln!(
+                "Warning: Server returned {} on startup. Continuing...",
+                res.status()
+            );
         }
         Err(e) => {
-            eprintln!("Warning: Could not reach backend on startup: {}. Continuing offline...", e);
+            eprintln!(
+                "Warning: Could not reach backend on startup: {}. Continuing offline...",
+                e
+            );
         }
         _ => {}
     }
@@ -3126,12 +3634,21 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 if let Ok(body) = r.json::<serde_json::Value>().await {
                     let n = body["data"]["republished"].as_u64().unwrap_or(0);
                     if n > 0 {
-                        println!("[resume] Picking up {} pending operation(s) from prior run", n);
+                        println!(
+                            "[resume] Picking up {} pending operation(s) from prior run",
+                            n
+                        );
                     }
                 }
             }
-            Ok(r) => eprintln!("[resume] Controller returned {} - skipping resume", r.status()),
-            Err(e) => eprintln!("[resume] Could not reach controller: {} - skipping resume", e),
+            Ok(r) => eprintln!(
+                "[resume] Controller returned {} - skipping resume",
+                r.status()
+            ),
+            Err(e) => eprintln!(
+                "[resume] Could not reach controller: {} - skipping resume",
+                e
+            ),
         }
     }
 
@@ -3157,7 +3674,8 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
         // Set >= the largest per-workflow concurrency (threads/tasks, capped at
         // 200) so a full-concurrency scan isn't throttled, while still bounding
         // node RAM to a few hundred small op payloads. Tunable per node.
-        let max_ack_pending: i64 = std::env::var("CFX_MAX_ACK_PENDING").ok()
+        let max_ack_pending: i64 = std::env::var("CFX_MAX_ACK_PENDING")
+            .ok()
             .and_then(|s| s.parse().ok())
             .filter(|n| *n > 0)
             .unwrap_or(256);
@@ -3169,10 +3687,15 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 let mut bound = None;
                 for attempt in 0..10u32 {
                     match jetstream.get_stream("CFX_WORK").await {
-                        Ok(s) => { bound = Some(s); break; }
+                        Ok(s) => {
+                            bound = Some(s);
+                            break;
+                        }
                         Err(e) => {
                             if attempt == 9 {
-                                eprintln!("[work] CFX_WORK stream not available after retries, running push-only: {e}");
+                                eprintln!(
+                                    "[work] CFX_WORK stream not available after retries, running push-only: {e}"
+                                );
                             }
                             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                         }
@@ -3259,7 +3782,8 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
 
     // Proactive credential refresh - fire every 6 days (JWT has a 7-day TTL).
     // If the daemon runs long enough, this prevents silent NATS disconnects.
-    let mut refresh_interval = tokio::time::interval(tokio::time::Duration::from_secs(6 * 24 * 3600));
+    let mut refresh_interval =
+        tokio::time::interval(tokio::time::Duration::from_secs(6 * 24 * 3600));
     refresh_interval.tick().await; // skip immediate first tick
 
     // Catch SIGTERM (the default `kill` signal) so the egress teardown
@@ -3726,7 +4250,11 @@ pub async fn run_script(
         })
         .collect();
 
-    println!("Running {} with {} target(s)...\n", script_path, targets.len());
+    println!(
+        "Running {} with {} target(s)...\n",
+        script_path,
+        targets.len()
+    );
 
     let result = executor::execute_local(script_path, targets).await;
 

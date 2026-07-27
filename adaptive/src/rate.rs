@@ -205,8 +205,10 @@ impl RateController {
 
     fn directive(&self) -> Directive {
         Directive {
-            concurrency: (self.conc.round() as u32)
-                .clamp(self.caps.min_concurrency.max(1), self.caps.max_concurrency.max(1)),
+            concurrency: (self.conc.round() as u32).clamp(
+                self.caps.min_concurrency.max(1),
+                self.caps.max_concurrency.max(1),
+            ),
             delay_ms: self.delay_ms.min(self.caps.max_delay_ms),
         }
     }
@@ -218,12 +220,22 @@ mod tests {
     use crate::health::{HealthWindow, ProbeClass};
 
     fn caps() -> Caps {
-        Caps { min_concurrency: 1, max_concurrency: 100, max_delay_ms: 5_000, max_retries: 5 }
+        Caps {
+            min_concurrency: 1,
+            max_concurrency: 100,
+            max_delay_ms: 5_000,
+            max_retries: 5,
+        }
     }
 
     #[test]
     fn caps_are_never_exceeded() {
-        let tight = Caps { min_concurrency: 2, max_concurrency: 8, max_delay_ms: 1000, max_retries: 3 };
+        let tight = Caps {
+            min_concurrency: 2,
+            max_concurrency: 8,
+            max_delay_ms: 1000,
+            max_retries: 3,
+        };
         let mut rc = RateController::new(Posture::Balanced, tight, 0);
         let mut w = HealthWindow::new(200, 10);
         for _ in 0..100 {
@@ -231,7 +243,11 @@ mod tests {
         }
         for _ in 0..200 {
             let d = rc.tick(&w.stats());
-            assert!(d.concurrency >= 2 && d.concurrency <= 8, "conc out of caps: {}", d.concurrency);
+            assert!(
+                d.concurrency >= 2 && d.concurrency <= 8,
+                "conc out of caps: {}",
+                d.concurrency
+            );
             assert!(d.delay_ms <= 1000);
         }
     }

@@ -2,7 +2,7 @@
 // scan state to a shared Postgres instance; by default that's a local Docker
 // container named `crossfyre-postgres` published on port 4440.
 
-use super::config::{load_config, load_or_create_config, save_config, ToolchainConfig};
+use super::config::{ToolchainConfig, load_config, load_or_create_config, save_config};
 use std::process::Command;
 
 const CONTAINER_NAME: &str = "crossfyre-postgres";
@@ -41,17 +41,23 @@ pub fn running(config: &ToolchainConfig) -> bool {
     std::net::TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], config.postgres.port)),
         std::time::Duration::from_millis(300),
-    ).is_ok()
+    )
+    .is_ok()
 }
 
 pub fn up(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Stop and remove any existing container by saved ID first
     if let Some(ref id) = config.container.id {
-        println!("Removing existing container ({})...", &id[..id.len().min(12)]);
+        println!(
+            "Removing existing container ({})...",
+            &id[..id.len().min(12)]
+        );
         let _ = Command::new("docker").args(["rm", "-f", id]).output();
     } else {
         // Fallback: clean up by name in case of leftover
-        let _ = Command::new("docker").args(["rm", "-f", CONTAINER_NAME]).output();
+        let _ = Command::new("docker")
+            .args(["rm", "-f", CONTAINER_NAME])
+            .output();
     }
 
     let mut docker_args = vec![
@@ -81,7 +87,10 @@ pub fn up(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     if output.status.success() {
         let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        println!("Postgres container is up. ID: {}", &container_id[..container_id.len().min(12)]);
+        println!(
+            "Postgres container is up. ID: {}",
+            &container_id[..container_id.len().min(12)]
+        );
 
         let mut updated = load_config()?;
         updated.container.id = Some(container_id);
@@ -95,12 +104,18 @@ pub fn up(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn resolve_container(config: &ToolchainConfig) -> String {
-    config.container.id.clone().unwrap_or_else(|| CONTAINER_NAME.to_string())
+    config
+        .container
+        .id
+        .clone()
+        .unwrap_or_else(|| CONTAINER_NAME.to_string())
 }
 
 fn down(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::Error>> {
     let target = resolve_container(config);
-    let status = Command::new("docker").args(["rm", "-f", &target]).status()?;
+    let status = Command::new("docker")
+        .args(["rm", "-f", &target])
+        .status()?;
     if status.success() {
         println!("Postgres container removed.");
         let mut updated = load_config()?;

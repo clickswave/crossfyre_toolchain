@@ -37,9 +37,7 @@ impl Default for ToolchainConfig {
                 password: None,
                 db_name: "crossfyre".to_string(),
             },
-            container: ContainerSection {
-                id: None,
-            },
+            container: ContainerSection { id: None },
         }
     }
 }
@@ -114,7 +112,10 @@ pub fn load_or_create_config() -> Result<ToolchainConfig, Box<dyn std::error::Er
     if !get_config_path().exists() {
         let config = ToolchainConfig::default();
         save_config(&config)?;
-        println!("[config] Wrote default toolchain config: {}", get_config_path().display());
+        println!(
+            "[config] Wrote default toolchain config: {}",
+            get_config_path().display()
+        );
     }
     load_config()
 }
