@@ -109,8 +109,7 @@ impl Tui {
                     }
                     Err(e) => {
                         return Err(sqlx::Error::Io(io::Error::other(format!(
-                            "Failed to export results: {}",
-                            e
+                            "Failed to export results: {e}"
                         ))));
                     }
                 }
@@ -177,7 +176,7 @@ impl Tui {
             if self.config.enable_offset_pagination {
                 let real_index = scan_results_offset + index + 1;
 
-                let index_cell = Cell::from(format!("{}", real_index));
+                let index_cell = Cell::from(format!("{real_index}"));
                 let url_cell = Cell::from(result.url.clone());
                 let status_cell = Cell::from(format!("{} [{}]", label, result.request_status));
                 let headers_length_cell = Cell::from(format!("{}", result.headers_length));
@@ -192,28 +191,26 @@ impl Tui {
                 ]);
 
                 displayed_list.push(row);
-            } else {
-                if index >= scan_results_offset
-                    && index < scan_results_offset + visible_items as usize
-                {
-                    let real_index = index + 1;
+            } else if index >= scan_results_offset
+                && index < scan_results_offset + visible_items as usize
+            {
+                let real_index = index + 1;
 
-                    let index_cell = Cell::from(format!("{}", real_index));
-                    let url_cell = Cell::from(result.url.clone());
-                    let status_cell = Cell::from(format!("{} [{}]", label, result.request_status));
-                    let headers_length_cell = Cell::from(format!("{}", result.headers_length));
-                    let body_length_cell = Cell::from(format!("{}", result.body_length));
+                let index_cell = Cell::from(format!("{real_index}"));
+                let url_cell = Cell::from(result.url.clone());
+                let status_cell = Cell::from(format!("{} [{}]", label, result.request_status));
+                let headers_length_cell = Cell::from(format!("{}", result.headers_length));
+                let body_length_cell = Cell::from(format!("{}", result.body_length));
 
-                    let row = Row::new(vec![
-                        index_cell,
-                        url_cell,
-                        status_cell.style(style),
-                        headers_length_cell,
-                        body_length_cell,
-                    ]);
+                let row = Row::new(vec![
+                    index_cell,
+                    url_cell,
+                    status_cell.style(style),
+                    headers_length_cell,
+                    body_length_cell,
+                ]);
 
-                    displayed_list.push(row);
-                }
+                displayed_list.push(row);
             }
         }
 
@@ -288,24 +285,22 @@ impl Tui {
         {
             if self.config.enable_offset_pagination {
                 let real_index = logs_offset + index + 1;
-                let index_cell = Cell::from(format!("{}", real_index));
+                let index_cell = Cell::from(format!("{real_index}"));
                 let level_cell = Cell::from(log.level.clone());
                 let message_cell = Cell::from(log.description.clone());
                 let timestamp_cell = Cell::from(log.created_at.to_string());
                 let row = Row::new(vec![index_cell, level_cell, message_cell, timestamp_cell]);
                 displayed_list.push(row);
-            } else {
-                if index >= logs_offset && index < logs_offset + visible_items as usize {
-                    let real_index = index + 1;
-                    let index_cell = Cell::from(format!("{}", real_index));
-                    let level_cell = Cell::from(log.level.clone());
-                    let message_cell = Cell::from(log.description.clone());
-                    let timestamp_cell = Cell::from(log.created_at.to_string());
+            } else if index >= logs_offset && index < logs_offset + visible_items as usize {
+                let real_index = index + 1;
+                let index_cell = Cell::from(format!("{real_index}"));
+                let level_cell = Cell::from(log.level.clone());
+                let message_cell = Cell::from(log.description.clone());
+                let timestamp_cell = Cell::from(log.created_at.to_string());
 
-                    let row = Row::new(vec![index_cell, level_cell, message_cell, timestamp_cell]);
+                let row = Row::new(vec![index_cell, level_cell, message_cell, timestamp_cell]);
 
-                    displayed_list.push(row);
-                }
+                displayed_list.push(row);
             }
         }
 
@@ -410,13 +405,11 @@ impl Tui {
                                     .unwrap()
                                     .set(scan_results_offset + 1);
                             }
-                        } else {
-                            if scan_results_offset + 1 < results_length {
-                                self.scan_results_offset
-                                    .lock()
-                                    .unwrap()
-                                    .set(scan_results_offset + 1);
-                            }
+                        } else if scan_results_offset + 1 < results_length {
+                            self.scan_results_offset
+                                .lock()
+                                .unwrap()
+                                .set(scan_results_offset + 1);
                         }
                     }
                     Tab::Logs => {
@@ -428,10 +421,8 @@ impl Tui {
                             if logs_length > 1 {
                                 self.logs_offset.lock().unwrap().set(logs_offset + 1);
                             }
-                        } else {
-                            if logs_offset + 1 < logs_length {
-                                self.logs_offset.lock().unwrap().set(logs_offset + 1);
-                            }
+                        } else if logs_offset + 1 < logs_length {
+                            self.logs_offset.lock().unwrap().set(logs_offset + 1);
                         }
                     }
                 },

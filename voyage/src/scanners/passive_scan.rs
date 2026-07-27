@@ -17,10 +17,10 @@ pub async fn execute(
         match crate::scanners::providers::crt_sh::fetch(&client, domain).await {
             Ok(prefixes) => {
                 for prefix in prefixes {
-                    results.insert(format!("{}.{}", prefix, domain), "crt.sh".to_string());
+                    results.insert(format!("{prefix}.{domain}"), "crt.sh".to_string());
                 }
             }
-            Err(e) => eprintln!("[WARN] crt.sh error: {}", e),
+            Err(e) => eprintln!("[WARN] crt.sh error: {e}"),
         }
     }
 
@@ -29,10 +29,10 @@ pub async fn execute(
         match crate::scanners::providers::hackertarget::fetch(&client, domain).await {
             Ok(prefixes) => {
                 for prefix in prefixes {
-                    results.insert(format!("{}.{}", prefix, domain), "hackertarget".to_string());
+                    results.insert(format!("{prefix}.{domain}"), "hackertarget".to_string());
                 }
             }
-            Err(e) => eprintln!("[WARN] hackertarget error: {}", e),
+            Err(e) => eprintln!("[WARN] hackertarget error: {e}"),
         }
     }
 
@@ -44,7 +44,7 @@ pub async fn execute(
                     results.insert(subdomain, "alienvault".to_string());
                 }
             }
-            Err(e) => eprintln!("[WARN] alienvault error: {}", e),
+            Err(e) => eprintln!("[WARN] alienvault error: {e}"),
         }
     }
 

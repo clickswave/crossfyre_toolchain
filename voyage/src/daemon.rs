@@ -118,8 +118,8 @@ struct ProbeParams {
 // ---------------------------------------------------------------------------
 
 pub async fn run(port: u16, db: VoyageDb) -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    println!("Voyage daemon listening on port {}", port);
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    println!("Voyage daemon listening on port {port}");
 
     let db = Arc::new(db);
 
@@ -133,7 +133,7 @@ pub async fn run(port: u16, db: VoyageDb) -> Result<(), Box<dyn std::error::Erro
                 if let Ok(n) = db_cleanup.delete_expired_probe_results().await
                     && n > 0
                 {
-                    println!("Cleaned up {} expired probe result(s)", n);
+                    println!("Cleaned up {n} expired probe result(s)");
                 }
             }
         });
@@ -145,7 +145,7 @@ pub async fn run(port: u16, db: VoyageDb) -> Result<(), Box<dyn std::error::Erro
         let db_clone = Arc::clone(&db);
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, db_clone).await {
-                eprintln!("Connection error from {}: {}", addr, e);
+                eprintln!("Connection error from {addr}: {e}");
             }
         });
     }
@@ -329,7 +329,7 @@ async fn dispatch(req: DaemonRequest, db: Arc<VoyageDb>) -> DaemonResponse {
                         operation_id,
                         status: "error".to_string(),
                         results: None,
-                        message: Some(format!("Invalid enum params: {}", e)),
+                        message: Some(format!("Invalid enum params: {e}")),
                     };
                 }
             };
@@ -400,7 +400,7 @@ async fn dispatch(req: DaemonRequest, db: Arc<VoyageDb>) -> DaemonResponse {
                         operation_id,
                         status: "error".to_string(),
                         results: None,
-                        message: Some(format!("Invalid probe params: {}", e)),
+                        message: Some(format!("Invalid probe params: {e}")),
                     };
                 }
             };
@@ -417,14 +417,14 @@ async fn dispatch(req: DaemonRequest, db: Arc<VoyageDb>) -> DaemonResponse {
                 operation_id,
                 status: "error".to_string(),
                 results: None,
-                message: Some(format!("DB reset failed: {}", e)),
+                message: Some(format!("DB reset failed: {e}")),
             },
         },
         unknown => DaemonResponse {
             operation_id,
             status: "error".to_string(),
             results: None,
-            message: Some(format!("Unknown operation: {}", unknown)),
+            message: Some(format!("Unknown operation: {unknown}")),
         },
     }
 }
@@ -445,17 +445,17 @@ async fn prepare_enum(
     .to_string();
     let config_hash = crate::libs::sha::sha512(config_str)
         .await
-        .map_err(|e| format!("Hash error: {}", e))?;
+        .map_err(|e| format!("Hash error: {e}"))?;
 
     let scan_id = db
         .get_or_create_scan(&config_hash, &params.domain, &params.wordlist)
         .await
-        .map_err(|e| format!("DB error: {}", e))?;
+        .map_err(|e| format!("DB error: {e}"))?;
 
     if params.fresh_start {
         db.fresh_start_scan(&scan_id)
             .await
-            .map_err(|e| format!("DB error: {}", e))?;
+            .map_err(|e| format!("DB error: {e}"))?;
     }
 
     // Passive scan - insert results with status="found"
@@ -481,7 +481,7 @@ async fn prepare_enum(
                     .collect();
                 let _ = db.insert_entries_batch(&scan_id, &entries).await;
             }
-            Err(e) => eprintln!("[WARN] Passive scan error: {}", e),
+            Err(e) => eprintln!("[WARN] Passive scan error: {e}"),
         }
     }
 
@@ -489,7 +489,7 @@ async fn prepare_enum(
     if !params.disable_active && !params.wordlist.is_empty() {
         let words = crate::libs::wordlist::read_lines(&params.wordlist)
             .await
-            .map_err(|e| format!("Wordlist error: {}", e))?;
+            .map_err(|e| format!("Wordlist error: {e}"))?;
 
         let entries: Vec<(String, String, String, String)> = words
             .iter()
@@ -506,20 +506,20 @@ async fn prepare_enum(
 
         db.insert_entries_batch(&scan_id, &entries)
             .await
-            .map_err(|e| format!("DB error: {}", e))?;
+            .map_err(|e| format!("DB error: {e}"))?;
     }
 
     db.set_scan_status(&scan_id, "populated")
         .await
-        .map_err(|e| format!("DB error: {}", e))?;
+        .map_err(|e| format!("DB error: {e}"))?;
     db.reset_halted_entries(&scan_id)
         .await
-        .map_err(|e| format!("DB error: {}", e))?;
+        .map_err(|e| format!("DB error: {e}"))?;
 
     let total = db
         .get_scan_entry_total(&scan_id)
         .await
-        .map_err(|e| format!("DB error: {}", e))? as usize;
+        .map_err(|e| format!("DB error: {e}"))? as usize;
 
     let config = EnumConfig {
         scan_id,
@@ -562,7 +562,7 @@ async fn run_enum_instant(
 
     db2.get_found_subdomains(&scan_id)
         .await
-        .map_err(|e| format!("{}", e).into())
+        .map_err(|e| format!("{e}").into())
 }
 
 // ---------------------------------------------------------------------------
@@ -577,7 +577,7 @@ async fn run_probe(params: ProbeParams, db: Arc<VoyageDb>) -> DaemonResponse {
                 operation_id: params.operation_id,
                 status: "error".to_string(),
                 results: None,
-                message: Some(format!("DNS resolver error: {}", e)),
+                message: Some(format!("DNS resolver error: {e}")),
             };
         }
     };

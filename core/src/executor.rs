@@ -27,9 +27,8 @@ fn run_python(ctx: &JobContext) -> PyResult<()> {
         let globals = PyDict::new(py);
         globals.set_item("__name__", "__main__")?;
 
-        let code = CString::new(ctx.script.as_str()).map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(format!("Invalid script: {}", e))
-        })?;
+        let code = CString::new(ctx.script.as_str())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid script: {e}")))?;
         py.run(&code, Some(&globals), None)?;
 
         // Call run() if it exists
@@ -107,7 +106,7 @@ pub async fn execute_job(
         match result {
             Ok(()) => ExecutionResult::Completed { code: 0 },
             Err(e) => ExecutionResult::Error {
-                message: format!("Script error: {}", e),
+                message: format!("Script error: {e}"),
             },
         }
     });
@@ -115,7 +114,7 @@ pub async fn execute_job(
     let exec_result = match handle.await {
         Ok(r) => r,
         Err(e) => ExecutionResult::Error {
-            message: format!("Task panicked: {}", e),
+            message: format!("Task panicked: {e}"),
         },
     };
 
@@ -131,7 +130,7 @@ pub async fn execute_local(script_path: &str, targets: Vec<(String, String)>) ->
         Ok(s) => s,
         Err(e) => {
             return ExecutionResult::Error {
-                message: format!("Cannot read '{}': {}", script_path, e),
+                message: format!("Cannot read '{script_path}': {e}"),
             };
         }
     };
@@ -143,13 +142,13 @@ pub async fn execute_local(script_path: &str, targets: Vec<(String, String)>) ->
         while let Ok(msg) = rx.recv() {
             match msg {
                 cfx_runtime::cfxs::CfxMessage::Result { job_id, data } => {
-                    println!("[result] job={} data={}", job_id, data);
+                    println!("[result] job={job_id} data={data}");
                 }
                 cfx_runtime::cfxs::CfxMessage::Log { job_id, message } => {
-                    println!("[log]    job={} {}", job_id, message);
+                    println!("[log]    job={job_id} {message}");
                 }
                 cfx_runtime::cfxs::CfxMessage::Completed { job_id, code } => {
-                    println!("[done]   job={} code={}", job_id, code);
+                    println!("[done]   job={job_id} code={code}");
                     return;
                 }
             }
@@ -179,7 +178,7 @@ pub async fn execute_local(script_path: &str, targets: Vec<(String, String)>) ->
         match result {
             Ok(()) => ExecutionResult::Completed { code: 0 },
             Err(e) => ExecutionResult::Error {
-                message: format!("Script error: {}", e),
+                message: format!("Script error: {e}"),
             },
         }
     });
@@ -187,7 +186,7 @@ pub async fn execute_local(script_path: &str, targets: Vec<(String, String)>) ->
     let exec_result = match handle.await {
         Ok(r) => r,
         Err(e) => ExecutionResult::Error {
-            message: format!("Task panicked: {}", e),
+            message: format!("Task panicked: {e}"),
         },
     };
 

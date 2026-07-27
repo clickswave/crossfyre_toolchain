@@ -235,11 +235,7 @@ fn draw(f: &mut ratatui::Frame, state: &TuiState) {
             Cell::from(ev.status.as_deref().unwrap_or("-"))
                 .style(Style::default().fg(status_color)),
             Cell::from(ev.service.as_deref().unwrap_or("-")),
-            Cell::from(
-                ev.latency_ms
-                    .map(|l| format!("{}ms", l))
-                    .unwrap_or_default(),
-            ),
+            Cell::from(ev.latency_ms.map(|l| format!("{l}ms")).unwrap_or_default()),
             Cell::from(
                 ev.banner
                     .as_deref()

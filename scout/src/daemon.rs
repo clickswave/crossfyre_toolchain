@@ -20,15 +20,15 @@ fn default_response() -> String {
 }
 
 pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    println!("Scout daemon listening on port {}", port);
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    println!("Scout daemon listening on port {port}");
 
     loop {
         let (stream, addr) = listener.accept().await?;
         let _ = stream.set_nodelay(true);
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream).await {
-                eprintln!("Connection error from {}: {}", addr, e);
+                eprintln!("Connection error from {addr}: {e}");
             }
         });
     }

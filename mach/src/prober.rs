@@ -36,9 +36,9 @@ impl std::fmt::Display for ProbeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProbeError::UnsupportedMethod(method) => {
-                write!(f, "Unsupported HTTP method: {}", method)
+                write!(f, "Unsupported HTTP method: {method}")
             }
-            ProbeError::RequestFailed(err) => write!(f, "Request failed: {}", err),
+            ProbeError::RequestFailed(err) => write!(f, "Request failed: {err}"),
         }
     }
 }
@@ -66,14 +66,13 @@ impl Prober {
         for header in &config.headers {
             if let Some((key, value)) = header.split_once(':') {
                 let header_name = HeaderName::from_bytes(key.trim().as_bytes())
-                    .map_err(|e| format!("Invalid header name '{}': {}", key, e))?;
+                    .map_err(|e| format!("Invalid header name '{key}': {e}"))?;
                 let header_value = HeaderValue::from_str(value.trim())
-                    .map_err(|e| format!("Invalid header value '{}': {}", value, e))?;
+                    .map_err(|e| format!("Invalid header value '{value}': {e}"))?;
                 headers_map.insert(header_name, header_value);
             } else {
                 return Err(format!(
-                    "Invalid header format '{}'. Use 'Key: Value'",
-                    header
+                    "Invalid header format '{header}'. Use 'Key: Value'"
                 ));
             }
         }
@@ -91,20 +90,20 @@ impl Prober {
             headers_map.insert(
                 COOKIE,
                 HeaderValue::from_str(&cookie_string)
-                    .map_err(|e| format!("Invalid cookie header: {}", e))?,
+                    .map_err(|e| format!("Invalid cookie header: {e}"))?,
             );
         }
 
         // --- Add Basic Auth if configured ---
         if !config.basic_auth.is_empty() {
             if let Some((username, password)) = config.basic_auth.split_once(':') {
-                let credentials = format!("{}:{}", username, password); // password may be empty
+                let credentials = format!("{username}:{password}"); // password may be empty
                 let encoded = STANDARD.encode(credentials);
-                let value = format!("Basic {}", encoded);
+                let value = format!("Basic {encoded}");
                 headers_map.insert(
                     AUTHORIZATION,
                     HeaderValue::from_str(&value)
-                        .map_err(|e| format!("Invalid basic auth header: {}", e))?,
+                        .map_err(|e| format!("Invalid basic auth header: {e}"))?,
                 );
             } else {
                 return Err(format!(
@@ -120,7 +119,7 @@ impl Prober {
             .cookie_store(config.store_cookies)
             .redirect(policy)
             .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
         Ok(Self {
             config: config.clone(),
@@ -145,8 +144,7 @@ impl Prober {
             "head" => self.client.head(url),
             other => {
                 return Err(ProbeError::UnsupportedMethod(format!(
-                    "Unsupported HTTP method: {}",
-                    other
+                    "Unsupported HTTP method: {other}"
                 )));
             }
         };
@@ -164,8 +162,7 @@ impl Prober {
             Ok(resp) => resp,
             Err(e) => {
                 return Err(ProbeError::RequestFailed(format!(
-                    "Failed to send request: {}",
-                    e
+                    "Failed to send request: {e}"
                 )));
             }
         };

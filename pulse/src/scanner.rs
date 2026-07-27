@@ -508,7 +508,7 @@ async fn probe_port(
     detect_service: bool,
 ) -> ProbeReport {
     use crate::governor::{Outcome, Sample};
-    let addr_str = format!("{}:{}", host, port);
+    let addr_str = format!("{host}:{port}");
 
     // Build the list of addresses to try.
     let addrs: Vec<SocketAddr> = if let Ok(parsed) = addr_str.parse::<SocketAddr>() {

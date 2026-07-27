@@ -53,7 +53,7 @@ pub fn nodes(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .ok()
             .and_then(|s| s.trim().parse::<u32>().ok())
         {
-            Some(pid) if Path::new(&format!("/proc/{}", pid)).exists() => {
+            Some(pid) if Path::new(&format!("/proc/{pid}")).exists() => {
                 (check(), format!("{GREEN}running{RESET}"), pid.to_string())
             }
             Some(_) => (bang(), format!("{YELLOW}stale pid{RESET}"), "-".to_string()),
@@ -119,8 +119,8 @@ pub fn extensions() -> Result<(), Box<dyn std::error::Error>> {
                 dim("not listening")
             };
             match daemon.as_str() {
-                "running" => (check(), format!("{GREEN}running{RESET}  {}", listen_note)),
-                "failed" => (bang(), format!("{YELLOW}failed{RESET}  {}", listen_note)),
+                "running" => (check(), format!("{GREEN}running{RESET}  {listen_note}")),
+                "failed" => (bang(), format!("{YELLOW}failed{RESET}  {listen_note}")),
                 "stopped" => (dot(), format!("{}  {}", dim("stopped"), listen_note)),
                 other => (dot(), format!("{}  {}", dim(other), listen_note)),
             }

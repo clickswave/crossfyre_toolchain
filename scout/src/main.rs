@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Exec(args)) => {
             let mut payload: serde_json::Value =
-                serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;
+                serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {e}"))?;
             if payload.get("response").is_none() {
                 payload["response"] = serde_json::json!("stream");
             }
@@ -45,12 +45,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn send_stream(port: u16, req: serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
-    let stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+    let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
         .await
         .map_err(|_| {
             format!(
-                "Scout daemon is not running on port {}. Start it first with: scout --daemon",
-                port
+                "Scout daemon is not running on port {port}. Start it first with: scout --daemon"
             )
         })?;
     let (reader, mut writer) = tokio::io::split(stream);
@@ -60,7 +59,7 @@ async fn send_stream(port: u16, req: serde_json::Value) -> Result<(), Box<dyn st
 
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
-        println!("{}", line);
+        println!("{line}");
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
             let t = v["type"].as_str().unwrap_or("");
             if t == "done" || t == "error" {

@@ -30,7 +30,7 @@ pub fn sudo_user_info() -> Option<(u32, u32, PathBuf, String)> {
         let gid = (*pwd).pw_gid;
         let home_ptr = (*pwd).pw_dir;
         let home = if home_ptr.is_null() {
-            PathBuf::from(format!("/home/{}", sudo_user))
+            PathBuf::from(format!("/home/{sudo_user}"))
         } else {
             PathBuf::from(
                 std::ffi::CStr::from_ptr(home_ptr)
@@ -85,11 +85,11 @@ pub fn cmd_as_invoking_user<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
         cmd.env("LOGNAME", &name);
         // systemd --user finds the right bus via these two. Both live under
         // /run/user/<uid> on every modern systemd setup.
-        let runtime_dir = format!("/run/user/{}", uid);
+        let runtime_dir = format!("/run/user/{uid}");
         cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
         cmd.env(
             "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path={}/bus", runtime_dir),
+            format!("unix:path={runtime_dir}/bus"),
         );
     }
     cmd

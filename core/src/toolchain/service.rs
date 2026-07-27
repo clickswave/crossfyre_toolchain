@@ -255,7 +255,7 @@ mod node {
         // (config root, systemctl --user for extensions) keeps resolving to
         // the operator's home instead of /root.
         let sudo_env = match super::super::sudo_user::sudo_user_info() {
-            Some((_, _, _, name)) => format!("Environment=SUDO_USER={}\n", name),
+            Some((_, _, _, name)) => format!("Environment=SUDO_USER={name}\n"),
             None => String::new(),
         };
         // The supervisor is the separate `node` worker binary, installed
@@ -286,7 +286,7 @@ mod node {
             .arg("daemon-reload")
             .status();
         if !super::quiet() {
-            super::svc_ok(&format!("{} created", UNIT));
+            super::svc_ok(&format!("{UNIT} created"));
         }
         Ok(())
     }
@@ -304,7 +304,7 @@ mod node {
             let _ = std::process::Command::new("systemctl")
                 .arg("daemon-reload")
                 .status();
-            super::svc_ok(&format!("{} removed", UNIT));
+            super::svc_ok(&format!("{UNIT} removed"));
         }
         Ok(())
     }
@@ -314,9 +314,9 @@ mod node {
         let status = std::process::Command::new("systemctl")
             .args([action, UNIT])
             .status()
-            .map_err(|e| format!("systemctl failed: {}", e))?;
+            .map_err(|e| format!("systemctl failed: {e}"))?;
         if !status.success() {
-            return Err(format!("Failed to {} {}", action, UNIT).into());
+            return Err(format!("Failed to {action} {UNIT}").into());
         }
         if !super::quiet() {
             super::svc_ok(&format!("{} {}", UNIT, super::action_past(action)));
@@ -390,7 +390,7 @@ mod imp {
     use std::fs;
 
     fn service_name(ext: &str) -> String {
-        format!("crossfyre-{}.service", ext)
+        format!("crossfyre-{ext}.service")
     }
 
     fn unit_dir() -> std::path::PathBuf {
@@ -451,9 +451,9 @@ mod imp {
         let status = cmd_as_invoking_user("systemctl")
             .args(["--user", action, &svc])
             .status()
-            .map_err(|e| format!("systemctl failed: {}", e))?;
+            .map_err(|e| format!("systemctl failed: {e}"))?;
         if !status.success() {
-            return Err(format!("Failed to {} {}", action, svc).into());
+            return Err(format!("Failed to {action} {svc}").into());
         }
         if !super::quiet() {
             super::svc_ok(&format!("{} {}", svc, super::action_past(action)));

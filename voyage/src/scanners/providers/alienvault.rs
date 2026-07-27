@@ -17,10 +17,7 @@ pub async fn fetch(
     domain: &str,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut results = vec![];
-    let url = format!(
-        "https://otx.alienvault.com/api/v1/indicators/domain/{}/passive_dns",
-        domain
-    );
+    let url = format!("https://otx.alienvault.com/api/v1/indicators/domain/{domain}/passive_dns");
 
     let response = reqwest_client.get(&url).send().await?;
 

@@ -168,9 +168,9 @@ impl Scanner {
         let arc_prober = match crate::prober::Prober::new(&self.config).await {
             Ok(prober) => Arc::new(prober),
             Err(e) => {
-                eprintln!("Failed to create prober: {:?}", e);
+                eprintln!("Failed to create prober: {e:?}");
                 self.logger
-                    .error(&format!("Failed to create prober: {:?}", e))
+                    .error(&format!("Failed to create prober: {e:?}"))
                     .await?;
                 return Err(sqlx::Error::BeginFailed);
             }
@@ -192,8 +192,8 @@ impl Scanner {
 
         while let Some(result) = join_set.join_next().await {
             if let Err(e) = result {
-                eprintln!("Task failed: {:?}", e);
-                self.logger.error(&format!("Task failed: {:?}", e)).await?;
+                eprintln!("Task failed: {e:?}");
+                self.logger.error(&format!("Task failed: {e:?}")).await?;
             }
         }
 
@@ -221,7 +221,7 @@ impl Scanner {
             Ok(prober) => Arc::new(prober),
             Err(e) => {
                 self.logger
-                    .error(&format!("Failed to create prober: {:?}", e))
+                    .error(&format!("Failed to create prober: {e:?}"))
                     .await?;
                 return Err(sqlx::Error::BeginFailed);
             }
@@ -306,7 +306,7 @@ impl Scanner {
 
         while let Some(result) = join_set.join_next().await {
             if let Err(e) = result {
-                self.logger.error(&format!("Task failed: {:?}", e)).await?;
+                self.logger.error(&format!("Task failed: {e:?}")).await?;
             }
         }
 
@@ -351,9 +351,9 @@ impl Scanner {
         let arc_prober = match crate::prober::Prober::new(&self.config).await {
             Ok(prober) => Arc::new(prober),
             Err(e) => {
-                eprintln!("Failed to create prober: {:?}", e);
+                eprintln!("Failed to create prober: {e:?}");
                 self.logger
-                    .error(&format!("Failed to create prober: {:?}", e))
+                    .error(&format!("Failed to create prober: {e:?}"))
                     .await?;
                 return Err(sqlx::Error::BeginFailed);
             }
@@ -407,7 +407,7 @@ impl Scanner {
                         let offset_val = offset.lock().unwrap().value;
                         match db.get_scan_results(*scan_id, limit_val, offset_val).await {
                             Ok(new_results) => *results.lock().unwrap() = new_results,
-                            Err(e) => eprintln!("{}", e),
+                            Err(e) => eprintln!("{e}"),
                         }
                     }
                 };
@@ -437,7 +437,7 @@ impl Scanner {
                             { (limit.lock().unwrap().value, offset.lock().unwrap().value) };
                         match db.get_logs(&scan_id, limit_val, offset_val).await {
                             Ok(new_logs) => *logs_data.lock().unwrap() = new_logs,
-                            Err(e) => eprintln!("Error fetching logs: {:?}", e),
+                            Err(e) => eprintln!("Error fetching logs: {e:?}"),
                         }
                     }
                 };
@@ -491,17 +491,17 @@ impl Scanner {
         ));
 
         if let Err(e) = tui.run(terminal).await {
-            eprintln!("Failed to run TUI: {:?}", e);
+            eprintln!("Failed to run TUI: {e:?}");
             self.logger
-                .error(&format!("Failed to run TUI: {:?}", e))
+                .error(&format!("Failed to run TUI: {e:?}"))
                 .await?;
             return Err(sqlx::Error::BeginFailed);
         }
 
         while let Some(result) = join_set.join_next().await {
             if let Err(e) = result {
-                eprintln!("Task failed: {:?}", e);
-                self.logger.error(&format!("Task failed: {:?}", e)).await?;
+                eprintln!("Task failed: {e:?}");
+                self.logger.error(&format!("Task failed: {e:?}")).await?;
             }
         }
 
@@ -526,7 +526,7 @@ async fn update_logs_handle(
         let new_logs = match db.get_logs(&scan_id, limit_val, offset_val).await {
             Ok(logs) => logs,
             Err(e) => {
-                eprintln!("Error fetching logs: {:?}", e);
+                eprintln!("Error fetching logs: {e:?}");
                 continue; // Retry on error
             }
         };
@@ -552,7 +552,7 @@ async fn update_results_handle(
         let new_results = match db.get_scan_results(*scan_id, limit_val, offset_val).await {
             Ok(results) => results,
             Err(e) => {
-                eprintln!("Error fetching scan results: {:?}", e);
+                eprintln!("Error fetching scan results: {e:?}");
                 continue; // Retry on error
             }
         };
@@ -630,7 +630,7 @@ async fn task_handle(
                 return Ok(());
             }
             Err(e) => {
-                let msg = format!("Error fetching work: {:?}", e);
+                let msg = format!("Error fetching work: {e:?}");
                 let _ = logger.error(&msg).await;
                 emit_log(&event_tx, "error", &msg);
                 sleep(Duration::from_millis(200)).await;
@@ -714,7 +714,7 @@ async fn record_outcome(
                 )
                 .await
             {
-                let msg = format!("Failed to update work status: {:?}", e);
+                let msg = format!("Failed to update work status: {e:?}");
                 let _ = logger.error(&msg).await;
                 emit_log(event_tx, "error", &msg);
                 let _ = db.reset_entry_to_queued(work.entry_id).await;
@@ -772,7 +772,7 @@ async fn record_outcome(
                 .update_work_status(work.entry_id, entry_status, code, None, None, 0, 0)
                 .await
             {
-                let msg = format!("Failed to update error status: {:?}", db_err);
+                let msg = format!("Failed to update error status: {db_err:?}");
                 let _ = logger.error(&msg).await;
                 emit_log(event_tx, "error", &msg);
                 let _ = db.reset_entry_to_queued(work.entry_id).await;
@@ -982,7 +982,7 @@ async fn adaptive_task_handle(
                 return Ok(());
             }
             Err(e) => {
-                let msg = format!("Error fetching work: {:?}", e);
+                let msg = format!("Error fetching work: {e:?}");
                 let _ = logger.error(&msg).await;
                 emit_log(&event_tx, "error", &msg);
                 sleep(Duration::from_millis(200)).await;

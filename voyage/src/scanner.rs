@@ -172,7 +172,7 @@ impl Scanner {
                 emit_log(
                     &Some(Arc::clone(&arc_tx)),
                     "error",
-                    &format!("Task panicked: {:?}", e),
+                    &format!("Task panicked: {e:?}"),
                 );
             }
         }
@@ -218,7 +218,7 @@ async fn task_handle(
             emit_log(
                 &Some(event_tx.clone()),
                 "error",
-                &format!("DNS resolver error: {}", e),
+                &format!("DNS resolver error: {e}"),
             );
             return Ok(());
         }
@@ -240,7 +240,7 @@ async fn task_handle(
             emit_log(
                 &Some(event_tx.clone()),
                 "error",
-                &format!("HTTP client build error: {}", e),
+                &format!("HTTP client build error: {e}"),
             );
             return Ok(());
         }
@@ -267,7 +267,7 @@ async fn task_handle(
                 emit_log(
                     &Some(event_tx.clone()),
                     "error",
-                    &format!("get_work_one error: {}", e),
+                    &format!("get_work_one error: {e}"),
                 );
                 sleep(Duration::from_millis(200)).await;
                 continue;
@@ -300,7 +300,7 @@ async fn task_handle(
             emit_log(
                 &Some(event_tx.clone()),
                 "error",
-                &format!("update_work_status failed: {}", e),
+                &format!("update_work_status failed: {e}"),
             );
             let _ = db.reset_entry_to_queued(work.entry_id).await;
             continue;
@@ -419,7 +419,7 @@ async fn adaptive_task_handle(
             emit_log(
                 &Some(event_tx.clone()),
                 "error",
-                &format!("DNS resolver error: {}", e),
+                &format!("DNS resolver error: {e}"),
             );
             return Ok(());
         }
@@ -439,7 +439,7 @@ async fn adaptive_task_handle(
             emit_log(
                 &Some(event_tx.clone()),
                 "error",
-                &format!("HTTP client build error: {}", e),
+                &format!("HTTP client build error: {e}"),
             );
             return Ok(());
         }
@@ -480,7 +480,7 @@ async fn adaptive_task_handle(
                 emit_log(
                     &Some(event_tx.clone()),
                     "error",
-                    &format!("get_work_one error: {}", e),
+                    &format!("get_work_one error: {e}"),
                 );
                 sleep(Duration::from_millis(200)).await;
                 continue;
@@ -541,7 +541,7 @@ async fn adaptive_task_handle(
             emit_log(
                 &Some(event_tx.clone()),
                 "error",
-                &format!("update_work_status failed: {}", e),
+                &format!("update_work_status failed: {e}"),
             );
             let _ = db.reset_entry_to_queued(work.entry_id).await;
             continue;

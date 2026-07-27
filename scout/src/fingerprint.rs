@@ -270,12 +270,12 @@ fn normalize_target(t: &str) -> Option<(String, String, u16, String)> {
             } else {
                 "http"
             };
-            format!("{}://{}", scheme, t)
+            format!("{scheme}://{t}")
         } else {
-            format!("http://{}", t)
+            format!("http://{t}")
         }
     } else {
-        format!("http://{}", t)
+        format!("http://{t}")
     };
     let url = reqwest::Url::parse(&with_scheme).ok()?;
     let scheme = url.scheme().to_string();
@@ -291,7 +291,7 @@ fn normalize_target(t: &str) -> Option<(String, String, u16, String)> {
 // ---------------------------------------------------------------------------
 
 async fn fetch_favicon(client: &Client, scheme: &str, host: &str, port: u16) -> Value {
-    let url = format!("{}://{}:{}/favicon.ico", scheme, host, port);
+    let url = format!("{scheme}://{host}:{port}/favicon.ico");
     match client.get(&url).send().await {
         Ok(r) if r.status().is_success() => match r.bytes().await {
             Ok(b) if !b.is_empty() => {

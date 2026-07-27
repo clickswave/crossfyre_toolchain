@@ -24,17 +24,17 @@ impl Exporter {
 
         let mut wtr = match csv::Writer::from_path(&self.file_path) {
             Ok(writer) => writer,
-            Err(e) => return Err(format!("Failed to create CSV writer: {}", e)),
+            Err(e) => return Err(format!("Failed to create CSV writer: {e}")),
         };
 
         for result in results.found {
             if let Err(e) = wtr.serialize(result) {
-                return Err(format!("Failed to write to CSV file: {}", e));
+                return Err(format!("Failed to write to CSV file: {e}"));
             }
         }
 
         if let Err(e) = wtr.flush() {
-            return Err(format!("Failed to flush CSV file: {}", e));
+            return Err(format!("Failed to flush CSV file: {e}"));
         }
 
         Ok(())
@@ -48,7 +48,7 @@ impl Exporter {
 
         let mut file = match tokio::fs::File::create(&self.file_path).await {
             Ok(f) => f,
-            Err(e) => return Err(format!("Failed to create text file: {}", e)),
+            Err(e) => return Err(format!("Failed to create text file: {e}")),
         };
 
         for result in results.found {
@@ -62,12 +62,12 @@ impl Exporter {
             entry.push_str(&format!("Status Code: {}\n", result.request_status));
 
             if let Err(e) = file.write_all(entry.as_bytes()).await {
-                return Err(format!("Failed to write to text file: {}", e));
+                return Err(format!("Failed to write to text file: {e}"));
             }
         }
 
         if let Err(e) = file.flush().await {
-            return Err(format!("Failed to flush text file: {}", e));
+            return Err(format!("Failed to flush text file: {e}"));
         }
 
         Ok(())

@@ -75,7 +75,7 @@ pub fn up(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(ref pwd) = config.postgres.password {
         docker_args.push("-e".to_string());
-        docker_args.push(format!("POSTGRES_PASSWORD={}", pwd));
+        docker_args.push(format!("POSTGRES_PASSWORD={pwd}"));
     } else {
         docker_args.push("-e".to_string());
         docker_args.push("POSTGRES_HOST_AUTH_METHOD=trust".to_string());

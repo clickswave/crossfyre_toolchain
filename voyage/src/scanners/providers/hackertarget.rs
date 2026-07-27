@@ -7,7 +7,7 @@ pub async fn fetch(
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut results = vec![];
 
-    let url = format!("https://api.hackertarget.com/hostsearch/?q={}", domain);
+    let url = format!("https://api.hackertarget.com/hostsearch/?q={domain}");
     let response = reqwest_client.get(&url).send().await?;
 
     if response.status().is_success() {

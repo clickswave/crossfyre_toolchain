@@ -38,8 +38,7 @@ pub fn resolve_extensions(name: &str) -> Result<Vec<&'static str>, Box<dyn std::
         match EXTENSIONS.iter().find(|&&e| e == name) {
             Some(e) => Ok(vec![e]),
             None => Err(format!(
-                "Unknown extension: '{}'. Use: mach, voyage, pulse, scout, cortex, or all",
-                name
+                "Unknown extension: '{name}'. Use: mach, voyage, pulse, scout, cortex, or all"
             )
             .into()),
         }
@@ -67,7 +66,7 @@ pub fn print_extension_usage(verb: &str) {
     ];
 
     println!();
-    println!("  {}", dim(&format!("Choose an extension to {}:", verb)));
+    println!("  {}", dim(&format!("Choose an extension to {verb}:")));
     for (name, desc) in choices {
         println!(
             "    {} crossfyre extension {} {}  {}",

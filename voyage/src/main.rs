@@ -195,11 +195,10 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
         std::process::exit(1);
     }
 
-    let daemon_addr = format!("127.0.0.1:{}", port);
+    let daemon_addr = format!("127.0.0.1:{port}");
     let stream = TcpStream::connect(&daemon_addr).await.map_err(|_| {
         format!(
-            "Voyage daemon is not running on port {}.\nStart it first with: voyage --daemon",
-            port
+            "Voyage daemon is not running on port {port}.\nStart it first with: voyage --daemon"
         )
     })?;
 
@@ -224,16 +223,15 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
 async fn handle_enum_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the user's JSON, inject operation="probe" and response="instant"
     let mut payload: serde_json::Value =
-        serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {}", e))?;
+        serde_json::from_str(&args.json).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     payload["operation"] = serde_json::json!("probe");
     payload["response"] = serde_json::json!("instant");
 
-    let daemon_addr = format!("127.0.0.1:{}", port);
+    let daemon_addr = format!("127.0.0.1:{port}");
     let stream = TcpStream::connect(&daemon_addr).await.map_err(|_| {
         format!(
-            "Voyage daemon is not running on port {}.\nStart it first with: voyage --daemon",
-            port
+            "Voyage daemon is not running on port {port}.\nStart it first with: voyage --daemon"
         )
     })?;
     let _ = stream.set_nodelay(true);
@@ -245,7 +243,7 @@ async fn handle_enum_exec(args: ScanExecArgs, port: u16) -> Result<(), Box<dyn s
 
     let mut lines = BufReader::new(reader).lines();
     if let Some(line) = lines.next_line().await? {
-        println!("{}", line);
+        println!("{line}");
     }
 
     Ok(())

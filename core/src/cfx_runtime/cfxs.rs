@@ -62,8 +62,7 @@ impl Signal {
             })
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to send completion signal: {}",
-                    e
+                    "Failed to send completion signal: {e}"
                 ))
             })
     }
@@ -88,7 +87,7 @@ impl ServerHandle {
                 data: value,
             })
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send result: {}", e))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send result: {e}"))
             })
     }
 
@@ -100,7 +99,7 @@ impl ServerHandle {
                 message: message.to_string(),
             })
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send log: {}", e))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to send log: {e}"))
             })
     }
 

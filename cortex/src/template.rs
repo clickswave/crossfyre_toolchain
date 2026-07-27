@@ -187,8 +187,7 @@ pub async fn eval_template(
                         tmpl.info.severity.clone()
                     },
                     description: format!(
-                        "{} Confirmed out-of-band: {} callback(s) to {}.",
-                        base_desc, hits, host
+                        "{base_desc} Confirmed out-of-band: {hits} callback(s) to {host}."
                     ),
                     matched_at: base.to_string(),
                 });
@@ -282,14 +281,14 @@ fn expand_request(req: &HttpReq, raw_path: &str, base: &str, cap: usize) -> Vec<
     let referenced: Vec<(&String, &Vec<String>)> = req
         .payloads
         .iter()
-        .filter(|(k, _)| hay.contains(&format!("{{{{{}}}}}", k)))
+        .filter(|(k, _)| hay.contains(&format!("{{{{{k}}}}}")))
         .collect();
     if referenced.is_empty() {
         return vec![base_variant];
     }
     let mut results = vec![base_variant];
     for (k, vals) in referenced {
-        let placeholder = format!("{{{{{}}}}}", k);
+        let placeholder = format!("{{{{{k}}}}}");
         let mut next = Vec::new();
         'outer: for cur in &results {
             for val in vals {
@@ -493,9 +492,9 @@ fn expand(path: &str, base: &str) -> String {
         .replace("{{Hostname}}", host);
     if !p.contains("://") {
         if p.starts_with('/') {
-            p = format!("{}{}", base_trimmed, p);
+            p = format!("{base_trimmed}{p}");
         } else {
-            p = format!("{}/{}", base_trimmed, p);
+            p = format!("{base_trimmed}/{p}");
         }
     }
     p

@@ -13,7 +13,7 @@ pub async fn fetch(
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut results = vec![];
 
-    let url = format!("https://crt.sh/?q={}&output=json", domain);
+    let url = format!("https://crt.sh/?q={domain}&output=json");
     let response = reqwest_client.get(&url).send().await?;
 
     if response.status().is_success() {
@@ -21,7 +21,7 @@ pub async fn fetch(
         let mut unique_subdomains = HashSet::new();
         // crt.sh packs every SAN of a cert into one newline-separated
         // name_value, so split it into individual hostnames before parsing.
-        let dot_suffix = format!(".{}", domain);
+        let dot_suffix = format!(".{domain}");
         for entry in body {
             for raw in entry.name_value.split(['\n', '\r']) {
                 let host = raw.trim().trim_start_matches("*.").to_lowercase();

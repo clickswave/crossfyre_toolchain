@@ -70,7 +70,7 @@ pub fn get_bin_dir() -> PathBuf {
 /// On-disk file name of an extension binary (adds `.exe` on Windows).
 pub fn ext_file_name(ext: &str) -> String {
     if cfg!(windows) {
-        format!("{}.exe", ext)
+        format!("{ext}.exe")
     } else {
         ext.to_string()
     }

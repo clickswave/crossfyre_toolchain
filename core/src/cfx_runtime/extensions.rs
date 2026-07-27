@@ -69,10 +69,7 @@ impl Extension {
             .args(&args)
             .output()
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to run '{}': {}",
-                    binary, e
-                ))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to run '{binary}': {e}"))
             })?;
 
         if !output.status.success() {
@@ -118,7 +115,7 @@ impl DaemonExtension {
         let port = self.port;
 
         // Synchronous TCP - we're inside spawn_blocking so this is fine
-        let response = std::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+        let response = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
             .and_then(|mut stream| {
                 use std::io::{BufRead, Write};
                 stream.set_nodelay(true)?;
@@ -168,7 +165,7 @@ impl DaemonExtension {
         let port = self.port;
         let name = self.name.clone();
 
-        let events = std::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+        let events = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
             .and_then(|mut stream| {
                 use std::io::{BufRead, Write};
                 stream.set_nodelay(true)?;
@@ -198,8 +195,7 @@ impl DaemonExtension {
             })
             .map_err(|e| {
                 pyo3::exceptions::PyConnectionError::new_err(format!(
-                    "{} daemon not reachable on port {}: {}",
-                    name, port, e
+                    "{name} daemon not reachable on port {port}: {e}"
                 ))
             })?;
 
@@ -233,7 +229,7 @@ impl DaemonExtension {
         let port = self.port;
         let name = self.name.clone();
 
-        let response = std::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+        let response = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
             .and_then(|mut stream| {
                 use std::io::{BufRead, Write};
                 stream.set_nodelay(true)?;
@@ -249,16 +245,12 @@ impl DaemonExtension {
             })
             .map_err(|e| {
                 pyo3::exceptions::PyConnectionError::new_err(format!(
-                    "{} daemon not reachable on port {}: {}",
-                    name, port, e
+                    "{name} daemon not reachable on port {port}: {e}"
                 ))
             })?;
 
         let parsed: serde_json::Value = serde_json::from_str(response.trim()).map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid JSON from {} daemon: {}",
-                name, e
-            ))
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid JSON from {name} daemon: {e}"))
         })?;
 
         pythonize::pythonize(py, &parsed)
@@ -291,7 +283,7 @@ fn get(py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
         pyo3::exceptions::PyRuntimeError::new_err("Extension registry not initialized")
     })?;
     let kind = map.get(name).ok_or_else(|| {
-        pyo3::exceptions::PyKeyError::new_err(format!("Unknown extension: '{}'", name))
+        pyo3::exceptions::PyKeyError::new_err(format!("Unknown extension: '{name}'"))
     })?;
     match kind {
         ExtensionKind::Cli { binary } => Ok(Extension {
