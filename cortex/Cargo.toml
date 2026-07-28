@@ -8,6 +8,8 @@ keywords = ["vulnerability", "security", "scanner", "dast"]
 authors = ["Clickswave <team@clickswave.org>"]
 
 [dependencies]
+cfx_tui = { path = "../tui" }
+ratatui = { version = "0.30.0-alpha.5", features = ["crossterm"] }
 tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time"] }
 clap = { version = "4.5.42", features = ["derive"] }
 serde = { version = "1.0.219", features = ["derive"] }
