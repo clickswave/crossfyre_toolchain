@@ -2948,6 +2948,7 @@ name = "pulse"
 version = "0.0.6"
 dependencies = [
  "adaptive",
+ "cfx_tui",
  "clap",
  "crossterm",
  "csv",
@@ -4972,6 +4973,7 @@ name = "voyage"
 version = "0.0.4"
 dependencies = [
  "adaptive",
+ "cfx_tui",
  "clap",
  "crossterm",
  "dialoguer 0.11.0",

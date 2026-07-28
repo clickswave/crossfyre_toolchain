@@ -17,6 +17,7 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", 
 sha2 = "0.10.9"
 uuid = { version = "1.18.0", features = ["v4"] }
 rand = "0.9.2"
+cfx_tui = { path = "../tui" }
 ratatui = { version = "0.30.0-alpha.5", features = ["crossterm"] }
 crossterm = "0.29.0"
 toml = "0.8"
