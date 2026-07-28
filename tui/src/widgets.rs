@@ -21,15 +21,27 @@ pub struct Stat {
 
 impl Stat {
     pub fn new(label: &'static str, value: impl ToString) -> Self {
-        Self { label, value: value.to_string(), style: theme::value() }
+        Self {
+            label,
+            value: value.to_string(),
+            style: theme::value(),
+        }
     }
 
     pub fn good(label: &'static str, value: impl ToString) -> Self {
-        Self { label, value: value.to_string(), style: theme::good() }
+        Self {
+            label,
+            value: value.to_string(),
+            style: theme::good(),
+        }
     }
 
     pub fn bad(label: &'static str, value: impl ToString) -> Self {
-        Self { label, value: value.to_string(), style: theme::bad() }
+        Self {
+            label,
+            value: value.to_string(),
+            style: theme::bad(),
+        }
     }
 }
 
@@ -58,10 +70,18 @@ pub fn stats(frame: &mut Frame, area: Rect, items: &[Stat]) {
 /// Progress gauge. `total` of zero renders an empty bar rather than dividing
 /// by it, which happens whenever a run starts before its work is counted.
 pub fn progress(frame: &mut Frame, area: Rect, done: usize, total: usize, title: &str) {
-    let ratio = if total > 0 { (done as f64 / total as f64).min(1.0) } else { 0.0 };
+    let ratio = if total > 0 {
+        (done as f64 / total as f64).min(1.0)
+    } else {
+        0.0
+    };
     frame.render_widget(
         Gauge::default()
-            .block(Block::default().borders(Borders::ALL).title(title.to_string()))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title.to_string()),
+            )
             .gauge_style(Style::default().fg(theme::ACCENT))
             .ratio(ratio)
             .label(format!("{done} / {total}")),
@@ -78,7 +98,11 @@ pub fn progress_open(frame: &mut Frame, area: Rect, done: usize, title: &str, un
             Span::raw(" "),
             Span::styled(unit.to_string(), theme::label()),
         ]))
-        .block(Block::default().borders(Borders::ALL).title(title.to_string())),
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title.to_string()),
+        ),
         area,
     );
 }
@@ -141,16 +165,24 @@ pub struct Logs {
 
 impl Logs {
     pub fn new() -> Self {
-        Self { entries: Vec::new(), state: ListState::default(), cap: 5_000 }
+        Self {
+            entries: Vec::new(),
+            state: ListState::default(),
+            cap: 5_000,
+        }
     }
 
     pub fn push(&mut self, level: Level, message: impl Into<String>) {
-        self.entries.push(LogEntry { level, message: message.into() });
+        self.entries.push(LogEntry {
+            level,
+            message: message.into(),
+        });
         if self.cap > 0 && self.entries.len() > self.cap {
             let drop = self.entries.len() - self.cap;
             self.entries.drain(0..drop);
         }
-        self.state.select(Some(self.entries.len().saturating_sub(1)));
+        self.state
+            .select(Some(self.entries.len().saturating_sub(1)));
     }
 
     pub fn info(&mut self, message: impl Into<String>) {

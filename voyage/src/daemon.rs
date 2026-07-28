@@ -276,6 +276,7 @@ async fn handle_stream_enum(
             log_level: None,
             message: None,
             error: None,
+            ..Default::default()
         },
     )
     .await?;

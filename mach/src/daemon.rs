@@ -326,6 +326,10 @@ async fn handle_stream_scan(
             error: None,
             log_level: None,
             message: None,
+            concurrency: None,
+            delay_ms: None,
+            posture: None,
+            score: None,
         },
     )
     .await?;

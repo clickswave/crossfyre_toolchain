@@ -36,7 +36,7 @@ pub struct EnumConfig {
 }
 
 /// Events streamed from the daemon to the enum client over TCP.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamEvent {
     #[serde(rename = "type")]
     pub kind: String,
@@ -60,6 +60,18 @@ pub struct StreamEvent {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    // Adaptive-rate telemetry (kind == "governor"): the controller's current
+    // operating point, for the pacing strip. The same values the controller
+    // hands the engine each tick, read here rather than decided here. Emitted
+    // only in tuning builds; absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub posture: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
 }
 
 pub struct Scanner {
@@ -97,6 +109,7 @@ impl Scanner {
                 log_level: None,
                 message: None,
                 error: None,
+                ..Default::default()
             });
         }
 
@@ -134,6 +147,7 @@ impl Scanner {
                 caps,
                 self.config.interval_ms,
                 Arc::clone(&stop),
+                Some(Arc::clone(&arc_tx)),
             ));
             for i in 0..max_conc {
                 join_set.spawn(adaptive_task_handle(
@@ -201,6 +215,7 @@ impl Scanner {
             log_level: None,
             message: None,
             error: None,
+            ..Default::default()
         });
 
         Ok(())
@@ -326,6 +341,7 @@ async fn task_handle(
             log_level: None,
             message: None,
             error: None,
+            ..Default::default()
         });
     }
 }
@@ -344,6 +360,7 @@ fn emit_log(event_tx: &Option<Arc<mpsc::UnboundedSender<StreamEvent>>>, level: &
             found: None,
             not_found: None,
             error: None,
+            ..Default::default()
         });
     }
 }
@@ -385,8 +402,14 @@ async fn controller_tick(
     caps: adaptive::Caps,
     start_delay_ms: u64,
     stop: Arc<AtomicBool>,
+    // Used only by the tuning build to stream the operating point to the
+    // dashboard. Threaded unconditionally so the signature does not fork.
+    event_tx: Option<Arc<mpsc::UnboundedSender<StreamEvent>>>,
 ) {
+    let _ = &event_tx;
     let mut rc = adaptive::RateController::new(posture, caps, start_delay_ms);
+    #[cfg(feature = "tuning")]
+    let mut ticks: u32 = 0;
     loop {
         sleep(Duration::from_millis(250)).await;
         if stop.load(Ordering::Relaxed) {
@@ -403,6 +426,26 @@ async fn controller_tick(
         shared
             .score_bits
             .store(rc.last_score().to_bits(), Ordering::Relaxed);
+
+        // Publish the operating point about once a second. Compiled only in the
+        // tuning build, so a default daemon emits no governor events and its
+        // wire is unchanged.
+        #[cfg(feature = "tuning")]
+        {
+            ticks += 1;
+            if ticks % 4 == 0
+                && let Some(tx) = &event_tx
+            {
+                let _ = tx.send(StreamEvent {
+                    kind: "governor".to_string(),
+                    concurrency: Some(dir.concurrency),
+                    delay_ms: Some(dir.delay_ms),
+                    posture: Some(format!("{:?}", rc.posture()).to_lowercase()),
+                    score: Some(rc.last_score()),
+                    ..Default::default()
+                });
+            }
+        }
     }
 }
 
@@ -565,6 +608,7 @@ async fn adaptive_task_handle(
             log_level: None,
             message: None,
             error: None,
+            ..Default::default()
         });
     }
 }
