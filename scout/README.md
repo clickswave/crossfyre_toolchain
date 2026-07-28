@@ -16,8 +16,15 @@ scout is a daemon. Start it, then send it targets:
 scout --daemon
 
 # fingerprint a target through the running daemon
-scout fingerprint --target https://example.com
+scout fingerprint https://example.com
+
+# same run, with the live dashboard instead of JSON
+scout --tui fingerprint https://example.com
 ```
+
+`--tui` brings up the shared toolchain dashboard: findings sorted into
+technologies, services and CVE leads as they arrive. It is ignored when output
+is piped, so scripts still get clean JSON.
 
 `exec` sends a raw JSON op to the daemon and streams the events back, which is what
 the node uses under the hood:
