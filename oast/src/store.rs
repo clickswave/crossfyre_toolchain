@@ -58,11 +58,31 @@ pub struct Sealed {
     pub enc: String,
 }
 
+/// The non-sensitive envelope of an interaction, for a live operator view.
+///
+/// Deliberately not the interaction. `detail` and `raw` are the plaintext the
+/// server seals and never keeps, and they never reach here: an observer sees
+/// only what protocol fired, from where, and against which correlation, which
+/// is enough to confirm out-of-band works without weakening the zero-knowledge
+/// property.
+#[derive(Clone)]
+pub struct Envelope {
+    pub protocol: String,
+    pub remote_addr: String,
+    /// A short prefix of the correlation id, enough to tell interactions apart
+    /// without logging the full id.
+    pub corr_prefix: String,
+    pub at_unix: u64,
+}
+
 pub struct Store {
     regs: Mutex<HashMap<String, Registration>>,
     interactions: Mutex<HashMap<String, Vec<Sealed>>>,
     ttl_secs: u64,
     cap_per_corr: usize,
+    /// Optional live feed of interaction envelopes. `None` unless an operator
+    /// attached a dashboard, so the hot path pays nothing when nobody watches.
+    observer: Mutex<Option<std::sync::mpsc::Sender<Envelope>>>,
 }
 
 impl Store {
@@ -72,6 +92,16 @@ impl Store {
             interactions: Mutex::new(HashMap::new()),
             ttl_secs,
             cap_per_corr: 500,
+            observer: Mutex::new(None),
+        }
+    }
+
+    /// Attach a live feed of interaction envelopes. The receiver end drives a
+    /// dashboard; only one observer is kept, so a second attach replaces the
+    /// first.
+    pub fn observe(&self, tx: std::sync::mpsc::Sender<Envelope>) {
+        if let Ok(mut o) = self.observer.lock() {
+            *o = Some(tx);
         }
     }
 
@@ -148,6 +178,22 @@ impl Store {
             }
         }
         tracing::info!(corr = %corr_id, protocol = %interaction.protocol, from = %interaction.remote_addr, "oast interaction sealed");
+
+        // Notify a watching operator with envelope metadata only. A closed
+        // receiver (dashboard exited) just clears the slot.
+        if let Ok(mut o) = self.observer.lock() {
+            if let Some(tx) = o.as_ref() {
+                let env = Envelope {
+                    protocol: interaction.protocol.clone(),
+                    remote_addr: interaction.remote_addr.clone(),
+                    corr_prefix: corr_id.chars().take(8).collect(),
+                    at_unix: interaction.at_unix,
+                };
+                if tx.send(env).is_err() {
+                    *o = None;
+                }
+            }
+        }
     }
 
     /// Drain and return the sealed interactions for a correlation id, if the secret
