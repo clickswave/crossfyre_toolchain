@@ -51,6 +51,15 @@ It listens on:
 `OAST_DOMAIN` can be a comma-separated list, and TLS can resolve a cert per name, so
 one box can serve several delegated zones.
 
+## Watching interactions
+
+Set `OAST_TUI=1` and, if you are running it in a terminal, oast brings up a live
+feed of callbacks as they land: protocol, source address, and a short correlation
+prefix, with a running count and uptime. It shows only this envelope metadata and
+never the interaction contents, which stay sealed to the scan's key exactly as they
+are at rest. Under a service unit with piped output the flag is ignored and oast logs
+as usual.
+
 ## Notes
 
 You need a real public box, a domain you can delegate, and ports 53/80/443 open.

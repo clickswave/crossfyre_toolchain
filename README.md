@@ -23,7 +23,7 @@ The Crossfyre toolchain is a set of standalone reconnaissance and scanning engin
 
 - **Standalone first.** Use `mach`, `voyage`, and `pulse` like any other CLI. Nothing phones home unless you ask it to.
 - **Stateful and resumable.** Findings are written as they're discovered, so a scan you stop picks up exactly where it left off.
-- **Live in the terminal.** Each engine runs a real-time TUI: progress, hits, and throughput as they happen.
+- **Live in the terminal.** Every engine shares one terminal dashboard: progress, hits and throughput as they happen, the same keys and layout across all of them. The scan tools show it by default; the daemon tools take `--tui`.
 - **One coherent CLI.** `crossfyre` installs the engines, runs scans, and manages nodes from a single command.
 - **Scales when you do.** Enrol a host as a node and the same engines run distributed under the optional [platform](https://crossfyre.io).
 
@@ -31,7 +31,7 @@ The Crossfyre toolchain is a set of standalone reconnaissance and scanning engin
 
 | Tool | What it does |
 | --- | --- |
-| [**`mach`**](mach/) | HTTP fuzzing and content-discovery engine with a live TUI. Stateful and resumable. |
+| [**`mach`**](mach/) | HTTP fuzzing and content-discovery engine. Stateful and resumable. |
 | [**`voyage`**](voyage/) | Subdomain enumeration engine: passive sources plus active wordlist brute-forcing. |
 | [**`pulse`**](pulse/) | Host and port-scanning engine (connect and SYN techniques, service detection). |
 | [**`scout`**](scout/) | Service enumeration and web fingerprinting engine: identifies technologies and versions, and flags version-based CVE leads. |
@@ -73,7 +73,7 @@ voyage scan --domain example.com --wordlist-path ./subdomains.txt
 pulse scan --targets 10.0.0.0/24 --ports top-1000 --service-detection
 ```
 
-Each engine runs a live TUI by default and writes findings to a local store, so a scan you interrupt can be resumed later.
+The scan engines bring up a live dashboard as they run and write findings to a local store, so a scan you interrupt can be resumed later. The daemon engines (`scout`, `cortex`) stream results as JSON and show the same dashboard on `--tui`.
 
 ## Standalone, or part of the platform
 

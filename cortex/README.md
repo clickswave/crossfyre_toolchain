@@ -17,7 +17,14 @@ cortex --daemon
 
 # scan a target through it
 cortex scan https://example.com
+
+# same run, with the live dashboard
+cortex --tui scan https://example.com
 ```
+
+`--tui` brings up the shared toolchain dashboard, with findings ordered by
+severity so a critical sits at the top the moment it is confirmed. It is
+ignored when output is piped, so the node and any scripts still get JSON.
 
 Every finding streams back as a JSON event. cortex only emits a finding after it
 re-issues the request and gets the same result twice, so what you get out is the set
