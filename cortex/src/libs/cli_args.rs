@@ -17,6 +17,11 @@ pub struct Cli {
     /// TCP port to bind (daemon) or connect to (client)
     #[arg(long, default_value_t = 4445)]
     pub port: u16,
+
+    /// Show a live dashboard instead of streaming JSON. Ignored when stdout is
+    /// not a terminal, so piping still produces parseable output.
+    #[arg(long, default_value_t = false)]
+    pub tui: bool,
 }
 
 #[derive(Subcommand, Clone)]
