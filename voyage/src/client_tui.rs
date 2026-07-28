@@ -31,6 +31,8 @@ struct Voyage {
     table: TableState,
     logs: Logs,
     done: bool,
+    #[cfg(feature = "tuning")]
+    pacing: cfx_tui::tuning::Snapshot,
 }
 
 impl Voyage {
@@ -45,6 +47,8 @@ impl Voyage {
             table: TableState::default(),
             logs: Logs::new(),
             done: false,
+            #[cfg(feature = "tuning")]
+            pacing: cfx_tui::tuning::Snapshot::default(),
         }
     }
 
@@ -87,8 +91,26 @@ impl Voyage {
                 if let Some(t) = event.total {
                     self.scanned = t;
                 }
-                self.logs
-                    .info(format!("found {}, not found {}", self.found, self.not_found));
+                self.logs.info(format!(
+                    "found {}, not found {}",
+                    self.found, self.not_found
+                ));
+            }
+            #[cfg(feature = "tuning")]
+            "governor" => {
+                self.pacing = cfx_tui::tuning::Snapshot {
+                    in_flight: None,
+                    limit: event.concurrency.map(|c| c as usize),
+                    rate: None,
+                    posture: event.posture.clone(),
+                    throttled: None,
+                };
+                if let (Some(d), Some(sc)) = (event.delay_ms, event.score) {
+                    self.logs.push(
+                        cfx_tui::Level::Debug,
+                        format!("pacing: delay {d}ms, score {sc:.2}"),
+                    );
+                }
             }
             _ => {}
         }
@@ -168,6 +190,11 @@ impl Dashboard for Voyage {
 
     fn logs(&mut self) -> &mut Logs {
         &mut self.logs
+    }
+
+    #[cfg(feature = "tuning")]
+    fn tuning(&self) -> cfx_tui::tuning::Snapshot {
+        self.pacing.clone()
     }
 }
 

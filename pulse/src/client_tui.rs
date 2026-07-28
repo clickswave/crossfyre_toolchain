@@ -36,6 +36,12 @@ struct Pulse {
     table: TableState,
     logs: Logs,
     done: bool,
+    // Latest governor telemetry, for the pacing strip. The daemon already
+    // streams `governor` events; this just keeps the newest one. Only built
+    // with the tuning feature, so a default binary carries neither the field
+    // nor the strip.
+    #[cfg(feature = "tuning")]
+    pacing: cfx_tui::tuning::Snapshot,
 }
 
 impl Pulse {
@@ -51,6 +57,8 @@ impl Pulse {
             table: TableState::default(),
             logs: Logs::new(),
             done: false,
+            #[cfg(feature = "tuning")]
+            pacing: cfx_tui::tuning::Snapshot::default(),
         }
     }
 
@@ -72,10 +80,14 @@ impl Pulse {
                         port: event.port.map(|p| p.to_string()).unwrap_or_default(),
                         status: event.status.unwrap_or_else(|| "-".into()),
                         service: event.service.unwrap_or_else(|| "-".into()),
-                        latency: event.latency_ms.map(|l| format!("{l}ms")).unwrap_or_default(),
+                        latency: event
+                            .latency_ms
+                            .map(|l| format!("{l}ms"))
+                            .unwrap_or_default(),
                         banner: event.banner.unwrap_or_default(),
                     });
-                    self.table.select(Some(self.findings.len().saturating_sub(1)));
+                    self.table
+                        .select(Some(self.findings.len().saturating_sub(1)));
                 }
             }
             "log" => {
@@ -98,6 +110,21 @@ impl Pulse {
                     "open {}, closed {}, filtered {}",
                     self.open, self.closed, self.filtered
                 ));
+            }
+            #[cfg(feature = "tuning")]
+            "governor" => {
+                // Map the governor's public telemetry onto the shared pacing
+                // shape. These fields already travel on the wire; this only
+                // reads them. Concurrency is the ceiling it is allowing,
+                // goodput the useful throughput, phase its current stance, and
+                // loss the pressure it is reacting to.
+                self.pacing = cfx_tui::tuning::Snapshot {
+                    in_flight: None,
+                    limit: event.concurrency,
+                    rate: event.goodput.map(|g| g as f64),
+                    posture: event.phase.clone(),
+                    throttled: event.loss_pct,
+                };
             }
             _ => {}
         }
@@ -187,6 +214,11 @@ impl Dashboard for Pulse {
 
     fn logs(&mut self) -> &mut Logs {
         &mut self.logs
+    }
+
+    #[cfg(feature = "tuning")]
+    fn tuning(&self) -> cfx_tui::tuning::Snapshot {
+        self.pacing.clone()
     }
 }
 

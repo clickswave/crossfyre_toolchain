@@ -185,29 +185,65 @@ fn first_view<D: Dashboard>(dashboard: &D) -> char {
     dashboard.views().first().map(|v| v.key).unwrap_or(LOGS_KEY)
 }
 
+#[cfg(not(feature = "tuning"))]
 fn paint<D: Dashboard>(frame: &mut Frame, dashboard: &mut D, active: char) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(frame.area());
 
     header(frame, dashboard, active, rows[0]);
+    body(frame, dashboard, active, rows[1]);
+    footer(frame, dashboard, rows[2]);
+}
 
-    if active == LOGS_KEY {
-        dashboard.logs().render(frame, rows[1]);
-    } else {
-        dashboard.render(active, frame, rows[1]);
+/// With tuning on, a pacing strip sits between the body and the footer, but
+/// only once the tool has something to report, so an empty strip never steals a
+/// row. Everything else is laid out identically to the plain path.
+#[cfg(feature = "tuning")]
+fn paint<D: Dashboard>(frame: &mut Frame, dashboard: &mut D, active: char) {
+    let snap = dashboard.tuning();
+    let show = !snap.is_empty();
+
+    let mut constraints = vec![Constraint::Length(3), Constraint::Min(0)];
+    if show {
+        constraints.push(Constraint::Length(tuning::HEIGHT));
     }
+    constraints.push(Constraint::Length(1));
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(frame.area());
 
+    header(frame, dashboard, active, rows[0]);
+    body(frame, dashboard, active, rows[1]);
+    if show {
+        tuning::render(frame, rows[2], &snap);
+        footer(frame, dashboard, rows[3]);
+    } else {
+        footer(frame, dashboard, rows[2]);
+    }
+}
+
+fn body<D: Dashboard>(frame: &mut Frame, dashboard: &mut D, active: char, area: Rect) {
+    if active == LOGS_KEY {
+        dashboard.logs().render(frame, area);
+    } else {
+        dashboard.render(active, frame, area);
+    }
+}
+
+fn footer<D: Dashboard>(frame: &mut Frame, dashboard: &D, area: Rect) {
     let hint = if dashboard.finished() {
         "  Run complete. q to exit."
     } else {
         "  q to exit."
     };
-    frame.render_widget(
-        Paragraph::new(hint).style(theme::label()),
-        rows[2],
-    );
+    frame.render_widget(Paragraph::new(hint).style(theme::label()), area);
 }
 
 fn header<D: Dashboard>(frame: &mut Frame, dashboard: &mut D, active: char, area: Rect) {
