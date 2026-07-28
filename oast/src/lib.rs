@@ -14,10 +14,11 @@
 //! `crossfyre oast serve` (in-process) or the standalone `oast` binary under systemd.
 
 mod crypto;
+pub mod client_tui;
 mod dns;
 mod http_capture;
 mod poll;
-mod store;
+pub mod store;
 mod tls;
 
 use std::sync::Arc;
@@ -46,6 +47,9 @@ pub struct Config {
     /// File lego writes the ACME DNS-01 challenge value to; we answer it as a TXT
     /// record for `_acme-challenge.<domain>` since we are authoritative for the zone.
     pub acme_txt_file: Option<String>,
+    /// Show the live interaction dashboard instead of log lines. Honoured only
+    /// when stdout is a terminal; a service unit with piped output ignores it.
+    pub tui: bool,
 }
 
 impl Config {
@@ -113,6 +117,7 @@ impl Config {
             tls_key: None,
             tls_certs: None,
             acme_txt_file: None,
+            tui: false,
         }
     }
 
@@ -149,6 +154,26 @@ pub async fn run(cfg: Config) {
     );
 
     let store = Arc::new(store::Store::new(cfg.ttl_secs));
+
+    // Attach the live dashboard only when asked for and only with a real
+    // terminal. Under a service unit stdout is piped, and drawing into it would
+    // corrupt the log; there the server logs interactions as it always has.
+    if cfg.tui && cfx_tui::available() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        store.observe(tx);
+        let listeners = format!(
+            "dns {}  http {}  {}",
+            cfg.dns_addr,
+            cfg.http_addr,
+            if cfg.tls_enabled() { "https on" } else { "https off" }
+        );
+        std::thread::spawn(move || {
+            let _ = client_tui::run(listeners, rx);
+            // The operator quit the dashboard. The servers keep running; exit
+            // the process so a foreground `oast` stops when its UI is closed.
+            std::process::exit(0);
+        });
+    }
 
     {
         let s = store.clone();
