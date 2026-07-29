@@ -3465,6 +3465,39 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     // don't overflow and drop messages as "slow consumer".
     .subscription_capacity(1_000_000);
 
+    // TLS to the control plane.
+    //
+    // This link crosses the public internet: nexus.<zone> is a DNS-only record
+    // pointing straight at the box, because NATS is raw TCP and cannot be
+    // proxied. Without TLS every workflow dispatch (the target list) and every
+    // result (the findings) travelled in cleartext, readable by anyone on the
+    // path. nkey auth never protected the payloads, only the identity.
+    //
+    // The server presents the Cloudflare Origin CA certificate for the zone,
+    // which is not in any public trust store, so the root is shipped with this
+    // binary and added explicitly. It is written next to the node config because
+    // async-nats takes a path rather than bytes.
+    //
+    // require_tls is set independently of the URL scheme on purpose: without it a
+    // downgraded or tampered NATS_PUBLIC_URL (say `nats://`) would silently
+    // reconnect in cleartext, which is precisely the failure this is meant to
+    // prevent.
+    let opts = if nats_url.starts_with("tls://") {
+        match write_origin_root_cert() {
+            Ok(ca_path) => opts.add_root_certificates(ca_path).require_tls(true),
+            Err(e) => {
+                eprintln!("ERROR: could not stage the NATS root certificate: {e}");
+                return Err(e.into());
+            }
+        }
+    } else {
+        eprintln!(
+            "WARNING: NATS_PUBLIC_URL is not tls:// - this connection is UNENCRYPTED. \
+             Scan targets and findings will cross the network in cleartext."
+        );
+        opts
+    };
+
     let nats_client = opts.connect(nats_url).await.map_err(|e| {
         eprintln!("ERROR: Failed to connect to NATS: {e}");
         e
@@ -4230,4 +4263,19 @@ pub async fn run_script(
     }
 
     Ok(())
+}
+
+/// Stage the Cloudflare Origin CA root next to the node config and return its
+/// path. async-nats takes a path rather than bytes, so the root is embedded in
+/// the binary and written out on connect. Rewritten every time so a truncated or
+/// tampered copy on disk cannot persist.
+fn write_origin_root_cert() -> std::io::Result<std::path::PathBuf> {
+    const ORIGIN_ROOT: &str = include_str!("../assets/cloudflare-origin-root.pem");
+    let dir = std::env::var("CFX_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("cfx-nats-root.pem");
+    std::fs::write(&path, ORIGIN_ROOT)?;
+    Ok(path)
 }
