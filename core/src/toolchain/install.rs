@@ -309,6 +309,7 @@ fn remove_one(ext: &str) -> Result<(), Box<dyn std::error::Error>> {
 pub async fn update(
     target: Option<&str>,
     current_version: &str,
+    force: bool,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let manifest = fetch_manifest().await?;
     let mut self_updated = false;
@@ -341,7 +342,7 @@ pub async fn update(
             let up_to_date = ext_bin_path(ext).exists()
                 && !want.is_empty()
                 && have.as_deref() == Some(want.as_str());
-            if up_to_date {
+            if up_to_date && !force {
                 println!("{}", row(&check(), ext, &ver(&want), &dim("up to date")));
                 current += 1;
                 continue;
@@ -384,7 +385,7 @@ pub async fn update(
         println!("  {}", dim("Core"));
 
         let want = manifest_version(&manifest, "crossfyre");
-        if !want.is_empty() && want == current_version {
+        if !want.is_empty() && want == current_version && !force {
             println!(
                 "{}",
                 row(&check(), "crossfyre", &ver(&want), &dim("up to date"))
@@ -393,7 +394,7 @@ pub async fn update(
         } else {
             print!("    {} {:<10} {}", dot(), "crossfyre", dim("updating…"));
             let _ = std::io::Write::flush(&mut std::io::stdout());
-            match self_update(&manifest, current_version, true).await {
+            match self_update(&manifest, current_version, true, force).await {
                 Ok(true) => {
                     let mid = format!("{DIM}{current_version} \u{2192}{RESET} {want}");
                     println!(
@@ -437,7 +438,7 @@ pub async fn update(
         let node_ok = get_bin_dir().join(ext_file_name("node")).exists()
             && !nwant.is_empty()
             && nhave.as_deref() == Some(nwant.as_str());
-        if node_ok {
+        if node_ok && !force {
             println!(
                 "{}",
                 row(&check(), "node", &ver(&nwant), &dim("up to date"))
@@ -446,7 +447,7 @@ pub async fn update(
         } else {
             print!("    {} {:<10} {}", dot(), "node", dim("updating…"));
             let _ = std::io::Write::flush(&mut std::io::stdout());
-            match download_node(&manifest, true).await {
+            match download_node(&manifest, true, force).await {
                 Ok(true) => {
                     let mid = match &nhave {
                         Some(old) if !old.is_empty() && *old != nwant => {
@@ -518,6 +519,7 @@ pub async fn self_update(
     manifest: &Manifest,
     current_version: &str,
     quiet: bool,
+    force: bool,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let (comp, artifact) = resolve_artifact(manifest, "crossfyre")?;
 
@@ -526,7 +528,7 @@ pub async fn self_update(
     // value (installed_cli_version). It must NOT be read from env! here - this
     // code lives in cfx_core, so env! resolves to cfx_core's version (0.1.0), not
     // the CLI's. That mismatch made every `crossfyre update` re-run forever.
-    if comp.version == current_version {
+    if comp.version == current_version && !force {
         if !quiet {
             println!("crossfyre is already at {current_version} - nothing to update.");
         }
@@ -607,6 +609,7 @@ pub fn ensure_self_installed() -> Result<std::path::PathBuf, Box<dyn std::error:
 pub async fn download_node(
     manifest: &Manifest,
     quiet: bool,
+    force: bool,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let (comp, artifact) = resolve_artifact(manifest, "node")?;
     let stable = get_bin_dir().join(ext_file_name("node"));
@@ -614,7 +617,7 @@ pub async fn download_node(
     let installed = std::fs::read_to_string(&ver_file)
         .ok()
         .map(|s| s.trim().to_string());
-    if stable.exists() && installed.as_deref() == Some(comp.version.as_str()) {
+    if stable.exists() && installed.as_deref() == Some(comp.version.as_str()) && !force {
         return Ok(false); // already current
     }
 
@@ -658,6 +661,6 @@ pub async fn ensure_node_installed() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let manifest = fetch_manifest().await?;
-    download_node(&manifest, false).await?;
+    download_node(&manifest, false, false).await?;
     Ok(())
 }

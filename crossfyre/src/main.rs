@@ -97,7 +97,15 @@ enum Commands {
     /// Update from the release manifest: `self`, an extension name, or `all`
     /// (default: self + every installed extension). For a single extension you
     /// can also use `crossfyre extension update <name>`.
-    Update { target: Option<String> },
+    Update {
+        target: Option<String>,
+        /// Re-download and reinstall even when the installed version already
+        /// matches the manifest. Use this when a binary is present but wrong:
+        /// a corrupted download, a hand-copied dev build, or a republished
+        /// release that kept its version number.
+        #[arg(long)]
+        force: bool,
+    },
 
     /// Show a full overview of the local node daemons, extensions and database.
     /// (Use `crossfyre node status`, `crossfyre extension list` or
@@ -257,7 +265,12 @@ enum ExtensionAction {
     /// Remove an extension (stop service, delete binary).
     Remove { name: Option<String> },
     /// Update an extension from the release manifest.
-    Update { name: Option<String> },
+    Update {
+        name: Option<String>,
+        /// Re-download even if the installed version already matches.
+        #[arg(long)]
+        force: bool,
+    },
     /// Start an extension daemon.
     Start { name: String },
     /// Stop an extension daemon.
@@ -425,9 +438,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Some(ext) => cfx_core::toolchain::install::remove(ext)?,
                 None => cfx_core::toolchain::print_extension_usage("remove"),
             },
-            ExtensionAction::Update { name } => {
-                cfx_core::toolchain::install::update(name.as_deref(), env!("CARGO_PKG_VERSION"))
-                    .await?;
+            ExtensionAction::Update { name, force } => {
+                cfx_core::toolchain::install::update(
+                    name.as_deref(),
+                    env!("CARGO_PKG_VERSION"),
+                    force,
+                )
+                .await?;
             }
             ExtensionAction::Start { name } => cfx_core::toolchain::service::start(&name)?,
             ExtensionAction::Stop { name } => cfx_core::toolchain::service::stop(&name)?,
@@ -489,10 +506,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Run { script, targets } => {
             cfx_core::run_script(&script, &targets).await?;
         }
-        Commands::Update { target } => {
-            let self_updated =
-                cfx_core::toolchain::install::update(target.as_deref(), env!("CARGO_PKG_VERSION"))
-                    .await?;
+        Commands::Update { target, force } => {
+            let self_updated = cfx_core::toolchain::install::update(
+                target.as_deref(),
+                env!("CARGO_PKG_VERSION"),
+                force,
+            )
+            .await?;
             if self_updated && cfx_core::toolchain::service::node_service_exists() {
                 step("Restarting the node service to pick up the new binary...");
                 let _ = cfx_core::toolchain::service::restart(

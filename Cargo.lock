@@ -838,7 +838,7 @@ checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crossfyre"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "cfx_core",
  "clap",
@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "node"
-version = "0.1.26"
+version = "0.1.27"
 dependencies = [
  "cfx_core",
  "clap",
