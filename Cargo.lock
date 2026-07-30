@@ -2229,7 +2229,7 @@ dependencies = [
 
 [[package]]
 name = "mach"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "adaptive",
  "base64 0.22.1",
@@ -2413,7 +2413,7 @@ dependencies = [
 
 [[package]]
 name = "node"
-version = "0.1.30"
+version = "0.1.31"
 dependencies = [
  "cfx_core",
  "clap",

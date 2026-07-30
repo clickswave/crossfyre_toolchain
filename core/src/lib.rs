@@ -858,6 +858,10 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                                     let found_url =
                                         event["url"].as_str().unwrap_or(url).to_string();
                                     let code = event["code"].as_i64().unwrap_or(0);
+                                    // Present only when mach followed a redirect
+                                    // to a different URL; carried through so the UI
+                                    // can show "requested -> final".
+                                    let final_url = event["final_url"].as_str();
                                     let result_msg = serde_json::json!({
                                         "type": "result",
                                         "job_id": format!("{}-{}", workflow_id, op_id),
@@ -867,6 +871,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                                             "type": "endpoint",
                                             "status_code": event["code"],
                                             "body_length": event["body_length"],
+                                            "final_url": final_url,
                                             "source": "mach",
                                             "operation_id": op_id,
                                         }

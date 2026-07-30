@@ -363,6 +363,7 @@ async fn handle_stream_scan(
             delay_ms: None,
             posture: None,
             score: None,
+            final_url: None,
         },
     )
     .await?;
