@@ -15,8 +15,9 @@ name: CI
 #      open-core job fails the build if any of them appear.
 #
 # rustfmt and clippy are both REQUIRED: the workspace is formatted and at zero
-# clippy warnings. Only the dependency-advisory job stays advisory, because its
-# findings are transitive pins with no upstream fix available yet.
+# clippy warnings. The dependency-advisory job is enforced on the nightly
+# schedule but not on push/PR, so a newly published advisory is surfaced loudly
+# without blocking unrelated work; see the comment on that job.
 
 on:
   push:
@@ -24,6 +25,10 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # Advisories land independently of our commits, so a push-only trigger means a
+  # new one sits undetected until someone happens to push. See the audit job.
+  schedule:
+    - cron: "17 6 * * *"
 
 # Cancel superseded runs on the same ref: this workspace is not cheap to build.
 concurrency:
@@ -114,6 +119,17 @@ jobs:
       - name: Check (all targets, including tests and benches)
         run: cargo check --workspace --all-targets --locked
 
+      # Feature-gated code is invisible to a default build, which is how the
+      # `tuning` pacing strip shipped in a state where it could not be enabled at
+      # all: the engines used `#[cfg(feature = "tuning")]` without declaring the
+      # feature, so the cfg was permanently false and the code inside was never
+      # type-checked. Building the feature on is the only thing that catches that.
+      - name: Check feature-gated code (tuning)
+        run: |
+          cargo check --locked --all-targets \
+            -p mach -p voyage -p pulse \
+            --features mach/tuning,voyage/tuning,pulse/tuning
+
       - name: Test
         run: cargo test --workspace --locked --no-fail-fast
 
@@ -163,28 +179,55 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: clippy (tuning feature)
+        run: |
+          cargo clippy --locked --all-targets \
+            -p mach -p voyage -p pulse \
+            --features mach/tuning,voyage/tuning,pulse/tuning -- -D warnings
+
   audit:
-    name: dependency advisories (advisory)
+    name: dependency advisories
     runs-on: ubuntu-latest
     # The engines parse untrusted input from scan targets, so a DoS-class
-    # advisory in a DNS or QUIC parser matters more here than the CVSS suggests.
-    # Advisory-only because several current findings are transitive pins with no
-    # upstream release yet.
-    continue-on-error: true
+    # advisory in a DNS or QUIC parser matters more here than its CVSS suggests.
+    #
+    # With the two ignores below this is currently CLEAN, so it is enforced on
+    # the daily schedule and left non-blocking on push/PR. That split is
+    # deliberate: an advisory published upstream overnight would otherwise turn
+    # an unrelated pull request red, and the reflex when that happens is to add
+    # another --ignore. A scheduled failure is loud, is nobody's PR, and is the
+    # right place to decide whether to upgrade, ignore, or drop a dependency.
+    continue-on-error: ${{ github.event_name != 'schedule' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
-      # Two advisories have no upstream fix, so they are ignored by ID rather
-      # than left to turn the whole job red permanently:
-      #   RUSTSEC-2023-0071  rsa timing sidechannel (Marvin). Open since 2023,
-      #     needs the modular exponentiation reworked upstream. rsa reaches us
-      #     via cortex and oast, which verify certificates presented by scan
-      #     targets rather than decrypt with our own keys, so the operation the
-      #     attack times is not one we perform.
-      #   RUSTSEC-2025-0134  rustls-pemfile unmaintained. A notice, not a
-      #     vulnerability, on a crate pulled in by axum-server and
+      # Ignored by ID, with the reasoning recorded so it can be re-checked
+      # rather than inherited on faith. Re-examine both whenever rsa or
+      # rustls-pemfile move.
+      #
+      #   RUSTSEC-2023-0071  rsa: Marvin timing sidechannel in RSA decryption.
+      #     Open since 2023; the fix needs modular exponentiation reworked
+      #     upstream and there is no patched release to move to.
+      #
+      #     We DO perform the affected operation: cortex/src/oast.rs decrypts the
+      #     sealed OAST envelope with its own private key (RSA-OAEP), which is
+      #     exactly what Marvin times. An earlier version of this comment claimed
+      #     we only verify certificates; that was wrong.
+      #
+      #     It is still ignored, on narrower grounds: recovering the key needs
+      #     many chosen ciphertexts AND a precise timing signal from the
+      #     decryption. cortex decrypts locally after polling and returns nothing
+      #     timing-bearing to the target, and the keypair is generated per scan
+      #     (RsaPrivateKey::new at oast.rs:86), so even a successful recovery
+      #     yields a key that is already discarded. Revisit if that key ever
+      #     becomes long-lived or if decryption timing becomes observable to a
+      #     scan target.
+      #
+      #   RUSTSEC-2025-0134  rustls-pemfile unmaintained. A maintenance notice,
+      #     not a vulnerability, on a crate reached via axum-server and
       #     rustls-native-certs.
+      #
       # Everything else must stay visible and get fixed.
       - name: Audit
         run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2025-0134
