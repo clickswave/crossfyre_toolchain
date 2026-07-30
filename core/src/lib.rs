@@ -552,6 +552,11 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         let url = data["url"].as_str().unwrap_or("");
         let method = data["method"].as_str().unwrap_or("GET");
         let threads = data["threads"].as_i64().unwrap_or(10);
+        // Wizard "Follow Redirects" toggle. api_switch puts it on the op, but the
+        // streaming scan request below never forwarded it, so mach fell back to
+        // its default (off) and a path that 301s was recorded as a 301 with an
+        // empty body instead of following through to the real page.
+        let follow_redirects = data["follow_redirects"].as_bool().unwrap_or(false);
         let success_codes_str = data["success_codes"]
             .as_str()
             .unwrap_or("200,201,301,302,403");
@@ -773,6 +778,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                 "delay": pace.as_ref().map(|p| p.delay() as i64).unwrap_or(delay),
                 "success_status_codes": codes.clone(),
                 "fresh_start": !resume,
+                "follow_redirects": follow_redirects,
                 // The pace owns the rate now, so mach doesn't self-adapt it; it
                 // still runs the adaptive path for resilience when enabled.
                 "adaptive_rate": false,
