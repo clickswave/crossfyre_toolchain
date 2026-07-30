@@ -78,6 +78,39 @@ struct ScanParams {
     /// Controller posture: stealth | balanced | throughput.
     #[serde(default = "default_posture")]
     posture: String,
+    /// Optional request auth for an authenticated scan: custom headers plus a
+    /// Cookie string, resolved from a credential by the node. Absent for an
+    /// anonymous scan.
+    #[serde(default)]
+    auth: ScanAuth,
+}
+
+/// Auth applied to every probe in an authenticated content-discovery scan. Same
+/// shape the crawler receives (`AuthContext::to_json` on the node side).
+#[derive(Debug, Deserialize, Clone, Default)]
+struct ScanAuth {
+    #[serde(default)]
+    headers: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    cookies: String,
+}
+
+impl ScanAuth {
+    /// Flatten into the `headers` list the prober consumes ("Key: Value"). The
+    /// Cookie header carries the resolved cookie string verbatim rather than
+    /// going through the prober's `cookies` list, which reparses `k:v` pairs and
+    /// would mangle an already-formed Cookie value.
+    fn to_header_lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect();
+        if !self.cookies.is_empty() {
+            lines.push(format!("Cookie: {}", self.cookies));
+        }
+        lines
+    }
 }
 
 fn default_posture() -> String {
@@ -709,7 +742,9 @@ fn build_args(params: &ScanParams, endpoint: String, http_method: HttpMethod) ->
         wordlist_path: params.wordlist.clone(),
         fuzz_marker: params.fuzz_marker.clone(),
         cookies: vec![],
-        headers: vec![],
+        // Authenticated scan: the credential's headers + Cookie land here so the
+        // prober sends every probe as the logged-in user. Empty for anonymous.
+        headers: params.auth.to_header_lines(),
         basic_auth: String::new(),
         store_cookies: false,
         success_status_codes: params.success_status_codes.clone(),

@@ -716,6 +716,27 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         visited.insert(base0);
 
+        // Authenticated content discovery: resolve the attached credential ONCE
+        // (host is fixed for this op) into request auth mach applies to every
+        // probe. Resolved here rather than per recursion level so the credential
+        // is fetched a single time and every level of the crawl is authenticated
+        // the same way. A resolve failure logs and falls through to an
+        // unauthenticated scan rather than aborting the op.
+        let cd_auth: Option<serde_json::Value> =
+            match data["credential_id"].as_str().filter(|s| !s.is_empty()) {
+                Some(cid) => {
+                    let host = target_host(url);
+                    match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
+                        Ok(auth) => Some(auth),
+                        Err(e) => {
+                            eprintln!("[op] content-discovery credential resolve failed ({cid}): {e}");
+                            None
+                        }
+                    }
+                }
+                None => None,
+            };
+
         let mut found_count = 0;
         let mut cancelled = false;
 
@@ -738,7 +759,7 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                 "[op] mach scan (depth {depth}): {endpoint} method={method} threads={threads} delay={delay}ms wordlist={level_wordlist} mode={mode}"
             );
 
-            let mach_req = serde_json::json!({
+            let mut mach_req = serde_json::json!({
                 "operation": "scan",
                 "response": "stream",
                 "endpoint": endpoint,
@@ -758,6 +779,12 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
                 "adaptive_resilience": adaptive_resilience,
                 "posture": posture,
             });
+
+            // Attach the resolved credential (headers + cookies) when present, so
+            // mach probes every path as the authenticated user.
+            if let (Some(auth), Some(obj)) = (cd_auth.as_ref(), mach_req.as_object_mut()) {
+                obj.insert("auth".into(), auth.clone());
+            }
 
             let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
             match conn {
