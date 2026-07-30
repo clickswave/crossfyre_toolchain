@@ -88,9 +88,7 @@ impl Cortex {
                 // worst are always at the top rather than wherever they landed
                 // in scan order. Stable within a severity, so equal findings
                 // stay in discovery order.
-                let at = self
-                    .findings
-                    .partition_point(|f| f.rank <= finding.rank);
+                let at = self.findings.partition_point(|f| f.rank <= finding.rank);
                 self.findings.insert(at, finding);
             }
             "error" => {
@@ -216,10 +214,7 @@ impl Dashboard for Cortex {
 
 /// Errors are Send so the caller can drive this on a spawned task while it
 /// keeps reading the socket.
-pub async fn run(
-    rx: mpsc::UnboundedReceiver<Value>,
-    target: String,
-) -> std::io::Result<()> {
+pub async fn run(rx: mpsc::UnboundedReceiver<Value>, target: String) -> std::io::Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut app = Cortex::new(target);
         let mut rx = rx;

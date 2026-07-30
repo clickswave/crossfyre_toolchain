@@ -13,8 +13,8 @@
 //! This is the same server that backs the managed pool; self-hosters run it via
 //! `crossfyre oast serve` (in-process) or the standalone `oast` binary under systemd.
 
-mod crypto;
 pub mod client_tui;
+mod crypto;
 mod dns;
 mod http_capture;
 mod poll;
@@ -165,7 +165,11 @@ pub async fn run(cfg: Config) {
             "dns {}  http {}  {}",
             cfg.dns_addr,
             cfg.http_addr,
-            if cfg.tls_enabled() { "https on" } else { "https off" }
+            if cfg.tls_enabled() {
+                "https on"
+            } else {
+                "https off"
+            }
         );
         std::thread::spawn(move || {
             let _ = client_tui::run(listeners, rx);
