@@ -4098,7 +4098,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                 let updated = match toolchain::install::fetch_manifest().await {
                                     Ok(manifest) => {
                                         let cur = toolchain::install::installed_cli_version();
-                                        toolchain::install::self_update(&manifest, &cur, false).await
+                                        toolchain::install::self_update(&manifest, &cur, false, false).await
                                     }
                                     Err(e) => Err(e),
                                 };
