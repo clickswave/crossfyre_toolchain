@@ -89,7 +89,8 @@ impl Scout {
                         .to_string(),
                     detail,
                 });
-                self.table.select(Some(self.findings.len().saturating_sub(1)));
+                self.table
+                    .select(Some(self.findings.len().saturating_sub(1)));
             }
             "error" => {
                 self.done = true;
@@ -201,10 +202,7 @@ impl Dashboard for Scout {
 
 /// Errors are Send so the caller can drive this on a spawned task while it
 /// keeps reading the socket.
-pub async fn run(
-    rx: mpsc::UnboundedReceiver<Value>,
-    target: String,
-) -> std::io::Result<()> {
+pub async fn run(rx: mpsc::UnboundedReceiver<Value>, target: String) -> std::io::Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut app = Scout::new(target);
         let mut rx = rx;
