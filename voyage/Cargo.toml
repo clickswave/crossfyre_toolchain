@@ -7,6 +7,15 @@ repository = "https://github.com/clickswave/crossfyre_toolchain"
 keywords = ["subdomain", "enumeration", "security", "recon", "stateful"]
 authors = ["Clickswave <team@clickswave.org>"]
 
+[features]
+# Opt-in adaptive-pacing telemetry in the TUI and scanner.
+#
+# This MUST forward to cfx_tui/tuning, not be an empty list: `cfx_tui` gates
+# `pub mod tuning` and `Dashboard::tuning()` behind its own feature of the same
+# name, so an empty declaration here enables our `#[cfg(feature = "tuning")]`
+# blocks while leaving the items they reference compiled out of the dependency.
+tuning = ["cfx_tui/tuning"]
+
 [dependencies]
 adaptive = { path = "../adaptive" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time"] }
