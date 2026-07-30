@@ -105,6 +105,11 @@ pub struct StreamEvent {
     pub posture: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
+    /// Present only when redirects were followed AND the response came back from a
+    /// different URL than the one probed. The final destination, so the node and
+    /// UI can show "requested -> final". Absent for a direct hit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_url: Option<String>,
 }
 
 pub struct Scanner {
@@ -351,6 +356,7 @@ impl Scanner {
             delay_ms: None,
             posture: None,
             score: None,
+            final_url: None,
         });
 
         Ok(results)
@@ -774,6 +780,10 @@ async fn record_outcome(
                     delay_ms: None,
                     posture: None,
                     score: None,
+                    // Only when the response came back from a different URL than we
+                    // asked for, i.e. redirects were followed to somewhere else.
+                    final_url: (result.response.final_url != work.url)
+                        .then(|| result.response.final_url.clone()),
                 });
             }
         }
@@ -819,6 +829,7 @@ async fn record_outcome(
                     delay_ms: None,
                     posture: None,
                     score: None,
+                    final_url: None,
                 });
             }
         }
@@ -848,6 +859,7 @@ fn emit_log(event_tx: &Option<Arc<mpsc::UnboundedSender<StreamEvent>>>, level: &
             delay_ms: None,
             posture: None,
             score: None,
+            final_url: None,
         });
     }
 }

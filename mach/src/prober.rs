@@ -18,6 +18,10 @@ pub struct Response {
     pub headers_length: i64,
     pub body: Option<Vec<u8>>,
     pub body_length: i64,
+    /// Where the request actually landed. Equal to the requested URL for a direct
+    /// hit; when redirects were followed it is the final destination, so the node
+    /// can show "requested -> final" instead of a bare redirect finding.
+    pub final_url: String,
 }
 
 #[derive(Debug)]
@@ -168,6 +172,9 @@ impl Prober {
         };
 
         let response_status = valid_response.status().as_u16();
+        // The URL the response came from. With redirects followed this is the
+        // final hop; captured before the body is consumed below.
+        let final_url = valid_response.url().to_string();
 
         let probe_status = match &self.config.success_status_codes.contains(&response_status) {
             true => "found",
@@ -230,6 +237,7 @@ impl Prober {
                 headers_length,
                 body,
                 body_length,
+                final_url,
             },
         })
     }
