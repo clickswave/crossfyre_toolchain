@@ -2971,19 +2971,50 @@ pub async fn run_init(
 
     let client = reqwest::Client::new();
 
-    // Enrol this host against an existing dashboard-created node, identified by
-    // its node API key. The operator creates the node in the dashboard (which
-    // mints the key), then pastes it here. `json_resp` is the authorize-node
-    // body; `node_api_key` is persisted so the daemon can re-authorize on start.
-    let node_key = match node_key {
-        Some(k) => k,
-        None => prompt_node_key(no_prompt)?,
+    // Enrol this host. Two routes, in order of how little the operator has to do:
+    //
+    //  1. A node key was passed (or is pasted): enrol against that exact node.
+    //     This is the dashboard flow - create a node there, copy its key here.
+    //  2. No key, but we have an account session: ask the server to hand us one.
+    //     It claims the account's oldest node that has never come online (every
+    //     account is seeded with `default-node-1`) or creates one, and returns a
+    //     freshly minted key. This is what makes a single install-and-enrol
+    //     command possible, since node keys are stored hashed and cannot be read
+    //     back out of the dashboard to paste.
+    //
+    // Prompting is the last resort, only when there is no session to use.
+    // `json_resp` is authorize-node-shaped either way; `node_api_key` is
+    // persisted so the daemon can re-authorize on start.
+    let (json_resp, node_api_key) = match node_key {
+        Some(k) => {
+            end();
+            section("Register");
+            working("Verifying node key…");
+            let resp = auth::authorize_existing_node(&client, api_url, &k, force).await?;
+            (resp, k)
+        }
+        None => match auth::load_account(data_dir) {
+            Some(account) => {
+                end();
+                section("Register");
+                working("Claiming a node for this host…");
+                let resp = auth::provision_node(&client, &account, None).await?;
+                let issued = resp["api_key"]
+                    .as_str()
+                    .ok_or("The server did not return a node key")?
+                    .to_string();
+                (resp, issued)
+            }
+            None => {
+                let k = prompt_node_key(no_prompt)?;
+                end();
+                section("Register");
+                working("Verifying node key…");
+                let resp = auth::authorize_existing_node(&client, api_url, &k, force).await?;
+                (resp, k)
+            }
+        },
     };
-    end();
-    section("Register");
-    working("Verifying node key…");
-    let json_resp = auth::authorize_existing_node(&client, api_url, &node_key, force).await?;
-    let node_api_key = node_key;
 
     // Server may reject if the node is already online elsewhere
     if json_resp["valid"].as_bool() == Some(false) {
