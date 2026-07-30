@@ -503,9 +503,9 @@ pub async fn authorize_existing_node(
 /// Provision a brand-new node for the logged-in account. Returns a body shaped
 /// like authorize-node (node_id, nats_*, extensions, ...) plus `api_key` (the
 /// node's enrolment key, which the caller persists for daemon refresh).
-// Retained for the account-provisioning flow; `node init` currently enrols via
-// a dashboard-issued node key instead of auto-provisioning.
-#[allow(dead_code)]
+// Used by `crossfyre node init` when no node key is supplied and a session
+// exists. The server claims the account's oldest never-online node or creates
+// one, so a first-run install needs only the account key.
 pub async fn provision_node(
     client: &reqwest::Client,
     account: &Account,
