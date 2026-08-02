@@ -1773,6 +1773,14 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
         nkeys::KeyPair::from_seed(seed_str.as_str())
             .expect("Invalid nats_nkey_seed in config.toml"),
     );
+
+    // rustls needs an explicit CryptoProvider when more than one is compiled in.
+    // Both aws-lc-rs and ring are pulled into this workspace (cortex uses one,
+    // oast the other), so the TLS handshake to nexus would otherwise panic with
+    // "could not automatically determine the process-level CryptoProvider" - the
+    // node comes up but never connects. Idempotent: ignore if already installed.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let opts = async_nats::ConnectOptions::with_jwt(jwt_str, move |nonce: Vec<u8>| {
         let kp = key_pair.clone();
         async move { kp.sign(&nonce).map_err(async_nats::AuthError::new) }
