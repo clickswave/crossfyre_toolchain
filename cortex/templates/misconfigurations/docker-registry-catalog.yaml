@@ -1,0 +1,23 @@
+id: docker-registry-catalog-exposed
+info:
+  name: Docker registry catalog exposed
+  severity: high
+  description: A Docker Registry v2 API answers /v2/_catalog without authentication, listing all hosted image repositories that can then be pulled and inspected for secrets.
+  tags: misconfig,docker,registry,unauth
+  metadata:
+    category: misconfigurations
+    vendor: docker
+    product: distribution
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/v2/_catalog"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"repositories"'
+      - type: status
+        status:
+          - 200

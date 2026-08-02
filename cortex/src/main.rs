@@ -10,6 +10,7 @@ mod dsl;
 mod engine;
 mod libs;
 mod oast;
+mod rawhttp;
 mod template;
 
 #[tokio::main]

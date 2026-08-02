@@ -17,6 +17,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Correlation id length: the leading chars of the callback's correlation label.
 pub const CORR_LEN: usize = 20;
 
+/// Cap on live registrations. `/register` is unauthenticated (it must be, so any
+/// node can register), so without a ceiling a public listener can be spammed into
+/// memory exhaustion. At the cap, registering a NEW correlation is refused;
+/// re-registering an existing one (refresh) still works. Expired entries are
+/// reaped every 60s, so this is a burst ceiling, not a hard lifetime quota.
+pub const MAX_REGISTRATIONS: usize = 200_000;
+
 pub fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -112,6 +119,19 @@ impl Store {
             return false;
         }
         if let Ok(mut m) = self.regs.lock() {
+            // Refuse a NEW correlation once the table is full (memory-DoS guard);
+            // a refresh of an existing correlation is always allowed. Re-registering
+            // an existing id also requires the same secret, so a leaked correlation
+            // id (it travels in the callback host) cannot be hijacked to a new key.
+            let existing = m.get(corr_id);
+            if existing.is_none() && m.len() >= MAX_REGISTRATIONS {
+                return false;
+            }
+            if let Some(r) = existing {
+                if r.secret_hash != sha256(secret.as_bytes()) {
+                    return false;
+                }
+            }
             m.insert(
                 corr_id.to_string(),
                 Registration {
@@ -259,4 +279,39 @@ pub fn corr_from_host(host: &str, domain: &str) -> Option<String> {
 /// single domain a WAF could blocklist); they share this one store and poll API.
 pub fn corr_from_any(host: &str, domains: &[String]) -> Option<String> {
     domains.iter().find_map(|d| corr_from_host(host, d))
+}
+
+#[cfg(test)]
+mod corr_tests {
+    use super::{corr_from_any, corr_from_host, CORR_LEN};
+
+    // A 20-char correlation id followed by 13 random chars = the label under the domain.
+    const CORR: &str = "abcdefghij0123456789";
+
+    #[test]
+    fn extracts_the_correlation_id() {
+        assert_eq!(CORR.len(), CORR_LEN);
+        let host = format!("{CORR}rand1234567890.oast.example");
+        assert_eq!(corr_from_host(&host, "oast.example"), Some(CORR.to_string()));
+    }
+
+    #[test]
+    fn robust_to_case_trailing_dot_and_extra_labels() {
+        let host = format!("EXTRA.{CORR}RAND1234567890.OAST.EXAMPLE.");
+        assert_eq!(corr_from_host(&host, "oast.example"), Some(CORR.to_string()));
+    }
+
+    #[test]
+    fn rejects_off_domain_self_and_short_labels() {
+        assert_eq!(corr_from_host("evil.attacker.com", "oast.example"), None);
+        assert_eq!(corr_from_host("oast.example", "oast.example"), None);
+        assert_eq!(corr_from_host("short.oast.example", "oast.example"), None);
+    }
+
+    #[test]
+    fn corr_from_any_scans_the_pool() {
+        let host = format!("{CORR}rand1234567890.two.example");
+        let pool = vec!["one.example".to_string(), "two.example".to_string()];
+        assert_eq!(corr_from_any(&host, &pool), Some(CORR.to_string()));
+    }
 }

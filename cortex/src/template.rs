@@ -60,6 +60,12 @@ pub struct HttpReq {
     /// placeholder substitution, so JSON/XML/form injection checks work.
     #[serde(default)]
     pub body: Option<String>,
+    /// Send the request-target verbatim over a raw socket instead of through
+    /// reqwest, so `.`/`%2e` dot-segments are NOT normalised away client-side.
+    /// Required for path-traversal probes whose bypass depends on the server
+    /// doing the normalisation (e.g. CVE-2021-41773). nuclei's `unsafe`.
+    #[serde(default, rename = "unsafe")]
+    pub unsafe_raw: bool,
 }
 
 /// Max concrete requests generated from one path's payload expansion (safety cap
@@ -198,7 +204,13 @@ pub async fn eval_template(
         // Response-based request.
         for raw_path in &req.path {
             for v in expand_request(req, raw_path, base, MAX_PAYLOAD_REQUESTS) {
-                let r1 = match fetch(client, &method, &v).await {
+                // `unsafe` templates go over the raw sender so the request-target
+                // is sent verbatim (see rawhttp); everything else uses reqwest.
+                let r1 = match if req.unsafe_raw {
+                    fetch_raw(&method, &v).await
+                } else {
+                    fetch(client, &method, &v).await
+                } {
                     Some(r) => r,
                     None => continue,
                 };
@@ -206,7 +218,11 @@ pub async fn eval_template(
                     continue;
                 }
                 // CONFIRM: re-issue once; must match again (idempotent reproduce).
-                let r2 = match fetch(client, &method, &v).await {
+                let r2 = match if req.unsafe_raw {
+                    fetch_raw(&method, &v).await
+                } else {
+                    fetch(client, &method, &v).await
+                } {
                     Some(r) => r,
                     None => continue,
                 };
@@ -326,6 +342,24 @@ fn apply_oob(v: &mut ReqVariant, host: &str) {
     }
 }
 
+/// Issue a request over the raw sender (verbatim path, no dot-segment
+/// normalisation) and adapt it to the same `Resp` the matchers expect.
+async fn fetch_raw(method: &str, v: &ReqVariant) -> Option<Resp> {
+    let r = crate::rawhttp::send(crate::rawhttp::RawReq {
+        method,
+        url: &v.url,
+        headers: &v.headers,
+        body: v.body.clone(),
+        timeout: std::time::Duration::from_secs(10),
+    })
+    .await?;
+    Some(Resp {
+        status: r.status,
+        headers: r.headers,
+        body: r.body,
+    })
+}
+
 async fn fetch(client: &Client, method: &str, v: &ReqVariant) -> Option<Resp> {
     // Rate-limit resilience: a busy or WAF/edge-fronted target answers a burst of
     // template requests with 429/503. Without a retry, the later templates in a
@@ -363,7 +397,7 @@ async fn fetch(client: &Client, method: &str, v: &ReqVariant) -> Option<Resp> {
                     headers.push_str(vv.to_str().unwrap_or(""));
                     headers.push('\n');
                 }
-                let body = r.text().await.unwrap_or_default();
+                let body = crate::engine::read_body_capped(r).await;
                 return Some(Resp {
                     status,
                     headers,
@@ -427,10 +461,23 @@ fn matches_one(m: &Matcher, resp: &Resp) -> bool {
                 return false;
             }
             let cond_and = m.condition.to_lowercase() != "or";
+            // Header names are normalized to lowercase by the HTTP client, so match
+            // the header/all_headers part case-insensitively. This keeps cortex
+            // compatible with nuclei templates that spell header names in canonical
+            // case (e.g. "Server:", "X-Powered-By:"), which would otherwise miss.
+            let header_part = matches!(m.part.as_str(), "header" | "all_headers");
+            let hay_cmp = if header_part { hay.to_lowercase() } else { hay };
+            let contains = |w: &str| {
+                if header_part {
+                    hay_cmp.contains(&w.to_lowercase())
+                } else {
+                    hay_cmp.contains(w)
+                }
+            };
             if cond_and {
-                m.words.iter().all(|w| hay.contains(w.as_str()))
+                m.words.iter().all(|w| contains(w.as_str()))
             } else {
-                m.words.iter().any(|w| hay.contains(w.as_str()))
+                m.words.iter().any(|w| contains(w.as_str()))
             }
         }
         "regex" => {
@@ -561,11 +608,19 @@ http:
       - "{{BaseURL}}/info.php"
     matchers-condition: and
     matchers:
+      # "PHP Version" alone appears in ordinary prose; require a second phpinfo()
+      # structural marker so an article mentioning "PHP Version" is not flagged.
       - type: word
         part: body
         words:
           - "PHP Version"
+      - type: word
+        part: body
+        words:
           - "phpinfo()"
+          - "Configuration File (php.ini)"
+          - "PHP License"
+          - "PHP Credits"
         condition: or
       - type: status
         status:
@@ -608,6 +663,15 @@ http:
         words:
           - "Index of /"
           - "<title>Index of"
+        condition: or
+      # A real autoindex also renders navigable file links; requiring one avoids
+      # flagging pages that merely contain the phrase "Index of /" in prose.
+      - type: word
+        part: body
+        words:
+          - "Parent Directory"
+          - "<a href="
+          - "[DIR]"
         condition: or
       - type: status
         status:
@@ -705,6 +769,7 @@ info:
   description: A path that returns the contents of /etc/passwd indicates local file inclusion. Demonstrates payload fuzzing.
 http:
   - method: GET
+    unsafe: true
     payloads:
       trav:
         - "../../../../../../etc/passwd"
@@ -774,16 +839,35 @@ pub static BUILTIN: LazyLock<Vec<Template>> = LazyLock::new(|| {
         .collect()
 });
 
-/// Load external nuclei templates (*.yaml / *.yml) from a directory, skipping
-/// any that fail to parse against the supported subset.
+/// Load external nuclei templates (*.yaml / *.yml) from a directory, recursing
+/// into subdirectories so a categorized pack (technologies/, exposures/, cves/,
+/// ...) loads as one set. Templates that fail to parse against the supported
+/// subset, or carry no runnable request, are skipped rather than aborting the
+/// load. A hidden directory (leading dot) is skipped so stray editor/VCS state
+/// is never walked.
 pub fn load_dir(dir: &str) -> Vec<Template> {
     let mut out = Vec::new();
-    let rd = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(_) => return out,
+    load_dir_into(std::path::Path::new(dir), &mut out);
+    out
+}
+
+fn load_dir_into(dir: &std::path::Path, out: &mut Vec<Template>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
     };
     for entry in rd.flatten() {
         let path = entry.path();
+        if path.is_dir() {
+            let hidden = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with('.'))
+                .unwrap_or(false);
+            if !hidden {
+                load_dir_into(&path, out);
+            }
+            continue;
+        }
         let is_yaml = path
             .extension()
             .and_then(|e| e.to_str())
@@ -799,7 +883,6 @@ pub fn load_dir(dir: &str) -> Vec<Template> {
             out.push(t);
         }
     }
-    out
 }
 
 #[cfg(test)]

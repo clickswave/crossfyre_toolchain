@@ -1,0 +1,23 @@
+id: gitlab-ci-exposure
+info:
+  name: Exposed .gitlab-ci.yml
+  severity: low
+  description: A readable .gitlab-ci.yml discloses the CI pipeline, runner tags, deploy steps, and sometimes inline tokens or internal image registries.
+  tags: exposure,gitlab,ci,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.gitlab-ci.yml"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "stages:"
+          - "script:"
+        condition: or
+      - type: status
+        status:
+          - 200

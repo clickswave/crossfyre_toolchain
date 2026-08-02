@@ -33,8 +33,12 @@ of checks it could actually reproduce, not a pile of maybes.
 ## Templates
 
 Point cortex at a directory of templates with `CORTEX_TEMPLATES_DIR`. The built-in
-checks always run; anything in that directory runs on top. Matchers, status/word/body
-conditions, and payload fuzzing from the nuclei format are supported.
+checks always run; anything in that directory runs on top. cortex reads the nuclei
+format (a supported subset: matchers, status/word/regex/dsl conditions, and payload
+fuzzing), so a lot of existing packs work as-is.
+
+This repo ships a starter pack, grouped by category, in [`templates/`](templates/).
+Its [README](templates/README.md) covers the layout and how to write your own.
 
 ## Out-of-band confirmation
 

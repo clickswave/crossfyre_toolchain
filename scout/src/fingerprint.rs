@@ -83,7 +83,7 @@ pub async fn run(params: FpParams, tx: mpsc::UnboundedSender<Value>) {
 
     let mut builder = Client::builder()
         .timeout(std::time::Duration::from_millis(
-            params.timeout_ms.max(1000),
+            params.timeout_ms.clamp(1000, 120_000),
         ))
         .redirect(if params.follow_redirects {
             reqwest::redirect::Policy::limited(5)
@@ -120,7 +120,7 @@ pub async fn run(params: FpParams, tx: mpsc::UnboundedSender<Value>) {
                 }
                 hdrs.push((name, val));
             }
-            let body = r.text().await.unwrap_or_default();
+            let body = read_body_capped(r).await;
             (status, hdrs, body, cookies)
         }
         Err(e) => {
@@ -256,9 +256,40 @@ fn extract_title(body: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Cap on how much of a decoded response we buffer. reqwest's gzip feature
+/// auto-decompresses, so without a ceiling a scanned target could serve a small
+/// gzip "bomb" that inflates to gigabytes and OOMs the engine. 8 MiB is plenty
+/// for fingerprinting a page or hashing a favicon.
+const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+async fn read_body_capped(resp: reqwest::Response) -> String {
+    String::from_utf8_lossy(&read_bytes_capped(resp).await).into_owned()
+}
+
+async fn read_bytes_capped(mut resp: reqwest::Response) -> Vec<u8> {
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < MAX_BODY_BYTES {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = MAX_BODY_BYTES - buf.len();
+                let take = chunk.len().min(room);
+                buf.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    buf
+}
+
 fn normalize_target(t: &str) -> Option<(String, String, u16, String)> {
     let t = t.trim();
-    if t.is_empty() {
+    if t.is_empty() || t.len() > 2048 {
+        // Reject oversized targets: a multi-kilobyte host string only feeds a
+        // pathological name into blocking DNS resolution (not covered by the
+        // request timeout).
         return None;
     }
     let with_scheme = if t.starts_with("http://") || t.starts_with("https://") {
@@ -293,12 +324,14 @@ fn normalize_target(t: &str) -> Option<(String, String, u16, String)> {
 async fn fetch_favicon(client: &Client, scheme: &str, host: &str, port: u16) -> Value {
     let url = format!("{scheme}://{host}:{port}/favicon.ico");
     match client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => match r.bytes().await {
-            Ok(b) if !b.is_empty() => {
+        Ok(r) if r.status().is_success() => {
+            let b = read_bytes_capped(r).await;
+            if !b.is_empty() {
                 json!({ "mmh3": favicon_mmh3(&b), "md5": format!("{:x}", md5::compute(&b)) })
+            } else {
+                Value::Null
             }
-            _ => Value::Null,
-        },
+        }
         _ => Value::Null,
     }
 }
@@ -357,4 +390,27 @@ fn murmur3_x86_32(data: &[u8], seed: u32) -> u32 {
     h1 = h1.wrapping_mul(0xc2b2_ae35);
     h1 ^= h1 >> 16;
     h1
+}
+
+#[cfg(test)]
+mod normalize_target_tests {
+    use super::normalize_target;
+
+    #[test]
+    fn infers_scheme_and_port() {
+        let (s, h, p, _) = normalize_target("example.com").unwrap();
+        assert_eq!((s.as_str(), h.as_str(), p), ("http", "example.com", 80));
+        let (s, _, p, _) = normalize_target("example.com:443").unwrap();
+        assert_eq!((s.as_str(), p), ("https", 443));
+        let (s, _, p, _) = normalize_target("example.com:8080").unwrap();
+        assert_eq!((s.as_str(), p), ("http", 8080));
+        let (s, _, p, _) = normalize_target("https://x.com/a").unwrap();
+        assert_eq!((s.as_str(), p), ("https", 443));
+    }
+
+    #[test]
+    fn empty_is_none() {
+        assert!(normalize_target("").is_none());
+        assert!(normalize_target("   ").is_none());
+    }
 }

@@ -1,0 +1,26 @@
+id: kubernetes-api-anonymous-access
+info:
+  name: Kubernetes API allows anonymous access
+  severity: critical
+  description: The Kubernetes API server returns cluster objects (namespaces/pods) to an unauthenticated client, exposing the cluster to full enumeration and likely takeover.
+  tags: misconfig,kubernetes,unauth
+  metadata:
+    category: misconfigurations
+    vendor: kubernetes
+    product: kubernetes
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/namespaces"
+      - "{{BaseURL}}/api/v1/pods"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"kind":"NamespaceList"'
+          - '"kind":"PodList"'
+        condition: or
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,28 @@
+id: docker-compose-exposure
+info:
+  name: Exposed docker-compose.yml
+  severity: medium
+  description: A readable docker-compose file discloses service topology, image versions, and frequently environment secrets (passwords, tokens) set inline.
+  tags: exposure,docker,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/docker-compose.yml"
+      - "{{BaseURL}}/docker-compose.yaml"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "services:"
+      - type: word
+        part: body
+        words:
+          - "image:"
+          - "build:"
+        condition: or
+      - type: status
+        status:
+          - 200

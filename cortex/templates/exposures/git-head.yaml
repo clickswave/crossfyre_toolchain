@@ -1,0 +1,21 @@
+id: git-head-exposure
+info:
+  name: Exposed .git/HEAD
+  severity: medium
+  description: A readable .git/HEAD confirms the .git directory is web-served, which typically allows reconstructing the full source tree (and any secrets committed to it).
+  tags: exposure,git,source-code
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.git/HEAD"
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "^ref:\\s+refs/heads/"
+      - type: status
+        status:
+          - 200

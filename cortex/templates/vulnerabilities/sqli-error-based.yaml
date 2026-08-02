@@ -1,0 +1,23 @@
+id: sqli-error-based-search
+info:
+  name: SQL injection (error-based)
+  severity: high
+  description: Appending a single quote to the query provokes a database engine error, proving unsanitized input is concatenated into a SQL statement.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/plans?search='"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "unterminated quoted string"
+          - "syntax error at or near"
+          - "SQLSTATE"
+          - "pg-pool"
+          - "You have an error in your SQL syntax"
+          - "SQLITE_ERROR"
+          - "ORA-01756"
+          - "Unclosed quotation mark"

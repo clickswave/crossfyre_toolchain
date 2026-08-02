@@ -1,0 +1,18 @@
+id: os-command-injection
+info:
+  name: OS command injection
+  severity: critical
+  description: A parameter is passed into a shell command; appending ';id' executes an injected command whose output (uid=..(..) gid=..) is returned in the response.
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/v1/tools/ping"
+    headers:
+      Content-Type: application/json
+    body: '{"host":"127.0.0.1;id"}'
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "uid=[0-9]+\\([a-z0-9_-]+\\)\\s+gid=[0-9]+"

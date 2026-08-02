@@ -1,6 +1,6 @@
 # Contributing to the Crossfyre Toolchain
 
-Thanks for taking the time to contribute. This repo holds the open-source engines (`mach`, `voyage`, `pulse`), the node agent (`node`), and the `crossfyre` CLI.
+Thanks for taking the time to contribute. This repo holds the open-source recon and scanning engines (`mach`, `voyage`, `pulse`, `scout`, `cortex`), the out-of-band server (`oast`), the node agent (`node`), and the `crossfyre` CLI.
 
 ## Ground rules
 
@@ -33,6 +33,8 @@ cargo test             # run the tests
 cargo fmt              # format before you commit
 cargo clippy           # lint; please keep it warning-clean
 ```
+
+Run `scripts/install-hooks.sh` once per clone to enable the local git hooks (`core.hooksPath -> .githooks`). They run fast, dependency-free checks on push; on a public checkout they no-op cleanly.
 
 Keep pull requests focused: one logical change per PR, with a clear description of what and why. Match the style of the surrounding code.
 

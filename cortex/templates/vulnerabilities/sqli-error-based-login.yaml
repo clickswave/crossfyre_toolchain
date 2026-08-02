@@ -1,0 +1,24 @@
+id: sqli-error-based-login
+info:
+  name: SQL injection (error-based) in login
+  severity: critical
+  description: The login email field is concatenated into a SQL statement; a single quote provokes a database engine error, proving injectable authentication (a bypass to admin is possible).
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/v1/auth/login"
+    headers:
+      Content-Type: application/json
+    body: "{\"email\":\"'\",\"password\":\"x\"}"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "pg-pool"
+          - "unterminated"
+          - "syntax error at or near"
+          - "SQLSTATE"
+          - "You have an error in your SQL syntax"
+          - "SQLITE_ERROR"

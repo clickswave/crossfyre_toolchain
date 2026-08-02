@@ -203,3 +203,32 @@ pub const TOP_1000_PORTS: &[u16] = &[
     56737, 56738, 57294, 57797, 58080, 60020, 60443, 61532, 61900, 62078, 63331, 64623, 64680,
     65000, 65129, 65389,
 ];
+
+#[cfg(test)]
+mod resolve_ports_tests {
+    use super::*;
+
+    #[test]
+    fn presets_have_expected_sizes() {
+        assert_eq!(resolve_ports("top-100").len(), TOP_100_PORTS.len());
+        assert_eq!(resolve_ports("top-1000").len(), TOP_1000_PORTS.len());
+        assert_eq!(resolve_ports("all").len(), 65535);
+        assert_eq!(resolve_ports("full").len(), 65535);
+    }
+
+    #[test]
+    fn comma_list_and_range() {
+        let list = resolve_ports("80,443,8080");
+        assert!(list.contains(&80) && list.contains(&443) && list.contains(&8080));
+        let range = resolve_ports("20-25");
+        for p in 20u16..=25 {
+            assert!(range.contains(&p), "range is missing {p}");
+        }
+    }
+
+    #[test]
+    fn garbage_does_not_panic() {
+        let _ = resolve_ports("not-a-port-spec");
+        let _ = resolve_ports("");
+    }
+}

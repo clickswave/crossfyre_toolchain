@@ -1,0 +1,22 @@
+id: panel-webmin
+info:
+  name: Webmin panel exposed
+  severity: low
+  description: A Webmin system-administration login is reachable. Webmin controls the host directly and has hosted several pre-auth RCE CVEs.
+  tags: panel,webmin,management
+  metadata:
+    category: panels
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/session_login.cgi"
+      - "{{BaseURL}}/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Webmin"
+      - type: status
+        status:
+          - 200

@@ -34,6 +34,11 @@ pub struct AuthzParams {
     pub timeout_ms: u64,
     #[serde(default)]
     pub target: String,
+    /// Opt-in to the state-changing mass-assignment probe (POST/PUT/PATCH with an
+    /// injected privileged body). Off by default: read-only is the safe default,
+    /// per the plan's safety rails.
+    #[serde(default)]
+    pub test_writes: bool,
 }
 fn d_timeout() -> u64 {
     10_000
@@ -65,6 +70,9 @@ struct Probe {
     body_hash: u64,
     login_ish: bool,
     ok: bool,
+    /// Hard-sensitive field names found in the response body (password/token/...),
+    /// for the BOPLA excessive-data-exposure oracle.
+    sensitive: Vec<String>,
 }
 
 /// A finding that still needs its confirm re-request before it is emitted.
@@ -74,6 +82,8 @@ struct Candidate {
     confirm_role: String,
     /// For BOLA, the body hash that must reappear on re-probe.
     expect_hash: Option<u64>,
+    /// For excessive-data-exposure, the sensitive field must reappear on re-probe.
+    expect_sensitive: bool,
 }
 
 pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
@@ -97,7 +107,7 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
     let mut clients: Vec<(Identity, Client)> = Vec::new();
     for id in &params.identities {
         let mut b = Client::builder()
-            .timeout(Duration::from_millis(params.timeout_ms.max(1000)))
+            .timeout(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000)))
             .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(true)
             .user_agent("Mozilla/5.0 (compatible; cortex-authz/0.1; +https://clickswave.org)");
@@ -136,15 +146,23 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
                     },
                 )
                 .await;
-                let confirmed = match cand.expect_hash {
-                    Some(h) => p2.ok && p2.body_hash == h,
-                    None => p2.ok && !p2.login_ish,
+                let confirmed = if let Some(h) = cand.expect_hash {
+                    p2.ok && p2.body_hash == h
+                } else if cand.expect_sensitive {
+                    p2.ok && !p2.sensitive.is_empty()
+                } else {
+                    p2.ok && !p2.login_ish
                 };
                 if confirmed {
                     found += 1;
                     let _ = tx.send(json!({ "type": "finding", "data": cand.finding }));
                 }
             }
+        }
+
+        // BOPLA mass-assignment (state-changing) - opt-in only, write verbs only.
+        if params.test_writes && is_write_method(&ep.method) {
+            found += mass_assign_probe(ep, &clients, &tx).await;
         }
 
         done += 1;
@@ -154,6 +172,93 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
     }
 
     let _ = tx.send(json!({"type":"done","found": found}));
+}
+
+fn is_write_method(m: &str) -> bool {
+    matches!(m.to_uppercase().as_str(), "POST" | "PUT" | "PATCH")
+}
+
+const INJECT_BODY: &str =
+    r#"{"role":"admin","is_admin":true,"isAdmin":true,"admin":true,"is_superuser":true}"#;
+
+/// A 2xx write response that echoes an injected privileged property back as
+/// accepted - the reflection signal for mass assignment.
+fn injected_reflected(status: u16, body: &str) -> bool {
+    if !(200..300).contains(&status) {
+        return false;
+    }
+    // Strip whitespace so `"role": "admin"` and `"role":"admin"` both match.
+    let low: String = body
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    low.contains("\"role\":\"admin\"")
+        || low.contains("\"is_admin\":true")
+        || low.contains("\"isadmin\":true")
+        || low.contains("\"admin\":true")
+        || low.contains("\"is_superuser\":true")
+}
+
+async fn send_injected(client: &Client, ep: &Endpoint) -> (u16, String) {
+    let rb = match ep.method.to_uppercase().as_str() {
+        "PUT" => client.put(&ep.url),
+        "PATCH" => client.patch(&ep.url),
+        _ => client.post(&ep.url),
+    }
+    .header("Content-Type", "application/json")
+    .body(INJECT_BODY);
+    match rb.send().await {
+        Ok(r) => {
+            let s = r.status().as_u16();
+            let b = crate::engine::read_body_capped(r).await;
+            (s, b)
+        }
+        Err(_) => (0, String::new()),
+    }
+}
+
+/// Send an injected privileged body as each non-privileged authed identity and
+/// report mass assignment when the property is reflected as accepted (re-sent
+/// once to confirm). Anonymous and privileged identities are skipped: setting your
+/// own admin flag only matters for a lower-privileged identity.
+async fn mass_assign_probe(
+    ep: &Endpoint,
+    clients: &[(Identity, Client)],
+    tx: &mpsc::UnboundedSender<Value>,
+) -> i64 {
+    let mut found = 0;
+    for (id, client) in clients {
+        if !id.auth.is_meaningful() || role_is_privileged(&id.role) {
+            continue;
+        }
+        let (s1, b1) = send_injected(client, ep).await;
+        if !injected_reflected(s1, &b1) {
+            continue;
+        }
+        let (s2, b2) = send_injected(client, ep).await; // confirm
+        if !injected_reflected(s2, &b2) {
+            continue;
+        }
+        let matrix = json!([{ "role": id.role, "status": s1, "reflected": true }]);
+        let finding = finding_value(
+            "Mass assignment / BOPLA (privileged property accepted)",
+            "high",
+            "mass_assignment",
+            ep,
+            &matrix,
+            &id.role,
+            format!(
+                "Identity '{}' set a privileged property (role/is_admin) via {} {} and it was reflected as accepted, indicating mass assignment.",
+                id.role,
+                ep.method.to_uppercase(),
+                ep.url
+            ),
+        );
+        let _ = tx.send(json!({ "type": "finding", "data": finding }));
+        found += 1;
+    }
+    found
 }
 
 async fn probe(client: &Client, ep: &Endpoint, id: &Identity) -> Probe {
@@ -180,7 +285,8 @@ async fn probe(client: &Client, ep: &Endpoint, id: &Identity) -> Probe {
                     continue;
                 }
                 let is_redirect = (300..400).contains(&status);
-                let body = r.text().await.unwrap_or_default();
+                let body = crate::engine::read_body_capped(r).await;
+                let ok = (200..300).contains(&status);
                 return Probe {
                     role: id.role.clone(),
                     is_anon: !id.auth.is_meaningful(),
@@ -188,7 +294,8 @@ async fn probe(client: &Client, ep: &Endpoint, id: &Identity) -> Probe {
                     body_len: body.len(),
                     body_hash: hash_body(&body),
                     login_ish: is_redirect || looks_like_login(&body),
-                    ok: (200..300).contains(&status),
+                    ok,
+                    sensitive: if ok { scan_sensitive(&body) } else { Vec::new() },
                 };
             }
             Err(_) => {
@@ -205,6 +312,7 @@ async fn probe(client: &Client, ep: &Endpoint, id: &Identity) -> Probe {
                     body_hash: 0,
                     login_ish: false,
                     ok: false,
+                    sensitive: Vec::new(),
                 };
             }
         }
@@ -236,6 +344,7 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
         out.push(Candidate {
             confirm_role: a.role.clone(),
             expect_hash: None,
+            expect_sensitive: false,
             finding: finding_value(
                 "Unauthenticated access to a protected endpoint",
                 "high",
@@ -263,6 +372,7 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
                     out.push(Candidate {
                         confirm_role: p.role.clone(),
                         expect_hash: None,
+                        expect_sensitive: false,
                         finding: finding_value(
                             "Function-level authorization broken (BFLA)",
                             "high",
@@ -283,6 +393,10 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
 
     // 3) BOLA / IDOR: two different authenticated identities get byte-identical
     //    successful bodies for an object-scoped endpoint, and anon cannot.
+    //    BOLA is a *horizontal* break (a peer reads a peer's object), so both
+    //    identities in the pair must be NON-privileged: a privileged role (admin/
+    //    owner/...) is expected to read other users' objects, and pairing it here
+    //    only produces false positives on legitimate god-mode access.
     if has_object_id && authed.len() >= 2 && !all_same_body {
         let anon_ok = anon.map(|a| a.ok).unwrap_or(false);
         'pairs: for i in 0..authed.len() {
@@ -295,10 +409,13 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
                     && a.body_hash == b.body_hash
                     && a.body_len > 0
                     && !anon_ok
+                    && !role_is_privileged(&a.role)
+                    && !role_is_privileged(&b.role)
                 {
                     out.push(Candidate {
                         confirm_role: b.role.clone(),
                         expect_hash: Some(b.body_hash),
+                        expect_sensitive: false,
                         finding: finding_value(
                             "Object-level authorization broken (BOLA / IDOR)",
                             "critical",
@@ -318,7 +435,94 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
         }
     }
 
+    // 4) BOPLA - excessive data exposure (API3): a 2xx response body exposes a
+    //    hard-sensitive field (password/token/secret/...). Reported once per
+    //    endpoint, attributed to the lowest-trust identity that received it
+    //    (anon > peer > privileged), which also sets the severity.
+    {
+        let mut exposed: Option<&Probe> = None;
+        for p in probes {
+            if p.ok && !p.sensitive.is_empty() {
+                let better = exposed.map(|e| trust_rank(p) < trust_rank(e)).unwrap_or(true);
+                if better {
+                    exposed = Some(p);
+                }
+            }
+        }
+        if let Some(p) = exposed {
+            let sev = if p.is_anon || !role_is_privileged(&p.role) {
+                "high"
+            } else {
+                "medium"
+            };
+            out.push(Candidate {
+                confirm_role: p.role.clone(),
+                expect_hash: None,
+                expect_sensitive: true,
+                finding: finding_value(
+                    "Excessive data exposure (sensitive fields in response)",
+                    sev,
+                    "excessive_data_exposure",
+                    ep,
+                    &matrix,
+                    &p.role,
+                    format!(
+                        "The response to identity '{}' for {} exposes sensitive field(s): {}.",
+                        p.role,
+                        ep.url,
+                        p.sensitive.join(", ")
+                    ),
+                ),
+            });
+        }
+    }
+
     out
+}
+
+/// Trust rank for exposure attribution: lower = less trusted = worse exposure.
+fn trust_rank(p: &Probe) -> u8 {
+    if p.is_anon {
+        0
+    } else if !role_is_privileged(&p.role) {
+        1
+    } else {
+        2
+    }
+}
+
+/// Hard-sensitive JSON field names that should never appear in an API response
+/// body. Deliberately tight (key form `"name":`) to keep false positives near zero.
+fn scan_sensitive(body: &str) -> Vec<String> {
+    if body.len() > 500_000 {
+        return Vec::new();
+    }
+    let low = body.to_ascii_lowercase();
+    const KEYS: &[&str] = &[
+        "password",
+        "passwd",
+        "pwd",
+        "password_hash",
+        "secret",
+        "client_secret",
+        "api_key",
+        "apikey",
+        "private_key",
+        "access_token",
+        "refresh_token",
+        "ssn",
+        "social_security",
+        "credit_card",
+        "card_number",
+        "cvv",
+    ];
+    let mut hits = Vec::new();
+    for k in KEYS {
+        if low.contains(&format!("\"{k}\":")) {
+            hits.push((*k).to_string());
+        }
+    }
+    hits
 }
 
 fn finding_value(
@@ -562,5 +766,40 @@ mod tests {
         assert!(!key_is_id_ref("grid"));
         assert!(!key_is_id_ref("page"));
         assert!(!key_is_id_ref("valid"));
+    }
+
+    fn probe_of(role: &str, ok: bool, hash: u64, len: usize) -> Probe {
+        Probe {
+            role: role.into(),
+            is_anon: role == "anon",
+            status: if ok { 200 } else { 403 },
+            body_len: len,
+            body_hash: hash,
+            login_ish: false,
+            ok,
+            sensitive: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn bola_requires_nonprivileged_peers() {
+        let ep = Endpoint { method: "GET".into(), url: "http://h/api/orders/1001".into() };
+        let has_bola = |probes: &[Probe]| {
+            analyze(&ep, probes)
+                .iter()
+                .any(|c| c.finding["vuln_class"].as_str() == Some("bola"))
+        };
+        // Two non-privileged peers get an identical object body, anon denied -> BOLA.
+        assert!(has_bola(&[
+            probe_of("user-a", true, 42, 100),
+            probe_of("user-b", true, 42, 100),
+            probe_of("anon", false, 0, 0),
+        ]));
+        // Admin (privileged) god-mode reading a user's object is NOT BOLA.
+        assert!(!has_bola(&[
+            probe_of("admin", true, 99, 100),
+            probe_of("user-a", true, 99, 100),
+            probe_of("anon", false, 0, 0),
+        ]));
     }
 }

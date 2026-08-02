@@ -105,7 +105,7 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     };
 
     let mut builder = Client::builder()
-        .timeout(Duration::from_millis(params.timeout_ms.max(1000)))
+        .timeout(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000)))
         .redirect(if params.follow_redirects {
             reqwest::redirect::Policy::limited(5)
         } else {
@@ -133,7 +133,12 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     let mut found: i64 = 0;
 
     // --- Passive header checks on the base response (deterministic) ---
-    if let Some(resp) = fetch_base(&client, &base).await {
+    // fetch_base returns None only on a transport-level failure (connection
+    // refused, timed out, TLS error): the target did not answer a simple GET.
+    // Every {{BaseURL}} template dials the same host:port, so if the base is
+    // unreachable the whole active phase would just re-dial a dead or tarpitting
+    // target 100+ times, each attempt burning a full per-request timeout. Skip it.
+    let base_reachable = if let Some(resp) = fetch_base(&client, &base).await {
         for (name, template, severity, description) in header_checks(&resp) {
             if allow(severity) {
                 found += 1;
@@ -153,10 +158,13 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
                 }));
             }
         }
-    }
+        true
+    } else {
+        false
+    };
 
     // --- Template mode (confirm-then-report) ---
-    if !params.passive_only {
+    if !params.passive_only && base_reachable {
         let ext_dir = params
             .templates_dir
             .clone()
@@ -248,6 +256,32 @@ fn header_checks(resp: &BaseResp) -> Vec<(&'static str, &'static str, &'static s
     out
 }
 
+/// Cap on how much of a decoded response body we buffer. reqwest's gzip feature
+/// auto-decompresses, so an unbounded read lets a scanned target serve a small
+/// gzip "bomb" that inflates to gigabytes and OOMs the engine (a scanned target
+/// is attacker-controlled). Reading in chunks with a ceiling keeps a hostile
+/// response from exhausting memory; 8 MiB is far more than any real finding needs.
+pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Read a response body but stop after `MAX_BODY_BYTES` of decoded output.
+pub async fn read_body_capped(mut resp: reqwest::Response) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < MAX_BODY_BYTES {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = MAX_BODY_BYTES - buf.len();
+                let take = chunk.len().min(room);
+                buf.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
     match client.get(base).send().await {
         Ok(r) => {
@@ -269,7 +303,10 @@ async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
 
 fn normalize_base(t: &str) -> Option<String> {
     let t = t.trim();
-    if t.is_empty() {
+    if t.is_empty() || t.len() > 2048 {
+        // No legitimate target is multi-kilobyte; an oversized string only feeds
+        // a pathological host into blocking DNS resolution (not covered by the
+        // request timeout), so reject it up front.
         return None;
     }
     let with_scheme = if t.starts_with("http://") || t.starts_with("https://") {

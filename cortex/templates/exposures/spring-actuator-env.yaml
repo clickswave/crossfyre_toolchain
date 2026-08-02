@@ -1,0 +1,32 @@
+id: spring-actuator-env-exposure
+info:
+  name: Spring Boot actuator /env exposed
+  severity: high
+  description: The Spring Boot actuator env endpoint is unauthenticated and dumps the application's resolved configuration (property sources), routinely leaking credentials and internal URLs.
+  tags: exposure,spring,actuator,disclosure
+  metadata:
+    category: exposures
+    vendor: vmware
+    product: spring_boot
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/actuator/env"
+      - "{{BaseURL}}/env"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "propertySources"
+          - "activeProfiles"
+        condition: or
+      - type: word
+        part: header
+        words:
+          - "Content-Type: application/vnd.spring-boot.actuator"
+          - "Content-Type: application/json"
+        condition: or
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,22 @@
+id: security-txt-present
+info:
+  name: security.txt present
+  severity: info
+  description: A /.well-known/security.txt is published. This is good practice, not a weakness; it is reported to record the disclosed security contact and policy.
+  tags: exposure,security-txt,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.well-known/security.txt"
+      - "{{BaseURL}}/security.txt"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Contact:"
+      - type: status
+        status:
+          - 200

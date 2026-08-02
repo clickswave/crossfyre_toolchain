@@ -1,0 +1,24 @@
+id: panel-jupyter
+info:
+  name: Jupyter notebook exposed
+  severity: medium
+  description: A Jupyter notebook or lab server is reachable. Without a token or password it grants arbitrary code execution on the host.
+  tags: panel,jupyter,notebook,rce
+  metadata:
+    category: panels
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/tree"
+      - "{{BaseURL}}/lab"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Jupyter"
+          - "jupyter-config-data"
+        condition: or
+      - type: status
+        status:
+          - 200

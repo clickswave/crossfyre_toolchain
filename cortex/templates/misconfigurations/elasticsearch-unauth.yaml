@@ -1,0 +1,25 @@
+id: elasticsearch-unauthenticated
+info:
+  name: Elasticsearch exposed without authentication
+  severity: high
+  description: The Elasticsearch cluster API answers unauthenticated requests, exposing cluster state and (via _cat/_search) the indexed data itself.
+  tags: misconfig,elasticsearch,unauth,exposure
+  metadata:
+    category: misconfigurations
+    vendor: elastic
+    product: elasticsearch
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/_cluster/health"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"cluster_name"'
+          - '"number_of_nodes"'
+        condition: and
+      - type: status
+        status:
+          - 200

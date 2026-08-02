@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Pre-push guard for the crossfyre toolchain.
+#
+# The open `adaptive` crate and the git-ignored `adaptive-private` tuned drop-in
+# are swapped at build time by `.cargo/config.toml`. They must expose the SAME
+# public API surface or the swap silently breaks one of the two builds. Neither
+# CI nor any git repo ever has the private drop-in, so this parity check can only
+# run locally - which is exactly what this hook is for.
+#
+# Enable it with: scripts/install-hooks.sh   (sets core.hooksPath to .githooks)
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+checker="$repo_root/scripts/check_adaptive_parity.py"
+
+if [ -f "$checker" ]; then
+  if ! python3 "$checker"; then
+    echo "pre-push: adaptive API parity check failed - see above. Push aborted." >&2
+    exit 1
+  fi
+fi

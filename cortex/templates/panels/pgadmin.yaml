@@ -1,0 +1,22 @@
+id: panel-pgadmin
+info:
+  name: pgAdmin panel exposed
+  severity: low
+  description: A pgAdmin database console login is reachable. pgAdmin manages Postgres servers directly, so an exposed instance is a meaningful attack surface.
+  tags: panel,pgadmin,database,postgres
+  metadata:
+    category: panels
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/login"
+      - "{{BaseURL}}/pgadmin4/login"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "pgAdmin"
+      - type: status
+        status:
+          - 200

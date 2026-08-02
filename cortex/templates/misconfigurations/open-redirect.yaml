@@ -1,0 +1,28 @@
+id: open-redirect-param
+info:
+  name: Open redirect via redirect parameter
+  severity: medium
+  description: A redirect/return parameter sends the user to an attacker-controlled external origin. Confirmed by following the redirect to example.com and observing its content, which proves the destination is not constrained to the site.
+  tags: misconfig,redirect
+  metadata:
+    category: misconfigurations
+    cwe: CWE-601
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?url=https://example.com/"
+      - "{{BaseURL}}/?redirect=https://example.com/"
+      - "{{BaseURL}}/?next=https://example.com/"
+      - "{{BaseURL}}/?returnUrl=https://example.com/"
+      - "{{BaseURL}}/?redirect_uri=https://example.com/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Example Domain"
+          - "illustrative examples in documents"
+        condition: and
+      - type: status
+        status:
+          - 200

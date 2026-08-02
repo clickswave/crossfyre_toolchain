@@ -1,0 +1,23 @@
+id: prometheus-metrics-exposed
+info:
+  name: Prometheus metrics endpoint exposed
+  severity: low
+  description: A /metrics endpoint is served unauthenticated, disclosing internal host, process, and application telemetry (paths, versions, load) useful for further attacks.
+  tags: misconfig,prometheus,metrics,disclosure
+  metadata:
+    category: misconfigurations
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/metrics"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "# HELP"
+          - "# TYPE"
+        condition: and
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,21 @@
+id: svn-wc-db-exposure
+info:
+  name: Exposed Subversion .svn/wc.db
+  severity: medium
+  description: A readable .svn/wc.db (a SQLite database) exposes the working-copy metadata and pristine file paths, typically allowing source recovery.
+  tags: exposure,svn,source-code
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.svn/wc.db"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "SQLite format 3"
+      - type: status
+        status:
+          - 200

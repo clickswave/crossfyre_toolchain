@@ -1,0 +1,23 @@
+id: panel-tomcat-manager
+info:
+  name: Tomcat Manager panel exposed
+  severity: low
+  description: The Tomcat Manager application is reachable (its Basic-auth realm is presented), exposing a WAR-deploy console that is a direct RCE path if default or weak credentials are set.
+  tags: panel,tomcat,apache,manager
+  metadata:
+    category: panels
+    vendor: apache
+    product: tomcat
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/manager/html"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - 'realm="Tomcat Manager Application"'
+      - type: status
+        status:
+          - 401

@@ -1,0 +1,26 @@
+id: panel-keycloak-realm
+info:
+  name: Keycloak realm metadata exposed
+  severity: info
+  description: A Keycloak identity server exposes its realm's public OIDC metadata, identifying the SSO provider and its endpoints for authentication-flow testing.
+  tags: panel,keycloak,sso,oidc
+  metadata:
+    category: panels
+    vendor: redhat
+    product: keycloak
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/auth/realms/master"
+      - "{{BaseURL}}/realms/master"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"realm"'
+          - '"public_key"'
+        condition: and
+      - type: status
+        status:
+          - 200

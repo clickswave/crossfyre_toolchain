@@ -1,0 +1,25 @@
+id: panel-swagger-ui
+info:
+  name: Swagger UI exposed
+  severity: info
+  description: An interactive Swagger UI is served publicly, handing an attacker a browsable, executable inventory of the API's endpoints and parameters.
+  tags: panel,swagger,api,docs
+  metadata:
+    category: panels
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/swagger-ui/index.html"
+      - "{{BaseURL}}/swagger-ui.html"
+      - "{{BaseURL}}/api/docs"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Swagger UI"
+          - "swagger-ui"
+        condition: or
+      - type: status
+        status:
+          - 200
