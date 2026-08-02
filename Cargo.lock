@@ -475,6 +475,7 @@ dependencies = [
  "pyo3",
  "pythonize",
  "reqwest 0.13.4",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
@@ -2415,7 +2416,7 @@ dependencies = [
 
 [[package]]
 name = "node"
-version = "0.1.31"
+version = "0.1.32"
 dependencies = [
  "cfx_core",
  "clap",

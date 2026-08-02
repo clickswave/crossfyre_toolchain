@@ -13,6 +13,9 @@ path = "src/lib.rs"
 [dependencies]
 adaptive = { path = "../adaptive" }
 async-nats = "0.50.0"
+# Direct handle so run_daemon can install a rustls CryptoProvider before the
+# NATS TLS handshake (both aws-lc-rs and ring are in the workspace graph).
+rustls = { version = "0.23", features = ["aws_lc_rs"] }
 base64 = "0.21.0"
 clap = { version = "4.5.60", features = ["derive"] }
 dialoguer = { version = "0.12.0", features = ["password"] }
