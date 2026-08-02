@@ -75,7 +75,11 @@ fn split(url: &str) -> Option<(bool, String, u16, String)> {
     if host.is_empty() {
         return None;
     }
-    let target = if target.is_empty() { "/".to_string() } else { target.to_string() };
+    let target = if target.is_empty() {
+        "/".to_string()
+    } else {
+        target.to_string()
+    };
     Some((https, host, port, target))
 }
 
@@ -87,7 +91,11 @@ fn build_request(req: &RawReq, host: &str, port: u16, https: bool, target: &str)
         format!("{host}:{port}")
     };
     s.push_str(&format!("Host: {host_hdr}\r\n"));
-    let have = |name: &str| req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
+    let have = |name: &str| {
+        req.headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case(name))
+    };
     if !have("user-agent") {
         s.push_str("User-Agent: Mozilla/5.0 (compatible; cortex/0.1; +https://clickswave.org)\r\n");
     }
@@ -119,7 +127,11 @@ async fn send_plain(host: &str, port: u16, data: &[u8]) -> Option<Vec<u8>> {
     stream.write_all(data).await.ok()?;
     stream.flush().await.ok()?;
     let mut buf = Vec::new();
-    stream.take(MAX_RESPONSE_BYTES).read_to_end(&mut buf).await.ok()?;
+    stream
+        .take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut buf)
+        .await
+        .ok()?;
     Some(buf)
 }
 
@@ -131,7 +143,10 @@ async fn send_tls(host: &str, port: u16, data: &[u8]) -> Option<Vec<u8>> {
     tls.write_all(data).await.ok()?;
     tls.flush().await.ok()?;
     let mut buf = Vec::new();
-    tls.take(MAX_RESPONSE_BYTES).read_to_end(&mut buf).await.ok()?;
+    tls.take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut buf)
+        .await
+        .ok()?;
     Some(buf)
 }
 
@@ -226,7 +241,11 @@ fn parse_response(raw: &[u8]) -> Option<RawResp> {
             headers.push('\n');
         }
     }
-    let body_bytes = if chunked { dechunk(body) } else { body.to_vec() };
+    let body_bytes = if chunked {
+        dechunk(body)
+    } else {
+        body.to_vec()
+    };
     Some(RawResp {
         status,
         headers,
@@ -255,11 +274,9 @@ fn dechunk(mut data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     while let Some(i) = find(data, b"\r\n") {
         let size_line = String::from_utf8_lossy(&data[..i]);
-        let size = usize::from_str_radix(
-            size_line.trim().split(';').next().unwrap_or("").trim(),
-            16,
-        )
-        .unwrap_or(0);
+        let size =
+            usize::from_str_radix(size_line.trim().split(';').next().unwrap_or("").trim(), 16)
+                .unwrap_or(0);
         data = &data[i + 2..];
         if size == 0 {
             break;

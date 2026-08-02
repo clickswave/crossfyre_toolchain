@@ -13,8 +13,8 @@ pub mod creds;
 mod egress;
 pub mod executor;
 pub mod oast;
-pub mod toolchain;
 mod ops;
+pub mod toolchain;
 
 use toolchain::sudo_user::chown_to_invoking_user;
 

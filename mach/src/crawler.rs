@@ -596,7 +596,10 @@ mod normalize_seed_tests {
 
     #[test]
     fn adds_scheme_and_keeps_existing() {
-        assert_eq!(normalize_seed("example.com").unwrap().as_str(), "http://example.com/");
+        assert_eq!(
+            normalize_seed("example.com").unwrap().as_str(),
+            "http://example.com/"
+        );
         assert_eq!(normalize_seed("https://x.com/a").unwrap().scheme(), "https");
     }
 

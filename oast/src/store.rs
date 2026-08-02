@@ -292,13 +292,19 @@ mod corr_tests {
     fn extracts_the_correlation_id() {
         assert_eq!(CORR.len(), CORR_LEN);
         let host = format!("{CORR}rand1234567890.oast.example");
-        assert_eq!(corr_from_host(&host, "oast.example"), Some(CORR.to_string()));
+        assert_eq!(
+            corr_from_host(&host, "oast.example"),
+            Some(CORR.to_string())
+        );
     }
 
     #[test]
     fn robust_to_case_trailing_dot_and_extra_labels() {
         let host = format!("EXTRA.{CORR}RAND1234567890.OAST.EXAMPLE.");
-        assert_eq!(corr_from_host(&host, "oast.example"), Some(CORR.to_string()));
+        assert_eq!(
+            corr_from_host(&host, "oast.example"),
+            Some(CORR.to_string())
+        );
     }
 
     #[test]
