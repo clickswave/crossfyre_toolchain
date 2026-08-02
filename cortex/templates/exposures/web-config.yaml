@@ -1,0 +1,23 @@
+id: web-config-exposure
+info:
+  name: Exposed web.config
+  severity: high
+  description: A served ASP.NET web.config commonly exposes connection strings, machine keys, and app settings. It should never be readable.
+  tags: exposure,aspnet,config,credentials
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/web.config"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "<configuration"
+          - "<connectionStrings"
+        condition: or
+      - type: status
+        status:
+          - 200

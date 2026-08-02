@@ -1,0 +1,21 @@
+id: ds-store-exposure
+info:
+  name: Exposed .DS_Store
+  severity: low
+  description: A readable .DS_Store (macOS Finder metadata) leaks the directory's file and folder names, revealing otherwise unlinked paths to enumerate.
+  tags: exposure,ds-store,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.DS_Store"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Bud1"
+      - type: status
+        status:
+          - 200

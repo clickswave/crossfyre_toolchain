@@ -1,0 +1,24 @@
+id: spring-actuator-heapdump-exposure
+info:
+  name: Spring Boot actuator /heapdump exposed
+  severity: critical
+  description: The actuator heapdump endpoint returns a full JVM heap snapshot without authentication; it can be mined offline for in-memory secrets, sessions, and credentials.
+  tags: exposure,spring,actuator,heapdump
+  metadata:
+    category: exposures
+    vendor: vmware
+    product: spring_boot
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/actuator/heapdump"
+      - "{{BaseURL}}/heapdump"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "Content-Type: application/octet-stream"
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,24 @@
+id: ssti-arithmetic-evaluation
+info:
+  name: Server-side template injection (arithmetic evaluation)
+  severity: high
+  description: A parameter is rendered by a server-side template engine, so an injected expression is evaluated. A marker of the form cxk{{7*191}} / cxk${7*191} returns as cxk1337, proving code evaluation (often escalates to RCE).
+  tags: vuln,ssti,injection,rce
+  metadata:
+    category: vulnerabilities
+    cwe: CWE-1336
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/?name=cxk%7B%7B7*191%7D%7D"
+      - "{{BaseURL}}/?q=cxk%24%7B7*191%7D"
+      - "{{BaseURL}}/?search=cxk%7B%7B7*191%7D%7D"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "cxk1337"
+      - type: status
+        status:
+          - 200

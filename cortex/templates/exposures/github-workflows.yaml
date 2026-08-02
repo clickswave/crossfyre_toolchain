@@ -1,0 +1,25 @@
+id: github-workflow-exposure
+info:
+  name: Exposed GitHub Actions workflow
+  severity: low
+  description: A readable .github/workflows file discloses the CI/CD pipeline and any secret names or deploy targets referenced in it.
+  tags: exposure,github,ci,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.github/workflows/main.yml"
+      - "{{BaseURL}}/.github/workflows/ci.yml"
+      - "{{BaseURL}}/.github/workflows/deploy.yml"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "jobs:"
+          - "runs-on:"
+        condition: and
+      - type: status
+        status:
+          - 200

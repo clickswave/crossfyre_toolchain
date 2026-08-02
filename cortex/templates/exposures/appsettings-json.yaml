@@ -1,0 +1,23 @@
+id: appsettings-json-exposure
+info:
+  name: Exposed appsettings.json
+  severity: high
+  description: A served .NET appsettings.json commonly exposes connection strings and API keys under ConnectionStrings / secrets.
+  tags: exposure,dotnet,config,credentials
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/appsettings.json"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "ConnectionStrings"
+          - "DefaultConnection"
+        condition: or
+      - type: status
+        status:
+          - 200

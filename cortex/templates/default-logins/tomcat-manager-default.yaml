@@ -1,0 +1,39 @@
+id: tomcat-manager-default-creds
+info:
+  name: Tomcat Manager default credentials
+  severity: critical
+  description: The Tomcat Manager accepts a well-known default credential pair (tomcat/tomcat, admin/admin, ...). The Manager can deploy a WAR, so valid default creds are a direct remote-code-execution path.
+  tags: default-login,tomcat,apache
+  metadata:
+    category: default-logins
+    vendor: apache
+    product: tomcat
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/manager/html"
+    headers:
+      Authorization: "Basic dG9tY2F0OnRvbWNhdA=="
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Tomcat Web Application Manager"
+      - type: status
+        status:
+          - 200
+  - method: GET
+    path:
+      - "{{BaseURL}}/manager/html"
+    headers:
+      Authorization: "Basic YWRtaW46YWRtaW4="
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Tomcat Web Application Manager"
+      - type: status
+        status:
+          - 200

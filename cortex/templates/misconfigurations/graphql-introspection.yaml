@@ -1,0 +1,21 @@
+id: graphql-introspection-enabled
+info:
+  name: GraphQL introspection enabled
+  severity: medium
+  description: The GraphQL endpoint answers introspection queries, exposing the full schema (types, fields, mutations) to unauthenticated clients. This aids attackers in mapping sensitive operations.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/graphql?query=%7B__schema%7BqueryType%7Bname%7D%7D%7D"
+      - "{{BaseURL}}/api/graphql?query=%7B__schema%7BqueryType%7Bname%7D%7D%7D"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "__schema"
+          - "queryType"
+        condition: and

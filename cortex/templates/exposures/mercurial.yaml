@@ -1,0 +1,24 @@
+id: mercurial-requires-exposure
+info:
+  name: Exposed Mercurial .hg/requires
+  severity: medium
+  description: A readable .hg/requires confirms a web-served Mercurial repository, which typically allows reconstructing the source history and any committed secrets.
+  tags: exposure,mercurial,source-code
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.hg/requires"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "revlogv1"
+          - "dotencode"
+          - "store"
+        condition: or
+      - type: status
+        status:
+          - 200

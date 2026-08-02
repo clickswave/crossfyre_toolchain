@@ -1,0 +1,26 @@
+id: wp-config-backup-exposure
+info:
+  name: Exposed wp-config.php backup
+  severity: critical
+  description: An editor/backup copy of wp-config.php is served as text (not executed), exposing the WordPress database credentials and secret auth keys.
+  tags: exposure,wordpress,credentials,backup
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/wp-config.php.bak"
+      - "{{BaseURL}}/wp-config.php.save"
+      - "{{BaseURL}}/wp-config.php~"
+      - "{{BaseURL}}/.wp-config.php.swp"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "DB_PASSWORD"
+          - "DB_NAME"
+        condition: and
+      - type: status
+        status:
+          - 200

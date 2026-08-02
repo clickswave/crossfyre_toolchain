@@ -1,0 +1,22 @@
+id: debug-endpoint-env-exposure
+info:
+  name: Debug endpoint leaks environment secrets
+  severity: critical
+  description: A debug endpoint returns the process environment, exposing secrets such as JWT_SECRET and DATABASE_URL. This directly enables token forgery and lateral movement.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/debug"
+      - "{{BaseURL}}/debug"
+      - "{{BaseURL}}/debug/vars"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "JWT_SECRET"
+          - "DATABASE_URL"
+        condition: or

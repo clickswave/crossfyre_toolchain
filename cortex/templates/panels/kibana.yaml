@@ -1,0 +1,24 @@
+id: panel-kibana-app
+info:
+  name: Kibana app reachable
+  severity: low
+  description: The Kibana app loads, exposing dashboards over the data in the backing Elasticsearch. Frequently deployed without authentication.
+  tags: panel,kibana,elastic
+  metadata:
+    category: panels
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/app/home"
+      - "{{BaseURL}}/app/kibana"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "kbnBundlesLoader"
+          - "kibana"
+        condition: or
+      - type: status
+        status:
+          - 200

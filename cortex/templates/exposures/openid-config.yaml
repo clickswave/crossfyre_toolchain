@@ -1,0 +1,23 @@
+id: openid-configuration-exposed
+info:
+  name: OpenID Connect discovery document present
+  severity: info
+  description: A /.well-known/openid-configuration is published, naming the identity provider and its authorization, token, and JWKS endpoints. This is expected for an OIDC provider and is reported for inventory.
+  tags: exposure,oidc,sso,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/.well-known/openid-configuration"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"authorization_endpoint"'
+          - '"jwks_uri"'
+        condition: and
+      - type: status
+        status:
+          - 200

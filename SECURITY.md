@@ -14,7 +14,7 @@ We will acknowledge your report, keep you updated on the fix, and credit you onc
 
 ## Scope
 
-This policy covers the code in this repository: `crossfyre`, `node`, `mach`, `voyage`, and `pulse`. For issues in the hosted Crossfyre platform, use the same address and say so in your report.
+This policy covers the code in this repository: the recon and scanning engines (`mach`, `voyage`, `pulse`, `scout`, `cortex`), the out-of-band server (`oast`), the node agent (`node`), and the `crossfyre` CLI. For issues in the hosted Crossfyre platform, use the same address and say so in your report.
 
 ## A note on responsible use
 

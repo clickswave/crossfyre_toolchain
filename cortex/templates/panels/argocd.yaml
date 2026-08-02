@@ -1,0 +1,23 @@
+id: panel-argocd
+info:
+  name: Argo CD panel exposed
+  severity: low
+  description: An Argo CD UI is reachable. Argo CD deploys to a Kubernetes cluster, so an exposed or weakly-authenticated instance can lead to cluster control.
+  tags: panel,argocd,kubernetes,devops
+  metadata:
+    category: panels
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Argo CD"
+          - "argocd"
+        condition: or
+      - type: status
+        status:
+          - 200

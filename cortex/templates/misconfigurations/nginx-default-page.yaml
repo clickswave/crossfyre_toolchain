@@ -1,0 +1,23 @@
+id: nginx-default-welcome-page
+info:
+  name: Default nginx welcome page
+  severity: info
+  description: The site serves the stock "Welcome to nginx!" page, indicating an unconfigured or placeholder virtual host that may expose an unintended service or origin.
+  tags: misconfig,nginx,default-page
+  metadata:
+    category: misconfigurations
+    vendor: f5
+    product: nginx
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - "Welcome to nginx!"
+      - type: status
+        status:
+          - 200

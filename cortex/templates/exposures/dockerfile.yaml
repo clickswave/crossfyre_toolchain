@@ -1,0 +1,29 @@
+id: dockerfile-exposure
+info:
+  name: Exposed Dockerfile
+  severity: low
+  description: A readable Dockerfile discloses base images, build steps, and sometimes baked-in credentials or internal registry paths.
+  tags: exposure,docker,disclosure
+  metadata:
+    category: exposures
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/Dockerfile"
+    matchers-condition: and
+    matchers:
+      - type: regex
+        part: body
+        regex:
+          - "(?m)^\\s*FROM\\s+\\S+"
+      - type: word
+        part: body
+        words:
+          - "RUN "
+          - "COPY "
+          - "ENV "
+          - "WORKDIR "
+        condition: or
+      - type: status
+        status:
+          - 200

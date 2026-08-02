@@ -1,0 +1,27 @@
+id: panel-portainer
+info:
+  name: Portainer panel exposed
+  severity: low
+  description: A Portainer container-management UI is reachable. Portainer controls Docker/Kubernetes hosts, so an exposed instance (especially pre-initialisation) can lead to host compromise.
+  tags: panel,portainer,docker,management
+  metadata:
+    category: panels
+    product: portainer
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/system/status"
+      - "{{BaseURL}}/api/status"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: body
+        words:
+          - '"Version"'
+      - type: word
+        part: header
+        words:
+          - "Content-Type: application/json"
+      - type: status
+        status:
+          - 200

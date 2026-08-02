@@ -1,0 +1,20 @@
+id: crlf-header-injection
+info:
+  name: CRLF injection into response headers
+  severity: medium
+  description: A parameter is written into the response headers without stripping CR/LF, so an injected sequence adds an attacker-controlled header. The probe injects X-Crlf-Test and observes it reflected in the response headers.
+  tags: vuln,crlf,injection
+  metadata:
+    category: vulnerabilities
+    cwe: CWE-113
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/%0d%0aX-Crlf-Test:%20cxcrlf9k2"
+      - "{{BaseURL}}/?url=%0d%0aX-Crlf-Test:%20cxcrlf9k2"
+      - "{{BaseURL}}/?redirect=%0d%0aX-Crlf-Test:%20cxcrlf9k2"
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "X-Crlf-Test: cxcrlf9k2"

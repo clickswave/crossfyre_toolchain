@@ -589,3 +589,20 @@ fn dedup(v: &mut Vec<String>) {
     let mut seen = HashSet::new();
     v.retain(|s| !s.is_empty() && seen.insert(s.clone()));
 }
+
+#[cfg(test)]
+mod normalize_seed_tests {
+    use super::normalize_seed;
+
+    #[test]
+    fn adds_scheme_and_keeps_existing() {
+        assert_eq!(normalize_seed("example.com").unwrap().as_str(), "http://example.com/");
+        assert_eq!(normalize_seed("https://x.com/a").unwrap().scheme(), "https");
+    }
+
+    #[test]
+    fn empty_is_none() {
+        assert!(normalize_seed("").is_none());
+        assert!(normalize_seed("   ").is_none());
+    }
+}
