@@ -107,7 +107,9 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
     let mut clients: Vec<(Identity, Client)> = Vec::new();
     for id in &params.identities {
         let mut b = Client::builder()
-            .timeout(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000)))
+            .timeout(Duration::from_millis(
+                params.timeout_ms.clamp(1000, 120_000),
+            ))
             .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(true)
             .user_agent("Mozilla/5.0 (compatible; cortex-authz/0.1; +https://clickswave.org)");
@@ -295,7 +297,11 @@ async fn probe(client: &Client, ep: &Endpoint, id: &Identity) -> Probe {
                     body_hash: hash_body(&body),
                     login_ish: is_redirect || looks_like_login(&body),
                     ok,
-                    sensitive: if ok { scan_sensitive(&body) } else { Vec::new() },
+                    sensitive: if ok {
+                        scan_sensitive(&body)
+                    } else {
+                        Vec::new()
+                    },
                 };
             }
             Err(_) => {
@@ -443,7 +449,9 @@ fn analyze(ep: &Endpoint, probes: &[Probe]) -> Vec<Candidate> {
         let mut exposed: Option<&Probe> = None;
         for p in probes {
             if p.ok && !p.sensitive.is_empty() {
-                let better = exposed.map(|e| trust_rank(p) < trust_rank(e)).unwrap_or(true);
+                let better = exposed
+                    .map(|e| trust_rank(p) < trust_rank(e))
+                    .unwrap_or(true);
                 if better {
                     exposed = Some(p);
                 }
@@ -783,7 +791,10 @@ mod tests {
 
     #[test]
     fn bola_requires_nonprivileged_peers() {
-        let ep = Endpoint { method: "GET".into(), url: "http://h/api/orders/1001".into() };
+        let ep = Endpoint {
+            method: "GET".into(),
+            url: "http://h/api/orders/1001".into(),
+        };
         let has_bola = |probes: &[Probe]| {
             analyze(&ep, probes)
                 .iter()

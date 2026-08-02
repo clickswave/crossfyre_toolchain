@@ -105,7 +105,9 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     };
 
     let mut builder = Client::builder()
-        .timeout(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000)))
+        .timeout(Duration::from_millis(
+            params.timeout_ms.clamp(1000, 120_000),
+        ))
         .redirect(if params.follow_redirects {
             reqwest::redirect::Policy::limited(5)
         } else {
