@@ -598,22 +598,13 @@ pub async fn run_login(
 pub fn run_logout(data_dir: &Path) {
     use crate::toolchain::ui::*;
     title("Crossfyre logout", "");
-    let mut touched = Vec::new();
-    for ext in crate::toolchain::EXTENSIONS {
-        if crate::toolchain::config::is_extension_installed(ext) {
-            let _ = crate::toolchain::service::stop(ext);
-            let _ = crate::toolchain::service::disable(ext);
-            touched.push(*ext);
-        }
-    }
-    if !touched.is_empty() {
-        section("Extensions");
-        step(&format!(
-            "Stopped and disabled (no session): {}",
-            touched.join(", ")
-        ));
-        end();
-    }
+
+    // Logout only clears the account session. It deliberately leaves the engine
+    // daemons running: they're free, local, and don't use the account (they
+    // install from the public manifest and can run scripts with `crossfyre run`,
+    // no control plane). Tearing them down here would couple the free tools to
+    // the login state, which is exactly what we don't want. De-enrolling a node
+    // is a separate, explicit action (`crossfyre node remove`).
 
     if clear_account(data_dir) {
         done("Signed out");

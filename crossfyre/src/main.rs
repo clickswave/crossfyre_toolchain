@@ -316,26 +316,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let base = cfx_core::resolve_data_dir(cli.data_dir.as_deref())?;
 
-    // Account gate: the operational/management commands require an account
-    // session. `login`/`logout` are the way in/out; `init` performs login
-    // inline; `doctor`/`uninstall` stay usable for diagnostics + cleanup; and
-    // `up`/`daemon` are run by the OS service and are already implicitly gated
-    // (they need a node config that only `init` can create).
-    // `node list` needs an account too, but it self-handles the missing-session
-    // case with a tailored message (see run_node_list), so it's not gated here.
-    let requires_login = matches!(
-        &cli.command,
-        Commands::Extension { .. }
-            | Commands::Update { .. }
-            | Commands::Status
-            | Commands::Db { .. }
-            | Commands::Run { .. }
-    );
-    if requires_login && cfx_core::auth::load_account(&base).is_none() {
-        warn("You are not logged in.");
-        hint("Run `crossfyre login` first (then `crossfyre node init` to register this host).");
-        std::process::exit(1);
-    }
+    // No account gate here on purpose. The engines are free, and every command
+    // that isn't node enrolment is either local or served from the PUBLIC
+    // release manifest (bins.crossfyre.io): `extension` install/manage,
+    // `update`, `status`, `db` (the local container) and `run` (a .cfx script
+    // with no control plane) never touch the account session, so forcing a login
+    // to install or use them is friction with nothing behind it.
+    //
+    // Auth still happens where it's genuinely needed, inside the command that
+    // needs it: `node init` enrols this host against your account (and logs in
+    // inline if needed), and `node list`/`node remove` hit the authed API and
+    // self-handle a missing session with their own tailored message. `login`/
+    // `logout` manage the session for those.
 
     match cli.command {
         Commands::Login {
