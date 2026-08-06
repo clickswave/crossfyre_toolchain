@@ -12,7 +12,7 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::Engine as _;
-use reqwest::Client;
+use transport::Client;
 use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
 use serde_json::{Value, json};

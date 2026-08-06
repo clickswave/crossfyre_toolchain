@@ -8,7 +8,7 @@
 //! API mode are the documented next milestones (docs/tier1-engines-plan.md).
 
 use crate::template;
-use reqwest::Client;
+use transport::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -17,6 +17,14 @@ use tokio::sync::mpsc;
 #[derive(Debug, Deserialize)]
 pub struct ScanParams {
     pub target: String,
+    /// Evasiveness posture (set by the node's Evasiveness switch): blend in as a
+    /// browser (true, default) vs a neutral honest client (false).
+    #[serde(default = "d_true")]
+    pub evasive: bool,
+    /// Attribution token: when set, advertise it so an authorized program can
+    /// allow-list the traffic.
+    #[serde(default)]
+    pub identify: Option<String>,
     #[serde(default = "d_timeout")]
     pub timeout_ms: u64,
     #[serde(default = "d_true")]
@@ -104,22 +112,51 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
         }
     };
 
-    let mut builder = Client::builder()
-        .timeout(Duration::from_millis(
-            params.timeout_ms.clamp(1000, 120_000),
-        ))
-        .redirect(if params.follow_redirects {
-            reqwest::redirect::Policy::limited(5)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
-        .danger_accept_invalid_certs(true)
-        .cookie_store(true)
-        .user_agent("Mozilla/5.0 (compatible; cortex/0.1; +https://clickswave.org)");
-    if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
-        builder = builder.default_headers(auth.to_header_map());
+    // Outbound identity, presented via the transport layer. The reqwest backend
+    // sends UA + hint headers; the impersonate (wreq) backend presents a real
+    // browser TLS/HTTP2 fingerprint, with the emulation profile owning the
+    // fingerprint headers. Fast posture skips emulation. Stable-per-target; the
+    // profile choice is the private `adaptive` drop-in.
+    let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
+    let ident = adaptive::identity::resolve(&mode, Some(params.target.as_str()));
+
+    let mut browser_headers = transport::HeaderMap::new();
+    for (k, v) in &ident.headers {
+        if let (Ok(name), Ok(val)) = (
+            transport::HeaderName::from_bytes(k.as_bytes()),
+            transport::HeaderValue::from_str(v),
+        ) {
+            browser_headers.insert(name, val);
+        }
     }
-    let client = match builder.build() {
+    let mut extra_headers = transport::HeaderMap::new();
+    if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
+        for (k, v) in auth.to_header_map().iter() {
+            extra_headers.insert(k.clone(), v.clone());
+        }
+    }
+    // The attribution token (Identify posture) is an app header: it must survive
+    // emulation, so it goes in extra_headers, not the browser fingerprint set.
+    if let adaptive::identity::Mode::Identify(token) = &mode {
+        if let Ok(val) = transport::HeaderValue::from_str(token) {
+            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+        }
+    }
+
+    let client = match transport::build_client(transport::ClientConfig {
+        timeout: Some(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000))),
+        redirect: if params.follow_redirects {
+            transport::Redirect::Limited(5)
+        } else {
+            transport::Redirect::None
+        },
+        accept_invalid_certs: true,
+        cookie_store: true,
+        user_agent: Some(ident.user_agent.clone()),
+        browser_headers,
+        extra_headers,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+    }) {
         Ok(c) => c,
         Err(e) => {
             let _ = tx.send(json!({"type":"error","message":format!("client build failed: {e}")}));
@@ -266,7 +303,7 @@ fn header_checks(resp: &BaseResp) -> Vec<(&'static str, &'static str, &'static s
 pub const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 
 /// Read a response body but stop after `MAX_BODY_BYTES` of decoded output.
-pub async fn read_body_capped(mut resp: reqwest::Response) -> String {
+pub async fn read_body_capped(mut resp: transport::Response) -> String {
     let mut buf: Vec<u8> = Vec::new();
     while buf.len() < MAX_BODY_BYTES {
         match resp.chunk().await {

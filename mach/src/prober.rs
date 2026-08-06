@@ -2,7 +2,7 @@ use crate::libs::cli_args;
 use crate::libs::mach_db::Work;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use reqwest::Client;
+use transport::Client;
 use reqwest::header::{AUTHORIZATION, COOKIE, HeaderMap, HeaderName, HeaderValue};
 
 #[derive(Debug)]
@@ -51,12 +51,12 @@ impl Prober {
     pub async fn new(config: &cli_args::Args) -> Result<Self, String> {
         let policy = if config.follow_redirects {
             if config.follow_redirects_depth == 0 {
-                reqwest::redirect::Policy::limited(usize::MAX) // effectively unlimited
+                transport::Redirect::Limited(usize::MAX) // effectively unlimited
             } else {
-                reqwest::redirect::Policy::limited(config.follow_redirects_depth as usize)
+                transport::Redirect::Limited(config.follow_redirects_depth as usize)
             }
         } else {
-            reqwest::redirect::Policy::none()
+            transport::Redirect::None
         };
 
         let user_agent = if config.random_user_agent_scan {
@@ -117,13 +117,27 @@ impl Prober {
             }
         }
 
-        let reqwest_client = Client::builder()
-            .default_headers(headers_map)
-            .user_agent(user_agent)
-            .cookie_store(config.store_cookies)
-            .redirect(policy)
-            .build()
-            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+        // Content-discovery client via the transport layer. Config headers/cookies
+        // are app headers (always sent); the impersonate backend emulates a real
+        // browser fingerprint from the UA family. No timeout, matching the prior
+        // bare client. accept_invalid_certs stays false as before.
+        // Attribution token (Identify posture) survives emulation as an app header.
+        if let Some(token) = &config.identify {
+            if let Ok(val) = transport::HeaderValue::from_str(token) {
+                headers_map.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+            }
+        }
+        let reqwest_client = transport::build_client(transport::ClientConfig {
+            timeout: None,
+            redirect: policy,
+            accept_invalid_certs: false,
+            cookie_store: config.store_cookies,
+            user_agent: Some(user_agent),
+            browser_headers: transport::HeaderMap::new(),
+            extra_headers: headers_map,
+            emulate: config.evasive,
+        })
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
         Ok(Self {
             config: config.clone(),

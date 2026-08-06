@@ -1,0 +1,215 @@
+//! Backend-agnostic outbound HTTP transport for the Crossfyre engines.
+//!
+//! The open toolchain builds a plain `reqwest` client (rustls). Enabling the
+//! `impersonate` feature swaps the client backend for `wreq` (BoringSSL) so the
+//! Evasive path can present a real browser **TLS + HTTP/2 fingerprint**, which is
+//! the signal a WAF checks before any HTTP is sent. reqwest only lets us fix the
+//! User-Agent and headers; the handshake fingerprint needs this.
+//!
+//! ## Why this compiles cleanly for both backends
+//!
+//! reqwest and wreq both re-export the `http` and `url` crates, so `HeaderMap`,
+//! `HeaderName`, `HeaderValue`, `Method`, `StatusCode` and `Url` are the *same
+//! types* in both. Only `Client`, `ClientBuilder`, `RequestBuilder`, `Response`,
+//! `Error` and `redirect::Policy` differ, so those are re-exported from whichever
+//! backend is active and callers stay backend-agnostic. All backend-specific
+//! construction (cert handling, emulation) is confined to [`build_client`].
+//!
+//! ## Open-core boundary
+//!
+//! The *choice* of which browser to present (the per-target UA) is a trade secret
+//! and lives in the private `adaptive` drop-in (the profile catalogue). This crate
+//! only maps a browser *family* (read from the UA) to a `wreq_util::Emulation`;
+//! that mapping is not secret, the selection is.
+
+use std::time::Duration;
+
+// Backend-specific types (differ between reqwest and wreq).
+#[cfg(not(feature = "impersonate"))]
+pub use reqwest::{redirect, Client, ClientBuilder, Error, RequestBuilder, Response};
+#[cfg(feature = "impersonate")]
+pub use wreq::{redirect, Client, ClientBuilder, Error, RequestBuilder, Response};
+
+// Shared http/url types (identical regardless of backend).
+pub use reqwest::header;
+pub use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+pub use reqwest::{Method, StatusCode, Url};
+
+/// Build a [`HeaderMap`] from `(name, value)` string pairs, skipping any that
+/// fail to parse. Convenience for turning an identity's header list (from
+/// `adaptive::identity`) into `ClientConfig::browser_headers`.
+pub fn headers_from_pairs(pairs: &[(&'static str, String)]) -> HeaderMap {
+    let mut m = HeaderMap::new();
+    for (k, v) in pairs {
+        if let (Ok(name), Ok(val)) =
+            (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v))
+        {
+            m.insert(name, val);
+        }
+    }
+    m
+}
+
+/// Redirect handling for a client.
+#[derive(Clone, Copy, Debug)]
+pub enum Redirect {
+    /// Do not follow redirects (a 3xx reads as-is).
+    None,
+    /// Follow up to `n` redirects.
+    Limited(usize),
+}
+
+/// Backend-agnostic client configuration. The engines fill this from the scan
+/// params and the resolved identity; [`build_client`] applies it to whichever
+/// backend is compiled in.
+pub struct ClientConfig {
+    /// Per-request timeout. `None` = no timeout (matches a bare reqwest client).
+    pub timeout: Option<Duration>,
+    pub redirect: Redirect,
+    /// Trust invalid/self-signed certs (scanners deliberately hit such hosts).
+    pub accept_invalid_certs: bool,
+    pub cookie_store: bool,
+    /// The identity's User-Agent. Sent when NOT emulating; when emulating, the
+    /// emulation profile provides a coherent UA and this is used only to choose
+    /// the browser family.
+    pub user_agent: Option<String>,
+    /// Browser fingerprint headers (sec-ch-ua, sec-fetch, accept-language, ...).
+    /// Sent only when NOT emulating; when emulating, the profile owns these, so
+    /// sending them too would duplicate or conflict with the emulated set.
+    pub browser_headers: HeaderMap,
+    /// Application headers (auth, attribution token, template headers). Always
+    /// sent, in both the emulating and non-emulating paths.
+    pub extra_headers: HeaderMap,
+    /// Attempt browser emulation (Evasive / Identify posture). Honoured only when
+    /// the `impersonate` backend is compiled in; a no-op for the reqwest backend.
+    pub emulate: bool,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        ClientConfig {
+            timeout: Some(Duration::from_secs(30)),
+            redirect: Redirect::Limited(5),
+            accept_invalid_certs: false,
+            cookie_store: false,
+            user_agent: None,
+            browser_headers: HeaderMap::new(),
+            extra_headers: HeaderMap::new(),
+            emulate: false,
+        }
+    }
+}
+
+/// True when this build will actually emulate a browser fingerprint: the
+/// `impersonate` backend is compiled in *and* emulation was requested.
+fn will_emulate(cfg: &ClientConfig) -> bool {
+    cfg!(feature = "impersonate") && cfg.emulate
+}
+
+/// Build a client from `cfg`. All backend differences are confined here.
+pub fn build_client(cfg: ClientConfig) -> Result<Client, Error> {
+    // App headers are always sent. Browser headers + UA are sent only when we are
+    // NOT emulating (the emulation profile provides its own coherent set).
+    let mut headers = cfg.extra_headers.clone();
+    if !will_emulate(&cfg) {
+        for (k, v) in cfg.browser_headers.iter() {
+            headers.insert(k.clone(), v.clone());
+        }
+        if let Some(ua) = &cfg.user_agent {
+            if let Ok(v) = HeaderValue::from_str(ua) {
+                headers.insert(header::USER_AGENT, v);
+            }
+        }
+    }
+
+    let mut b = Client::builder().default_headers(headers);
+    if let Some(t) = cfg.timeout {
+        b = b.timeout(t);
+    }
+    b = match cfg.redirect {
+        Redirect::None => b.redirect(redirect::Policy::none()),
+        Redirect::Limited(n) => b.redirect(redirect::Policy::limited(n)),
+    };
+    if cfg.cookie_store {
+        b = b.cookie_store(true);
+    }
+
+    // Cert handling differs by backend.
+    #[cfg(not(feature = "impersonate"))]
+    if cfg.accept_invalid_certs {
+        b = b.danger_accept_invalid_certs(true);
+    }
+    #[cfg(feature = "impersonate")]
+    {
+        if cfg.accept_invalid_certs {
+            b = b.cert_verification(false).verify_hostname(false);
+        }
+        if cfg.emulate {
+            if let Some(em) = emulation_for_ua(cfg.user_agent.as_deref()) {
+                b = b.emulation(em);
+            }
+        }
+    }
+
+    b.build()
+}
+
+/// Map the identity's User-Agent to a `wreq_util` emulation profile by browser
+/// family. The family variety across targets comes from the private catalogue's
+/// per-target UA choice; only the family -> profile mapping is here (public).
+#[cfg(feature = "impersonate")]
+fn emulation_for_ua(ua: Option<&str>) -> Option<wreq_util::Emulation> {
+    use wreq_util::Emulation::*;
+    let ua = ua?;
+    Some(if ua.contains("Firefox/") {
+        Firefox139
+    } else if ua.contains("Edg/") {
+        Edge134
+    } else if ua.contains("Version/") && ua.contains("Safari/") && !ua.contains("Chrome/") {
+        Safari18_5
+    } else if ua.contains("Chrome/") {
+        Chrome137
+    } else {
+        return None;
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ua(s: &str) -> ClientConfig {
+        ClientConfig { user_agent: Some(s.into()), emulate: true, ..Default::default() }
+    }
+
+    #[test]
+    fn builds_in_both_backends() {
+        let c = build_client(ClientConfig {
+            accept_invalid_certs: true,
+            cookie_store: true,
+            user_agent: Some(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+                    .into(),
+            ),
+            emulate: true,
+            ..Default::default()
+        });
+        assert!(c.is_ok(), "build failed: {:?}", c.err());
+    }
+
+    #[test]
+    fn will_emulate_tracks_feature_and_flag() {
+        assert_eq!(will_emulate(&ua("x")), cfg!(feature = "impersonate"));
+        assert!(!will_emulate(&ClientConfig { emulate: false, ..Default::default() }));
+    }
+
+    #[cfg(feature = "impersonate")]
+    #[test]
+    fn ua_maps_to_browser_family() {
+        assert!(emulation_for_ua(Some("... Chrome/138.0.0.0 Safari/537.36")).is_some());
+        assert!(emulation_for_ua(Some("... rv:139.0) Gecko/20100101 Firefox/139.0")).is_some());
+        assert!(emulation_for_ua(Some("... Version/18.5 Safari/605.1.15")).is_some());
+        assert!(emulation_for_ua(None).is_none());
+    }
+}

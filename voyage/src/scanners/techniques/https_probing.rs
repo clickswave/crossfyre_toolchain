@@ -1,7 +1,7 @@
 use crate::scanners::active_scan::NegativeResult;
 
 pub async fn execute(
-    reqwest_client: &reqwest::Client,
+    reqwest_client: &transport::Client,
     domain: &String,
     ports: &[u16],
 ) -> Result<(), Vec<NegativeResult>> {

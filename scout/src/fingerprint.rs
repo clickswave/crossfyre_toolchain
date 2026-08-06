@@ -4,7 +4,7 @@
 //! shared asset graph.
 
 use crate::signatures;
-use reqwest::Client;
+use transport::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::LazyLock;
@@ -14,6 +14,14 @@ use tokio::sync::mpsc;
 pub struct FpParams {
     /// Target URL or host[:port].
     pub target: String,
+    /// Evasiveness posture (set by the node's Evasiveness switch): blend in as a
+    /// browser (true, default) vs a neutral honest client (false).
+    #[serde(default = "d_true")]
+    pub evasive: bool,
+    /// Attribution token: when set, advertise it so an authorized program can
+    /// allow-list the traffic.
+    #[serde(default)]
+    pub identify: Option<String>,
     #[serde(default = "d_timeout")]
     pub timeout_ms: u64,
     #[serde(default = "d_true")]
@@ -81,22 +89,39 @@ pub async fn run(params: FpParams, tx: mpsc::UnboundedSender<Value>) {
         }
     };
 
-    let mut builder = Client::builder()
-        .timeout(std::time::Duration::from_millis(
-            params.timeout_ms.clamp(1000, 120_000),
-        ))
-        .redirect(if params.follow_redirects {
-            reqwest::redirect::Policy::limited(5)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
-        .danger_accept_invalid_certs(true)
-        .cookie_store(true)
-        .user_agent("Mozilla/5.0 (compatible; scout/0.1; +https://clickswave.org)");
+    // Present a coherent browser via the transport layer: the reqwest backend
+    // sends UA + hint headers; the impersonate (wreq) backend presents a real
+    // browser TLS/HTTP2 fingerprint (the profile owns the fingerprint headers).
+    // Fast posture skips emulation. Profile choice = the private `adaptive` drop-in.
+    let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
+    let ident = adaptive::identity::resolve(&mode, Some(params.target.as_str()));
+    let mut extra_headers = transport::HeaderMap::new();
     if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
-        builder = builder.default_headers(auth.to_header_map());
+        for (k, v) in auth.to_header_map().iter() {
+            extra_headers.insert(k.clone(), v.clone());
+        }
     }
-    let client = match builder.build() {
+    if let adaptive::identity::Mode::Identify(token) = &mode {
+        if let Ok(val) = transport::HeaderValue::from_str(token) {
+            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+        }
+    }
+    let client = match transport::build_client(transport::ClientConfig {
+        timeout: Some(std::time::Duration::from_millis(
+            params.timeout_ms.clamp(1000, 120_000),
+        )),
+        redirect: if params.follow_redirects {
+            transport::Redirect::Limited(5)
+        } else {
+            transport::Redirect::None
+        },
+        accept_invalid_certs: true,
+        cookie_store: true,
+        user_agent: Some(ident.user_agent.clone()),
+        browser_headers: transport::headers_from_pairs(&ident.headers),
+        extra_headers,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+    }) {
         Ok(c) => c,
         Err(e) => {
             let _ = tx.send(json!({"type":"error","message":format!("client build failed: {e}")}));
@@ -262,11 +287,11 @@ fn extract_title(body: &str) -> Option<String> {
 /// for fingerprinting a page or hashing a favicon.
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 
-async fn read_body_capped(resp: reqwest::Response) -> String {
+async fn read_body_capped(resp: transport::Response) -> String {
     String::from_utf8_lossy(&read_bytes_capped(resp).await).into_owned()
 }
 
-async fn read_bytes_capped(mut resp: reqwest::Response) -> Vec<u8> {
+async fn read_bytes_capped(mut resp: transport::Response) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     while buf.len() < MAX_BODY_BYTES {
         match resp.chunk().await {

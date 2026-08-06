@@ -1,6 +1,6 @@
 [package]
 name = "mach"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2024"
 homepage = "https://clickswave.org"
 repository = "https://github.com/clickswave/crossfyre_toolchain"
@@ -15,17 +15,21 @@ authors = ["Clickswave <team@clickswave.org>"]
 # name, so an empty declaration here enables our `#[cfg(feature = "tuning")]`
 # blocks while leaving the items they reference compiled out of the dependency.
 tuning = ["cfx_tui/tuning"]
+# First-party builds enable this to swap the scan client to wreq (BoringSSL) for
+# real browser TLS/HTTP2 fingerprints. Off by default (open build stays reqwest).
+impersonate = ["transport/impersonate"]
 
 [dependencies]
 adaptive = { path = "../adaptive" }
+transport = { path = "../transport" }
 tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util"] }
 clap = { version = "4.5.42", features = ["derive"] }
 whoami = { version = "2.0.0-pre.2", features = [] }
 serde = { version = "1.0.219", features = ["derive"] }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "chrono"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
 sha2 = "0.10.9"
 serde_json = { version = "1.0.142", features = [] }
-reqwest = { version = "0.12.22", features = ["cookies"] }
+reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "http2", "charset", "cookies"] }
 cfx_tui = { path = "../tui" }
 ratatui = { version = "0.30.0-alpha.5", features = ["crossterm"] }
 crossterm = "0.29.0"

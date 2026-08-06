@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "0.0.7"
+version = "0.0.8"
 edition = "2024"
 homepage = "https://clickswave.org"
 repository = "https://github.com/clickswave/crossfyre_toolchain"
@@ -15,7 +15,9 @@ clap = { version = "4.5.42", features = ["derive"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 serde_yaml = "0.9"
-reqwest = { version = "0.12.22", features = ["cookies", "gzip", "json"] }
+adaptive = { path = "../adaptive" }
+transport = { path = "../transport" }
+reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "http2", "charset", "cookies", "gzip", "json"] }
 # Raw HTTP/1.1 sender for `unsafe` templates: reqwest normalises dot-segments in
 # the path before sending, which defeats path-traversal probes (CVE-2021-41773).
 # These let us open a socket and write the request-target verbatim. aws-lc-rs is
@@ -30,3 +32,9 @@ rand = "0.8"
 base64 = "0.22"
 regex = "1"
 uuid = { version = "1.18.0", features = ["v4"] }
+
+[features]
+# First-party builds enable this to swap the outward scan client to wreq
+# (BoringSSL) for real browser TLS/HTTP2 fingerprints. Off by default so the open
+# build stays on reqwest (rustls, no C toolchain, no emulation policy shipped).
+impersonate = ["transport/impersonate"]

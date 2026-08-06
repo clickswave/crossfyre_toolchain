@@ -16,7 +16,7 @@
 //! pages are never counted as success.
 
 use crate::engine::AuthSpec;
-use reqwest::Client;
+use transport::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::hash_map::DefaultHasher;
@@ -39,6 +39,17 @@ pub struct AuthzParams {
     /// per the plan's safety rails.
     #[serde(default)]
     pub test_writes: bool,
+    /// Evasiveness posture (from the node switch): blend in as a browser (true,
+    /// default) vs a neutral honest client (false).
+    #[serde(default = "d_true")]
+    pub evasive: bool,
+    /// Attribution token: when set, advertise it so an authorized program can
+    /// allow-list the traffic.
+    #[serde(default)]
+    pub identify: Option<String>,
+}
+fn d_true() -> bool {
+    true
 }
 fn d_timeout() -> u64 {
     10_000
@@ -104,19 +115,53 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
 
     // One client per identity, carrying that identity's auth as default headers.
     // Redirects are NOT followed so a 302 to a login page reads as "denied".
+    // One coherent browser identity for the whole authz run; each per-auth
+    // client carries it plus that auth identity's headers.
+    let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
+    let seed = (!params.target.is_empty()).then_some(params.target.as_str());
+    let browser = adaptive::identity::resolve(&mode, seed);
+    let emulate = !matches!(mode, adaptive::identity::Mode::Fast);
+    // Attribution token (Identify posture) is an app header that must survive
+    // emulation, so it is added to each client's extra headers below.
+    let identify_token = if let adaptive::identity::Mode::Identify(t) = &mode {
+        transport::HeaderValue::from_str(t).ok()
+    } else {
+        None
+    };
     let mut clients: Vec<(Identity, Client)> = Vec::new();
     for id in &params.identities {
-        let mut b = Client::builder()
-            .timeout(Duration::from_millis(
-                params.timeout_ms.clamp(1000, 120_000),
-            ))
-            .redirect(reqwest::redirect::Policy::none())
-            .danger_accept_invalid_certs(true)
-            .user_agent("Mozilla/5.0 (compatible; cortex-authz/0.1; +https://clickswave.org)");
-        if id.auth.is_meaningful() {
-            b = b.default_headers(id.auth.to_header_map());
+        let mut browser_headers = transport::HeaderMap::new();
+        for (k, v) in &browser.headers {
+            if let (Ok(name), Ok(val)) = (
+                transport::HeaderName::from_bytes(k.as_bytes()),
+                transport::HeaderValue::from_str(v),
+            ) {
+                browser_headers.insert(name, val);
+            }
         }
-        match b.build() {
+        let mut extra_headers = transport::HeaderMap::new();
+        if id.auth.is_meaningful() {
+            for (k, v) in id.auth.to_header_map().iter() {
+                extra_headers.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(tok) = &identify_token {
+            extra_headers.insert(
+                transport::HeaderName::from_static("x-bug-bounty"),
+                tok.clone(),
+            );
+        }
+        let built = transport::build_client(transport::ClientConfig {
+            timeout: Some(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000))),
+            redirect: transport::Redirect::None,
+            accept_invalid_certs: true,
+            cookie_store: false,
+            user_agent: Some(browser.user_agent.clone()),
+            browser_headers,
+            extra_headers,
+            emulate,
+        });
+        match built {
             Ok(c) => clients.push((id.clone(), c)),
             Err(e) => {
                 let _ =

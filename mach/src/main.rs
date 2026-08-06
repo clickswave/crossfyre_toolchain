@@ -80,7 +80,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             append_slash: false,
             save_response_body: false,
             save_response_headers: false,
-            user_agent: format!("mach/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None)
+                .user_agent,
+            evasive: true,
+            identify: None,
             no_exit_banner: true,
             recreate_db: false,
             launch_delay: 0,
