@@ -8,7 +8,7 @@
 //! implementation is the documented next step (docs/tier1-engines-plan.md s6).
 
 use regex::Regex;
-use reqwest::Client;
+use transport::Client;
 use serde::Deserialize;
 use std::sync::LazyLock;
 

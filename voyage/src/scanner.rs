@@ -33,6 +33,10 @@ pub struct EnumConfig {
     pub adaptive_resilience: bool,
     /// Controller posture: stealth | balanced | throughput.
     pub posture: String,
+    /// Evasiveness posture: present as a real browser (default) vs neutral.
+    pub evasive: bool,
+    /// Attribution token for authorized programs (sent as X-Bug-Bounty).
+    pub identify: Option<String>,
 }
 
 /// Events streamed from the daemon to the enum client over TCP.
@@ -245,11 +249,19 @@ async fn task_handle(
         config.active_user_agent.clone()
     };
 
-    let client = match reqwest::Client::builder()
-        .user_agent(&user_agent)
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
+    let mut extra_headers = transport::HeaderMap::new();
+    if let Some(token) = &config.identify {
+        if let Ok(val) = transport::HeaderValue::from_str(token) {
+            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+        }
+    }
+    let client = match transport::build_client(transport::ClientConfig {
+        timeout: Some(Duration::from_secs(10)),
+        user_agent: Some(user_agent.clone()),
+        emulate: config.evasive,
+        extra_headers,
+        ..Default::default()
+    }) {
         Ok(c) => c,
         Err(e) => {
             emit_log(
@@ -472,11 +484,19 @@ async fn adaptive_task_handle(
     } else {
         config.active_user_agent.clone()
     };
-    let client = match reqwest::Client::builder()
-        .user_agent(&user_agent)
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
+    let mut extra_headers = transport::HeaderMap::new();
+    if let Some(token) = &config.identify {
+        if let Ok(val) = transport::HeaderValue::from_str(token) {
+            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+        }
+    }
+    let client = match transport::build_client(transport::ClientConfig {
+        timeout: Some(Duration::from_secs(10)),
+        user_agent: Some(user_agent.clone()),
+        emulate: config.evasive,
+        extra_headers,
+        ..Default::default()
+    }) {
         Ok(c) => c,
         Err(e) => {
             emit_log(

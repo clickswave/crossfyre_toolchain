@@ -125,11 +125,11 @@ pub struct ScanArgs {
     pub https_probing_port: Vec<u16>,
 
     /// User agent for active enumeration requests
-    #[arg(long, default_value_t = format!("voyage/{}", env!("CARGO_PKG_VERSION")))]
+    #[arg(long, default_value_t = adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None).user_agent)]
     pub active_user_agent: String,
 
     /// User agent for passive enumeration requests
-    #[arg(long, default_value_t = format!("voyage/{}", env!("CARGO_PKG_VERSION")))]
+    #[arg(long, default_value_t = adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None).user_agent)]
     pub passive_user_agent: String,
 
     /// Randomize user agent per active request

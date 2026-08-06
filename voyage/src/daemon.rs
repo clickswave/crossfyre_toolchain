@@ -40,6 +40,12 @@ struct DaemonResponse {
 #[derive(Debug, Deserialize, Clone)]
 struct EnumParams {
     domain: String,
+    /// Evasiveness posture: present as a real browser (default) vs neutral.
+    #[serde(default = "default_true")]
+    evasive: bool,
+    /// Attribution token for authorized programs (sent as X-Bug-Bounty).
+    #[serde(default)]
+    identify: Option<String>,
     #[serde(default)]
     wordlist: String,
     #[serde(default = "default_tasks")]
@@ -84,6 +90,10 @@ struct EnumParams {
 
 fn default_posture() -> String {
     "balanced".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_tasks() -> usize {
@@ -538,6 +548,8 @@ async fn prepare_enum(
         adaptive_rate: params.adaptive_rate,
         adaptive_resilience: params.adaptive_resilience,
         posture: params.posture.clone(),
+        evasive: params.evasive,
+        identify: params.identify.clone(),
     };
 
     let scanner = Scanner::new(config, Arc::clone(db));

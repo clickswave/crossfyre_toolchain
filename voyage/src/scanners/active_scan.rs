@@ -1,6 +1,6 @@
 use crate::scanners::techniques;
 use hickory_resolver::TokioResolver;
-use reqwest::Client;
+use transport::Client;
 
 pub struct NegativeResult {
     pub level: String,

@@ -28,7 +28,12 @@ pub async fn handle(
         true => libs::rng::user_agent(),
         false => args.active_user_agent.clone(),
     };
-    let client = match reqwest::Client::builder().user_agent(user_agent).build() {
+    let client = match transport::build_client(transport::ClientConfig {
+        timeout: None,
+        user_agent: Some(user_agent),
+        emulate: true,
+        ..Default::default()
+    }) {
         Ok(client) => client,
         Err(e) => {
             let _ = libs::sqlite::insert_log(

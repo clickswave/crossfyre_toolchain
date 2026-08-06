@@ -1,7 +1,7 @@
 use crate::libs::cli_args::{Args, HttpMethod, LogLevel, OutputFormat};
 use crate::libs::mach_db::MachDb;
 use crate::scanner::{Scanner, StreamEvent};
-use reqwest::Client;
+use transport::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -81,8 +81,18 @@ struct ScanParams {
     /// Optional request auth for an authenticated scan: custom headers plus a
     /// Cookie string, resolved from a credential by the node. Absent for an
     /// anonymous scan.
+    /// Evasiveness posture: present as a real browser (default) vs neutral.
+    #[serde(default = "default_evasive")]
+    evasive: bool,
+    /// Attribution token for authorized programs (sent as X-Bug-Bounty).
+    #[serde(default)]
+    identify: Option<String>,
     #[serde(default)]
     auth: ScanAuth,
+}
+
+fn default_evasive() -> bool {
+    true
 }
 
 /// Auth applied to every probe in an authenticated content-discovery scan. Same
@@ -166,22 +176,32 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
     println!("Mach daemon listening on port {port}");
 
     let db = Arc::new(db);
-    let probe_client = Arc::new(
-        Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .user_agent(format!("mach/{}", env!("CARGO_PKG_VERSION")))
-            .build()?,
-    );
+    let probe_client = Arc::new(transport::build_client(transport::ClientConfig {
+        timeout: Some(std::time::Duration::from_secs(10)),
+        redirect: transport::Redirect::Limited(10),
+        accept_invalid_certs: false,
+        cookie_store: false,
+        user_agent: Some(
+            adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None).user_agent,
+        ),
+        browser_headers: transport::HeaderMap::new(),
+        extra_headers: transport::HeaderMap::new(),
+        emulate: true,
+    })?);
     // Second client that does NOT follow redirects, for the wizard's
     // "Follow Redirects = off" probes (reqwest sets redirect policy per-client).
-    let probe_client_noredirect = Arc::new(
-        Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(format!("mach/{}", env!("CARGO_PKG_VERSION")))
-            .build()?,
-    );
+    let probe_client_noredirect = Arc::new(transport::build_client(transport::ClientConfig {
+        timeout: Some(std::time::Duration::from_secs(10)),
+        redirect: transport::Redirect::None,
+        accept_invalid_certs: false,
+        cookie_store: false,
+        user_agent: Some(
+            adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None).user_agent,
+        ),
+        browser_headers: transport::HeaderMap::new(),
+        extra_headers: transport::HeaderMap::new(),
+        emulate: true,
+    })?);
 
     // Background task: delete expired probe_results every 5 minutes
     {
@@ -760,7 +780,8 @@ fn build_args(params: &ScanParams, endpoint: String, http_method: HttpMethod) ->
         append_slash: false,
         save_response_body: false,
         save_response_headers: true,
-        user_agent: format!("mach/{}", env!("CARGO_PKG_VERSION")),
+        user_agent: adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None)
+            .user_agent,
         no_exit_banner: true,
         recreate_db: false,
         launch_delay: 0,
@@ -773,6 +794,8 @@ fn build_args(params: &ScanParams, endpoint: String, http_method: HttpMethod) ->
         adaptive_rate: params.adaptive_rate,
         adaptive_resilience: params.adaptive_resilience,
         posture: params.posture.clone(),
+        evasive: params.evasive,
+        identify: params.identify.clone(),
     }
 }
 

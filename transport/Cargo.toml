@@ -1,0 +1,19 @@
+[package]
+name = "transport"
+version = "0.1.0"
+edition = "2021"
+description = "Backend-agnostic outbound HTTP client for the Crossfyre engines. Default = reqwest (rustls). The `impersonate` feature swaps in wreq (BoringSSL) for browser TLS/HTTP2 fingerprint parity."
+
+[dependencies]
+# Default backend. Always compiled so the shared http/url types are available.
+reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "http2", "charset", "cookies", "gzip", "json"] }
+
+# Impersonation backend (BoringSSL). Optional so the open build never requires a
+# C toolchain and never ships the emulation policy.
+wreq = { version = "5", optional = true, features = ["cookies", "gzip", "json"] }
+wreq-util = { version = "2", optional = true }
+
+[features]
+# Off by default: the open toolchain builds a plain reqwest client. First-party
+# distribution enables this to get real browser TLS/HTTP2 fingerprints.
+impersonate = ["dep:wreq", "dep:wreq-util"]

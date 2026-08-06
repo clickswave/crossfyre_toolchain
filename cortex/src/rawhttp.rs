@@ -97,7 +97,10 @@ fn build_request(req: &RawReq, host: &str, port: u16, https: bool, target: &str)
             .any(|(k, _)| k.eq_ignore_ascii_case(name))
     };
     if !have("user-agent") {
-        s.push_str("User-Agent: Mozilla/5.0 (compatible; cortex/0.1; +https://clickswave.org)\r\n");
+        s.push_str(&format!(
+            "User-Agent: {}\r\n",
+            adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, Some(host)).user_agent
+        ));
     }
     if !have("accept") {
         s.push_str("Accept: */*\r\n");

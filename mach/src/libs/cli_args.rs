@@ -206,8 +206,16 @@ pub struct ScanArgs {
     pub save_response_headers: bool,
 
     /// User agent string
-    #[arg(long, default_value_t = format!("mach/{}", env!("CARGO_PKG_VERSION")))]
+    #[arg(long, default_value_t = adaptive::identity::resolve(&adaptive::identity::Mode::Evasive, None).user_agent)]
     pub user_agent: String,
+
+    /// Present as a real browser (evasive, default) vs a neutral honest client.
+    #[arg(long, default_value_t = true)]
+    pub evasive: bool,
+
+    /// Attribution token for authorized programs (sent as X-Bug-Bounty).
+    #[arg(long)]
+    pub identify: Option<String>,
 
     /// Suppress exit banner
     #[arg(long, default_value_t = false)]

@@ -12,7 +12,8 @@
 //! "Deep" tier and is intentionally not implemented here yet.
 
 use regex::Regex;
-use reqwest::{Client, Url};
+use reqwest::Url;
+use transport::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::sync::LazyLock;
@@ -27,6 +28,14 @@ use tokio::sync::mpsc;
 pub struct CrawlParams {
     /// Seed URL or host to start from.
     pub seed: String,
+    /// Evasiveness posture (from the node switch): blend in as a browser (true,
+    /// default) vs a neutral honest client (false).
+    #[serde(default = "d_true")]
+    pub evasive: bool,
+    /// Attribution token: when set, advertise it so an authorized program can
+    /// allow-list the traffic.
+    #[serde(default)]
+    pub identify: Option<String>,
     /// Restrict to the seed's exact host. Default true.
     #[serde(default = "d_true")]
     pub same_host: bool,
@@ -275,19 +284,29 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
     };
     let seed_host = seed.host_str().unwrap_or_default().to_lowercase();
 
-    let mut builder = Client::builder()
-        .timeout(std::time::Duration::from_millis(
-            params.timeout_ms.max(1000),
-        ))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .cookie_store(true)
-        .danger_accept_invalid_certs(true)
-        .user_agent(format!("mach-crawl/{}", env!("CARGO_PKG_VERSION")));
-    // Authenticated crawl: attach resolved credential auth to every request.
+    let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
+    let ident = adaptive::identity::resolve(&mode, Some(&seed_host));
+    let mut extra_headers = transport::HeaderMap::new();
     if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
-        builder = builder.default_headers(auth.to_header_map());
+        for (k, v) in auth.to_header_map().iter() {
+            extra_headers.insert(k.clone(), v.clone());
+        }
     }
-    let client = match builder.build() {
+    if let adaptive::identity::Mode::Identify(token) = &mode {
+        if let Ok(val) = transport::HeaderValue::from_str(token) {
+            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+        }
+    }
+    let client = match transport::build_client(transport::ClientConfig {
+        timeout: Some(std::time::Duration::from_millis(params.timeout_ms.max(1000))),
+        redirect: transport::Redirect::Limited(5),
+        accept_invalid_certs: true,
+        cookie_store: true,
+        user_agent: Some(ident.user_agent.clone()),
+        browser_headers: transport::headers_from_pairs(&ident.headers),
+        extra_headers,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+    }) {
         Ok(c) => c,
         Err(e) => {
             let _ = tx.send(CrawlEvent::error(format!("client build failed: {e}")));
