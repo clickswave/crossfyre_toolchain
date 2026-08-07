@@ -1,13 +1,13 @@
 use crate::libs::cli_args::{Args, HttpMethod, LogLevel, OutputFormat};
 use crate::libs::mach_db::MachDb;
 use crate::scanner::{Scanner, StreamEvent};
-use transport::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream, tcp::OwnedWriteHalf};
 use tokio::sync::mpsc;
+use transport::Client;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------

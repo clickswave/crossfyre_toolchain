@@ -71,10 +71,9 @@ pub fn resolve(mode: &Mode, _seed: Option<&str>) -> Identity {
 /// One current desktop-Chrome identity with a coherent navigation header set.
 fn chrome_desktop() -> Identity {
     Identity {
-        user_agent:
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
              (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
-                .to_string(),
+            .to_string(),
         headers: vec![
             (
                 "Accept",
@@ -122,10 +121,11 @@ mod tests {
     #[test]
     fn identify_advertises_the_token() {
         let id = resolve(&Mode::Identify("h1-handle".into()), None);
-        assert!(id
-            .headers
-            .iter()
-            .any(|(k, v)| *k == "X-Bug-Bounty" && v == "h1-handle"));
+        assert!(
+            id.headers
+                .iter()
+                .any(|(k, v)| *k == "X-Bug-Bounty" && v == "h1-handle")
+        );
     }
 
     #[test]
@@ -133,7 +133,10 @@ mod tests {
         assert!(matches!(Mode::from_flags(true, None), Mode::Evasive));
         assert!(matches!(Mode::from_flags(false, None), Mode::Fast));
         // An empty token is ignored (falls back to the evasive flag).
-        assert!(matches!(Mode::from_flags(true, Some(String::new())), Mode::Evasive));
+        assert!(matches!(
+            Mode::from_flags(true, Some(String::new())),
+            Mode::Evasive
+        ));
         match Mode::from_flags(false, Some("h1".into())) {
             Mode::Identify(t) => assert_eq!(t, "h1"),
             other => panic!("identify token should win, got {other:?}"),

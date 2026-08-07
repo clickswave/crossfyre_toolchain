@@ -41,9 +41,10 @@ pub use reqwest::{Method, StatusCode, Url};
 pub fn headers_from_pairs(pairs: &[(&'static str, String)]) -> HeaderMap {
     let mut m = HeaderMap::new();
     for (k, v) in pairs {
-        if let (Ok(name), Ok(val)) =
-            (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v))
-        {
+        if let (Ok(name), Ok(val)) = (
+            HeaderName::from_bytes(k.as_bytes()),
+            HeaderValue::from_str(v),
+        ) {
             m.insert(name, val);
         }
     }
@@ -179,7 +180,11 @@ mod tests {
     use super::*;
 
     fn ua(s: &str) -> ClientConfig {
-        ClientConfig { user_agent: Some(s.into()), emulate: true, ..Default::default() }
+        ClientConfig {
+            user_agent: Some(s.into()),
+            emulate: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -201,7 +206,10 @@ mod tests {
     #[test]
     fn will_emulate_tracks_feature_and_flag() {
         assert_eq!(will_emulate(&ua("x")), cfg!(feature = "impersonate"));
-        assert!(!will_emulate(&ClientConfig { emulate: false, ..Default::default() }));
+        assert!(!will_emulate(&ClientConfig {
+            emulate: false,
+            ..Default::default()
+        }));
     }
 
     #[cfg(feature = "impersonate")]
