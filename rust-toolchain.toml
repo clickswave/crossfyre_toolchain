@@ -1,0 +1,18 @@
+# Pin the toolchain to the one CI actually enforces.
+#
+# All three code jobs in .github/workflows/ci.yml (build+test, rustfmt, clippy)
+# install 1.88.0 and make it the default. Without this file, local `cargo fmt`
+# uses whatever toolchain the machine defaults to, and rustfmt's output is not
+# stable across versions: a newer rustfmt packs struct literals and `if let`
+# tuples onto one line where 1.88.0 breaks them apart. Formatting locally on a
+# newer toolchain therefore produced a workspace that `cargo fmt --check` on
+# 1.88.0 rejected, which is exactly how the rustfmt job went red across ten
+# files without anyone touching the code.
+#
+# Pinning here means `cargo fmt`, `cargo clippy` and `cargo check` all reproduce
+# CI locally with no `+1.88.0` prefix to remember. rustup installs the toolchain
+# on first use.
+[toolchain]
+channel = "1.88.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

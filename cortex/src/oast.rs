@@ -12,12 +12,12 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use base64::Engine as _;
-use transport::Client;
 use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
 use serde_json::{Value, json};
 use sha2::Sha256;
 use std::time::Duration;
+use transport::Client;
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)

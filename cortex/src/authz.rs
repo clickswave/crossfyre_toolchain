@@ -16,13 +16,13 @@
 //! pages are never counted as success.
 
 use crate::engine::AuthSpec;
-use transport::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use transport::Client;
 
 #[derive(Debug, Deserialize)]
 pub struct AuthzParams {
@@ -152,7 +152,9 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
             );
         }
         let built = transport::build_client(transport::ClientConfig {
-            timeout: Some(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000))),
+            timeout: Some(Duration::from_millis(
+                params.timeout_ms.clamp(1000, 120_000),
+            )),
             redirect: transport::Redirect::None,
             accept_invalid_certs: true,
             cookie_store: false,

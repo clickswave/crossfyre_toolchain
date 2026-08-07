@@ -13,11 +13,11 @@
 
 use regex::Regex;
 use reqwest::Url;
-use transport::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
+use transport::Client;
 
 // ---------------------------------------------------------------------------
 // Wire types
@@ -298,7 +298,9 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
         }
     }
     let client = match transport::build_client(transport::ClientConfig {
-        timeout: Some(std::time::Duration::from_millis(params.timeout_ms.max(1000))),
+        timeout: Some(std::time::Duration::from_millis(
+            params.timeout_ms.max(1000),
+        )),
         redirect: transport::Redirect::Limited(5),
         accept_invalid_certs: true,
         cookie_store: true,

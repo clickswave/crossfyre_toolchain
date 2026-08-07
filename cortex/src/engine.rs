@@ -8,11 +8,11 @@
 //! API mode are the documented next milestones (docs/tier1-engines-plan.md).
 
 use crate::template;
-use transport::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use transport::Client;
 
 #[derive(Debug, Deserialize)]
 pub struct ScanParams {
@@ -144,7 +144,9 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     }
 
     let client = match transport::build_client(transport::ClientConfig {
-        timeout: Some(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000))),
+        timeout: Some(Duration::from_millis(
+            params.timeout_ms.clamp(1000, 120_000),
+        )),
         redirect: if params.follow_redirects {
             transport::Redirect::Limited(5)
         } else {
