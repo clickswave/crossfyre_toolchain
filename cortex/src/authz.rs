@@ -162,6 +162,7 @@ pub async fn run(params: AuthzParams, tx: mpsc::UnboundedSender<Value>) {
             browser_headers,
             extra_headers,
             emulate,
+            resolve: Vec::new(),
         });
         match built {
             Ok(c) => clients.push((id.clone(), c)),

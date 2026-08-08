@@ -308,6 +308,7 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
         browser_headers: transport::headers_from_pairs(&ident.headers),
         extra_headers,
         emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+        resolve: Vec::new(),
     }) {
         Ok(c) => c,
         Err(e) => {
