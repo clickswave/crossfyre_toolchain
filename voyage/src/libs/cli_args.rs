@@ -59,6 +59,27 @@ pub enum Commands {
     Db(DbArgs),
     /// Probe a single subdomain instantly (no TUI - for high-volume scripted use)
     ScanExec(ScanExecArgs),
+    /// Discover a target's real origin IP behind a CDN/WAF
+    Origin(OriginArgs),
+}
+
+#[derive(ClapArgs, Clone, Debug)]
+pub struct OriginArgs {
+    /// Target apex domain (e.g. example.com)
+    #[arg(short, long)]
+    pub domain: String,
+
+    /// Per-request timeout in ms
+    #[arg(long, default_value_t = 12000)]
+    pub timeout: u64,
+
+    /// Disable browser impersonation for the origin probes
+    #[arg(long, default_value_t = false)]
+    pub no_evasive: bool,
+
+    /// Emit findings as JSON instead of human-readable text
+    #[arg(long, default_value_t = false)]
+    pub json: bool,
 }
 
 #[derive(ClapArgs, Clone, Debug)]

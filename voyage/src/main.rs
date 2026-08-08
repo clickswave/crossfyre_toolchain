@@ -1,4 +1,4 @@
-use crate::libs::cli_args::{Cli, Commands, DbArgs, ScanExecArgs};
+use crate::libs::cli_args::{Cli, Commands, DbArgs, OriginArgs, ScanExecArgs};
 use crate::scanner::StreamEvent;
 use clap::Parser;
 use serde::Deserialize;
@@ -81,11 +81,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // -----------------------------------------------------------------------
+    // Origin subcommand - self-contained origin discovery (no daemon needed)
+    // -----------------------------------------------------------------------
+    if let Some(Commands::Origin(origin_args)) = &cli.command {
+        return handle_origin(origin_args.clone()).await;
+    }
+
+    // -----------------------------------------------------------------------
     // Scan subcommand - client that talks to the running daemon
     // -----------------------------------------------------------------------
     let mut enum_args = match cli.command {
         Some(Commands::Scan(args)) => args,
-        Some(Commands::ScanExec(_)) | Some(Commands::Db(_)) | None => {
+        Some(Commands::ScanExec(_)) | Some(Commands::Db(_)) | Some(Commands::Origin(_)) | None => {
             eprintln!(
                 "No command given. Use `voyage scan`, `voyage scan-exec`, `voyage db`, or `voyage --daemon`. Try --help."
             );
@@ -214,6 +221,47 @@ async fn handle_db(args: DbArgs, port: u16) -> Result<(), Box<dyn std::error::Er
         match resp["status"].as_str().unwrap_or("error") {
             "completed" => println!("{}", resp["message"].as_str().unwrap_or("Done.")),
             _ => eprintln!("Error: {}", resp["message"].as_str().unwrap_or("unknown")),
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_origin(args: OriginArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if args.domain.trim().is_empty() {
+        eprintln!("Error: --domain is required");
+        std::process::exit(1);
+    }
+
+    let log = |line: String| eprintln!("  {line}");
+    let findings =
+        scanners::origin::discover(&args.domain, args.timeout, !args.no_evasive, &log).await;
+
+    if args.json {
+        let arr: Vec<serde_json::Value> = findings
+            .iter()
+            .map(|f| {
+                serde_json::json!({
+                    "ip": f.ip.to_string(),
+                    "host": f.host,
+                    "confidence": f.confidence,
+                    "note": f.note,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&arr)?);
+    } else if findings.is_empty() {
+        println!(
+            "\nNo origin candidates found behind the CDN for {}.",
+            args.domain
+        );
+    } else {
+        println!("\nOrigin candidates for {}:", args.domain);
+        for f in &findings {
+            println!(
+                "  [{}] {} (via {}) - {}",
+                f.confidence, f.ip, f.host, f.note
+            );
         }
     }
 

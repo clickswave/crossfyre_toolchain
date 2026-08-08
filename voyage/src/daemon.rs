@@ -112,6 +112,21 @@ fn default_passive_ua() -> String {
     format!("voyage/{}", env!("CARGO_PKG_VERSION"))
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct OriginParams {
+    domain: String,
+    /// Present as a real browser for the origin probes (default on).
+    #[serde(default = "default_true")]
+    evasive: bool,
+    /// Per-request timeout in ms.
+    #[serde(default = "default_origin_timeout")]
+    timeout_ms: u64,
+}
+
+fn default_origin_timeout() -> u64 {
+    12000
+}
+
 #[derive(Debug, Deserialize)]
 struct ProbeParams {
     operation_id: String,
@@ -416,6 +431,44 @@ async fn dispatch(req: DaemonRequest, db: Arc<VoyageDb>) -> DaemonResponse {
                 }
             };
             run_probe(probe_params, db).await
+        }
+        "origin" => {
+            let params: OriginParams = match serde_json::from_value(req.params.clone()) {
+                Ok(p) => p,
+                Err(e) => {
+                    return DaemonResponse {
+                        operation_id,
+                        status: "error".to_string(),
+                        results: None,
+                        message: Some(format!("Invalid origin params: {e}")),
+                    };
+                }
+            };
+            let noop = |_: String| {};
+            let findings = crate::scanners::origin::discover(
+                &params.domain,
+                params.timeout_ms,
+                params.evasive,
+                &noop,
+            )
+            .await;
+            let results: Vec<Value> = findings
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "ip": f.ip.to_string(),
+                        "host": f.host,
+                        "confidence": f.confidence,
+                        "note": f.note,
+                    })
+                })
+                .collect();
+            DaemonResponse {
+                operation_id,
+                status: "completed".to_string(),
+                results: Some(Value::Array(results)),
+                message: None,
+            }
         }
         "db_reset" => match db.truncate_tables().await {
             Ok(_) => DaemonResponse {
