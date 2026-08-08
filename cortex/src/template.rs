@@ -72,6 +72,11 @@ pub struct HttpReq {
 /// consistent with the distribution rate/fanout limits).
 const MAX_PAYLOAD_REQUESTS: usize = 256;
 
+/// Cap on WAF-evasion encodings tried per blocked request. Only reached under
+/// evasive posture and only when the original request looked WAF-blocked, so it
+/// does not multiply request volume on unprotected targets.
+const MAX_EVASION_VARIANTS: usize = 8;
+
 #[derive(Debug, Deserialize)]
 pub struct Matcher {
     #[serde(rename = "type")]
@@ -138,6 +143,7 @@ pub async fn eval_template(
     base: &str,
     tmpl: &Template,
     oast: Option<&crate::oast::OastClient>,
+    evasive: bool,
 ) -> Vec<Match> {
     let mut out = Vec::new();
     for req in &tmpl.http {
@@ -204,25 +210,49 @@ pub async fn eval_template(
         // Response-based request.
         for raw_path in &req.path {
             for v in expand_request(req, raw_path, base, MAX_PAYLOAD_REQUESTS) {
-                // `unsafe` templates go over the raw sender so the request-target
-                // is sent verbatim (see rawhttp); everything else uses reqwest.
-                let r1 = match if req.unsafe_raw {
-                    fetch_raw(&method, &v).await
-                } else {
-                    fetch(client, &method, &v).await
-                } {
+                // GENERATE + DETECT: issue the request. `unsafe` templates go over
+                // the raw sender (verbatim request-target); everything else via
+                // reqwest.
+                let r1 = match send_variant(client, &method, req.unsafe_raw, &v).await {
                     Some(r) => r,
                     None => continue,
                 };
-                if !matches_all(req, &r1) {
-                    continue;
-                }
-                // CONFIRM: re-issue once; must match again (idempotent reproduce).
-                let r2 = match if req.unsafe_raw {
-                    fetch_raw(&method, &v).await
+
+                // Pick the request that reproduces the finding. Normally that is
+                // `v` itself. Under evasive posture, if `v` was WAF-blocked rather
+                // than answered by the app, retry payload-encoding variants until
+                // one clears the WAF and still matches - so a signature WAF cannot
+                // mask the bug. `unsafe` (raw) templates are left to the raw-path
+                // track; their evasion is byte-level, not payload-level.
+                let (winner, evaded) = if matches_all(req, &r1) {
+                    (v.clone(), false)
+                } else if evasive && !req.unsafe_raw && resp_is_blocked(&r1) {
+                    let mut chosen: Option<ReqVariant> = None;
+                    for (mu, mb) in
+                        adaptive::evasion::variants(&v.url, v.body.as_deref(), MAX_EVASION_VARIANTS)
+                    {
+                        let vv = ReqVariant {
+                            url: mu,
+                            headers: v.headers.clone(),
+                            body: mb,
+                        };
+                        if let Some(rr) = fetch(client, &method, &vv).await
+                            && matches_all(req, &rr)
+                        {
+                            chosen = Some(vv);
+                            break;
+                        }
+                    }
+                    match chosen {
+                        Some(vv) => (vv, true),
+                        None => continue,
+                    }
                 } else {
-                    fetch(client, &method, &v).await
-                } {
+                    continue;
+                };
+
+                // CONFIRM: re-issue the winning variant once; must match again.
+                let r2 = match send_variant(client, &method, req.unsafe_raw, &winner).await {
                     Some(r) => r,
                     None => continue,
                 };
@@ -230,6 +260,10 @@ pub async fn eval_template(
                     continue;
                 }
 
+                let mut description = tmpl.info.description.clone();
+                if evaded {
+                    description.push_str(" (confirmed via WAF-evasion payload encoding)");
+                }
                 out.push(Match {
                     template_id: tmpl.id.clone(),
                     name: if tmpl.info.name.is_empty() {
@@ -242,8 +276,8 @@ pub async fn eval_template(
                     } else {
                         tmpl.info.severity.clone()
                     },
-                    description: tmpl.info.description.clone(),
-                    matched_at: v.url.clone(),
+                    description,
+                    matched_at: winner.url.clone(),
                 });
             }
         }
@@ -344,6 +378,40 @@ fn apply_oob(v: &mut ReqVariant, host: &str) {
 
 /// Issue a request over the raw sender (verbatim path, no dot-segment
 /// normalisation) and adapt it to the same `Resp` the matchers expect.
+/// Send a variant over the appropriate transport: the raw sender for `unsafe`
+/// templates (verbatim request-target), reqwest otherwise.
+async fn send_variant(
+    client: &Client,
+    method: &str,
+    unsafe_raw: bool,
+    v: &ReqVariant,
+) -> Option<Resp> {
+    if unsafe_raw {
+        fetch_raw(method, v).await
+    } else {
+        fetch(client, method, v).await
+    }
+}
+
+/// True when a response looks like a WAF/anti-bot challenge or block rather than
+/// the app's own answer, so a payload-encoding retry is warranted.
+fn resp_is_blocked(r: &Resp) -> bool {
+    adaptive::challenge::detect(
+        r.status,
+        |n| {
+            r.headers.lines().find_map(|l| {
+                l.split_once(':').and_then(|(k, val)| {
+                    k.trim()
+                        .eq_ignore_ascii_case(n)
+                        .then(|| val.trim().to_string())
+                })
+            })
+        },
+        &r.body,
+    )
+    .is_challenge()
+}
+
 async fn fetch_raw(method: &str, v: &ReqVariant) -> Option<Resp> {
     let r = crate::rawhttp::send(crate::rawhttp::RawReq {
         method,

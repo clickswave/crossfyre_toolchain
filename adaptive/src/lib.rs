@@ -34,6 +34,7 @@
 pub mod challenge;
 pub mod congestion;
 pub mod coord;
+pub mod evasion;
 pub mod health;
 pub mod identity;
 pub mod rate;
