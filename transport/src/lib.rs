@@ -84,6 +84,10 @@ pub struct ClientConfig {
     /// Attempt browser emulation (Evasive / Identify posture). Honoured only when
     /// the `impersonate` backend is compiled in; a no-op for the reqwest backend.
     pub emulate: bool,
+    /// Static DNS overrides: `(host, addr)` pairs. A request to `host` connects to
+    /// `addr` while keeping `host` as the SNI + Host header. Origin discovery uses
+    /// this to hit a candidate origin IP as if it were the fronted target host.
+    pub resolve: Vec<(String, std::net::SocketAddr)>,
 }
 
 impl Default for ClientConfig {
@@ -97,6 +101,7 @@ impl Default for ClientConfig {
             browser_headers: HeaderMap::new(),
             extra_headers: HeaderMap::new(),
             emulate: false,
+            resolve: Vec::new(),
         }
     }
 }
@@ -133,6 +138,9 @@ pub fn build_client(cfg: ClientConfig) -> Result<Client, Error> {
     };
     if cfg.cookie_store {
         b = b.cookie_store(true);
+    }
+    for (host, addr) in &cfg.resolve {
+        b = b.resolve(host.as_str(), *addr);
     }
 
     // Cert handling differs by backend.
