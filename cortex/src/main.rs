@@ -11,6 +11,7 @@ mod engine;
 mod libs;
 mod oast;
 mod rawhttp;
+mod solver;
 mod template;
 
 #[tokio::main]
