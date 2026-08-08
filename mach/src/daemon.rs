@@ -205,9 +205,17 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
         resolve: Vec::new(),
     })?);
 
-    // Background task: delete expired probe_results every 5 minutes
+    // Background task: delete expired probe_results + GC old scans every 5 min.
     {
         let db_cleanup = Arc::clone(&db);
+        // Scans older than this are reclaimed (see MachDb::gc_old_scans). Default
+        // 7 days: comfortably longer than any real scan (so a running/paused scan
+        // is never touched) while still bounding the table. Tunable per node.
+        let retention_hours: i64 = std::env::var("CROSSFYRE_MACH_SCAN_RETENTION_HOURS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|&h| h > 0)
+            .unwrap_or(168);
         tokio::spawn(async move {
             let interval = std::time::Duration::from_secs(300);
             loop {
@@ -216,6 +224,15 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
                     && n > 0
                 {
                     println!("Cleaned up {n} expired probe result(s)");
+                }
+                match db_cleanup.gc_old_scans(retention_hours).await {
+                    Ok(n) if n > 0 => {
+                        println!(
+                            "GC: reclaimed {n} scan_entries from scans older than {retention_hours}h"
+                        )
+                    }
+                    Err(e) => eprintln!("GC: scan sweep failed: {e}"),
+                    _ => {}
                 }
             }
         });
