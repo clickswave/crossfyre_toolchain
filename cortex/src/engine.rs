@@ -124,7 +124,8 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
 
     // Builds an outbound client for a resolved identity. Closed over so a
     // challenge retry can rebuild it with a rotated identity.
-    let build_client = |ident: &adaptive::identity::Identity| {
+    let build_client = |ident: &adaptive::identity::Identity,
+                        clearance: Option<&crate::solver::Solved>| {
         let mut browser_headers = transport::HeaderMap::new();
         for (k, v) in &ident.headers {
             if let (Ok(name), Ok(val)) = (
@@ -147,6 +148,18 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
                 extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
             }
         }
+        // Challenge clearance (from the solver): the cf_clearance cookie must ride
+        // on every request, and the UA must match the solver's browser or the
+        // cookie is rejected - so adopt the solver's UA for the fingerprint too.
+        let mut ua = ident.user_agent.clone();
+        if let Some(sol) = clearance {
+            if let Ok(val) = transport::HeaderValue::from_str(&sol.cookie_header) {
+                extra_headers.insert(transport::header::COOKIE, val);
+            }
+            if let Some(sua) = &sol.user_agent {
+                ua = sua.clone();
+            }
+        }
         transport::build_client(transport::ClientConfig {
             timeout: Some(Duration::from_millis(
                 params.timeout_ms.clamp(1000, 120_000),
@@ -158,7 +171,7 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
             },
             accept_invalid_certs: true,
             cookie_store: true,
-            user_agent: Some(ident.user_agent.clone()),
+            user_agent: Some(ua),
             browser_headers,
             extra_headers,
             emulate: !matches!(mode, adaptive::identity::Mode::Fast),
@@ -178,6 +191,9 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     let mut rotations: u32 = 0;
     let mut blocked = false;
     let mut block_label: &'static str = "blocked";
+    // Set once the challenge solver returns a clearance cookie; every subsequent
+    // client build then rides that cookie + the solver's UA.
+    let mut clearance: Option<crate::solver::Solved> = None;
     let (client, base_resp) = loop {
         let seed = if rotations == 0 {
             params.target.clone()
@@ -185,7 +201,7 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
             format!("{}#{}", params.target, rotations)
         };
         let ident = adaptive::identity::resolve(&mode, Some(seed.as_str()));
-        let client = match build_client(&ident) {
+        let client = match build_client(&ident, clearance.as_ref()) {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -229,12 +245,49 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
                         continue;
                     }
                     adaptive::challenge::Reaction::Broker => {
-                        // No broker wired yet: report and stop rather than burn the
-                        // whole template set against a challenge page.
-                        let _ = tx.send(json!({
-                            "type":"log",
-                            "message":format!("waf {} on base persists; challenge broker unavailable, ending scan", ch.label())
-                        }));
+                        // Hand off to a node-side challenge solver (FlareSolverr-
+                        // compatible), which mints a clearance cookie from the
+                        // node's own egress. On success, retry the base carrying
+                        // that cookie; if there is no solver, or it can't clear, or
+                        // the challenge persists even with clearance, report + stop.
+                        if clearance.is_none() && crate::solver::configured() {
+                            let _ = tx.send(json!({
+                                "type":"log",
+                                "message":format!("waf {} on base; handing off to challenge solver", ch.label())
+                            }));
+                            match crate::solver::solve(
+                                &base,
+                                params.timeout_ms.clamp(1000, 120_000),
+                            )
+                            .await
+                            {
+                                Some(sol) => {
+                                    let _ = tx.send(json!({
+                                        "type":"log",
+                                        "message":"challenge solver returned clearance; retrying with cf_clearance"
+                                    }));
+                                    clearance = Some(sol);
+                                    attempt += 1;
+                                    continue;
+                                }
+                                None => {
+                                    let _ = tx.send(json!({
+                                        "type":"log",
+                                        "message":"challenge solver could not clear the target; ending scan"
+                                    }));
+                                }
+                            }
+                        } else if clearance.is_some() {
+                            let _ = tx.send(json!({
+                                "type":"log",
+                                "message":format!("waf {} persists even after solver clearance; ending scan", ch.label())
+                            }));
+                        } else {
+                            let _ = tx.send(json!({
+                                "type":"log",
+                                "message":format!("waf {} on base persists; no challenge solver configured (set CROSSFYRE_CHALLENGE_SOLVER), ending scan", ch.label())
+                            }));
+                        }
                         blocked = true;
                         block_label = ch.label();
                         break (client, base_resp);
