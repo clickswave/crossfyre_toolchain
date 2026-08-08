@@ -26,9 +26,9 @@ use std::time::Duration;
 
 // Backend-specific types (differ between reqwest and wreq).
 #[cfg(not(feature = "impersonate"))]
-pub use reqwest::{redirect, Client, ClientBuilder, Error, RequestBuilder, Response};
+pub use reqwest::{redirect, Client, ClientBuilder, Error, Proxy, RequestBuilder, Response};
 #[cfg(feature = "impersonate")]
-pub use wreq::{redirect, Client, ClientBuilder, Error, RequestBuilder, Response};
+pub use wreq::{redirect, Client, ClientBuilder, Error, Proxy, RequestBuilder, Response};
 
 // Shared http/url types (identical regardless of backend).
 pub use reqwest::header;
@@ -141,6 +141,23 @@ pub fn build_client(cfg: ClientConfig) -> Result<Client, Error> {
     }
     for (host, addr) in &cfg.resolve {
         b = b.resolve(host.as_str(), *addr);
+    }
+
+    // BYO residential / mobile egress. When the node exports
+    // `CROSSFYRE_EGRESS_PROXY` (an `http(s)://` or `socks5://` gateway URL, with
+    // optional `user:pass@`), every engine client routes through it. One env var
+    // covers all engines with no per-engine plumbing, and a rotating-residential
+    // provider is exactly one such gateway URL. Ignored (direct egress) when
+    // unset or unparseable, so a bad value never silently drops to a worse path
+    // than "no proxy".
+    if let Ok(proxy_url) = std::env::var("CROSSFYRE_EGRESS_PROXY") {
+        let proxy_url = proxy_url.trim();
+        if !proxy_url.is_empty() {
+            match Proxy::all(proxy_url) {
+                Ok(p) => b = b.proxy(p),
+                Err(e) => eprintln!("[transport] ignoring invalid CROSSFYRE_EGRESS_PROXY: {e}"),
+            }
+        }
     }
 
     // Cert handling differs by backend.

@@ -401,6 +401,10 @@ mod imp {
 
     fn unit_body(ext: &str) -> String {
         let bin = ext_bin_path(ext);
+        // Optional egress-proxy env (BYO residential/mobile egress). The `-`
+        // prefix makes it non-fatal when absent, so direct-egress nodes are
+        // unaffected; the node writes this file when a proxy egress is configured.
+        let egress_env = invoking_user_home().join(".config/crossfyre/egress.env");
         format!(
             "[Unit]\n\
              Description=Crossfyre {ext} extension daemon\n\
@@ -408,6 +412,7 @@ mod imp {
              \n\
              [Service]\n\
              Type=simple\n\
+             EnvironmentFile=-{egress_env}\n\
              ExecStart={bin} --daemon\n\
              Restart=on-failure\n\
              RestartSec=5\n\
@@ -416,6 +421,7 @@ mod imp {
              WantedBy=default.target\n",
             ext = ext,
             bin = bin.display(),
+            egress_env = egress_env.display(),
         )
     }
 
