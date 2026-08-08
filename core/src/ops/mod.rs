@@ -4,6 +4,7 @@
 //! NATS, and publishes the terminal `operation_completed`.
 pub mod content_discovery;
 pub mod network_scan;
+pub mod origin_discovery;
 pub mod service_enum;
 pub mod subdomain_enum;
 pub mod vuln_scan;
