@@ -136,6 +136,7 @@ impl Prober {
             browser_headers: transport::HeaderMap::new(),
             extra_headers: headers_map,
             emulate: config.evasive,
+            resolve: Vec::new(),
         })
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 

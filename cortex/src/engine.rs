@@ -98,7 +98,10 @@ impl AuthSpec {
 
 struct BaseResp {
     is_https: bool,
+    status: u16,
     headers: Vec<(String, String)>,
+    /// First chunk of the body, for WAF/anti-bot challenge detection.
+    body_prefix: String,
 }
 
 pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
@@ -118,55 +121,154 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     // fingerprint headers. Fast posture skips emulation. Stable-per-target; the
     // profile choice is the private `adaptive` drop-in.
     let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
-    let ident = adaptive::identity::resolve(&mode, Some(params.target.as_str()));
 
-    let mut browser_headers = transport::HeaderMap::new();
-    for (k, v) in &ident.headers {
-        if let (Ok(name), Ok(val)) = (
-            transport::HeaderName::from_bytes(k.as_bytes()),
-            transport::HeaderValue::from_str(v),
-        ) {
-            browser_headers.insert(name, val);
+    // Builds an outbound client for a resolved identity. Closed over so a
+    // challenge retry can rebuild it with a rotated identity.
+    let build_client = |ident: &adaptive::identity::Identity| {
+        let mut browser_headers = transport::HeaderMap::new();
+        for (k, v) in &ident.headers {
+            if let (Ok(name), Ok(val)) = (
+                transport::HeaderName::from_bytes(k.as_bytes()),
+                transport::HeaderValue::from_str(v),
+            ) {
+                browser_headers.insert(name, val);
+            }
         }
-    }
-    let mut extra_headers = transport::HeaderMap::new();
-    if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
-        for (k, v) in auth.to_header_map().iter() {
-            extra_headers.insert(k.clone(), v.clone());
+        let mut extra_headers = transport::HeaderMap::new();
+        if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
+            for (k, v) in auth.to_header_map().iter() {
+                extra_headers.insert(k.clone(), v.clone());
+            }
         }
-    }
-    // The attribution token (Identify posture) is an app header: it must survive
-    // emulation, so it goes in extra_headers, not the browser fingerprint set.
-    if let adaptive::identity::Mode::Identify(token) = &mode {
-        if let Ok(val) = transport::HeaderValue::from_str(token) {
-            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+        // The attribution token (Identify posture) is an app header: it must
+        // survive emulation, so it goes in extra_headers, not the fingerprint set.
+        if let adaptive::identity::Mode::Identify(token) = &mode {
+            if let Ok(val) = transport::HeaderValue::from_str(token) {
+                extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
+            }
         }
-    }
-
-    let client = match transport::build_client(transport::ClientConfig {
-        timeout: Some(Duration::from_millis(
-            params.timeout_ms.clamp(1000, 120_000),
-        )),
-        redirect: if params.follow_redirects {
-            transport::Redirect::Limited(5)
-        } else {
-            transport::Redirect::None
-        },
-        accept_invalid_certs: true,
-        cookie_store: true,
-        user_agent: Some(ident.user_agent.clone()),
-        browser_headers,
-        extra_headers,
-        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
-    }) {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = tx.send(json!({"type":"error","message":format!("client build failed: {e}")}));
-            return;
-        }
+        transport::build_client(transport::ClientConfig {
+            timeout: Some(Duration::from_millis(
+                params.timeout_ms.clamp(1000, 120_000),
+            )),
+            redirect: if params.follow_redirects {
+                transport::Redirect::Limited(5)
+            } else {
+                transport::Redirect::None
+            },
+            accept_invalid_certs: true,
+            cookie_store: true,
+            user_agent: Some(ident.user_agent.clone()),
+            browser_headers,
+            extra_headers,
+            emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+            resolve: Vec::new(),
+        })
     };
 
     let _ = tx.send(json!({"type":"ack","target": base}));
+
+    // Fetch the base once and handle any WAF / anti-bot interference before
+    // committing to the full scan: a challenge on the base means every
+    // {{BaseURL}} template would just re-hit the WAF. Back off + rotate identity
+    // per the challenge policy; if it persists, report it and skip the active
+    // phase. (Broker escalation lands with the challenge-broker track; until then
+    // an unclearable challenge ends the scan early.)
+    let mut attempt: u32 = 0;
+    let mut rotations: u32 = 0;
+    let mut blocked = false;
+    let mut block_label: &'static str = "blocked";
+    let (client, base_resp) = loop {
+        let seed = if rotations == 0 {
+            params.target.clone()
+        } else {
+            format!("{}#{}", params.target, rotations)
+        };
+        let ident = adaptive::identity::resolve(&mode, Some(seed.as_str()));
+        let client = match build_client(&ident) {
+            Ok(c) => c,
+            Err(e) => {
+                let _ =
+                    tx.send(json!({"type":"error","message":format!("client build failed: {e}")}));
+                return;
+            }
+        };
+
+        let base_resp = fetch_base(&client, &base).await;
+
+        if let Some(ref br) = base_resp {
+            let ch = adaptive::challenge::detect(
+                br.status,
+                |n| {
+                    br.headers
+                        .iter()
+                        .find(|(k, _)| k == n)
+                        .map(|(_, v)| v.clone())
+                },
+                &br.body_prefix,
+            );
+            if ch.is_challenge() {
+                match adaptive::challenge::react(ch, attempt) {
+                    adaptive::challenge::Reaction::Backoff {
+                        delay_ms,
+                        rotate_identity,
+                    } => {
+                        let _ = tx.send(json!({
+                            "type":"log",
+                            "message":format!(
+                                "waf {} on base (HTTP {}), backing off {}ms{}",
+                                ch.label(), br.status, delay_ms,
+                                if rotate_identity { " + rotating identity" } else { "" }
+                            )
+                        }));
+                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                        attempt += 1;
+                        if rotate_identity {
+                            rotations += 1;
+                        }
+                        continue;
+                    }
+                    adaptive::challenge::Reaction::Broker => {
+                        // No broker wired yet: report and stop rather than burn the
+                        // whole template set against a challenge page.
+                        let _ = tx.send(json!({
+                            "type":"log",
+                            "message":format!("waf {} on base persists; challenge broker unavailable, ending scan", ch.label())
+                        }));
+                        blocked = true;
+                        block_label = ch.label();
+                        break (client, base_resp);
+                    }
+                    adaptive::challenge::Reaction::Abort => {
+                        blocked = true;
+                        block_label = ch.label();
+                        break (client, base_resp);
+                    }
+                    adaptive::challenge::Reaction::Proceed => {}
+                }
+            }
+        }
+        break (client, base_resp);
+    };
+
+    // A persistent WAF challenge on the base is itself reportable and a reason to
+    // skip the active phase.
+    if blocked {
+        let _ = tx.send(json!({
+            "type":"finding",
+            "data":{
+                "target": base,
+                "type":"waf",
+                "source":"cortex",
+                "severity":"info",
+                "name": format!("Target behind WAF/anti-bot ({block_label})"),
+                "template":"cortex:waf-challenge",
+                "matched_at": base,
+                "description":"The base URL returned a WAF/anti-bot challenge that could not be cleared, so active vulnerability templates were skipped. Consider origin discovery, an attribution/allowlist header, or a challenge-solving session.",
+                "confidence":"confirmed",
+            }
+        }));
+    }
 
     let sev_filter: Vec<String> = params.severity.iter().map(|s| s.to_lowercase()).collect();
     let allow = |sev: &str| sev_filter.is_empty() || sev_filter.iter().any(|s| s == sev);
@@ -179,7 +281,9 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     // Every {{BaseURL}} template dials the same host:port, so if the base is
     // unreachable the whole active phase would just re-dial a dead or tarpitting
     // target 100+ times, each attempt burning a full per-request timeout. Skip it.
-    let base_reachable = if let Some(resp) = fetch_base(&client, &base).await {
+    let base_reachable = if blocked {
+        false
+    } else if let Some(resp) = base_resp {
         for (name, template, severity, description) in header_checks(&resp) {
             if allow(severity) {
                 found += 1;
@@ -326,6 +430,8 @@ pub async fn read_body_capped(mut resp: transport::Response) -> String {
 async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
     match client.get(base).send().await {
         Ok(r) => {
+            let status = r.status().as_u16();
+            let is_https = base.starts_with("https://");
             let mut headers = Vec::new();
             for (k, v) in r.headers().iter() {
                 headers.push((
@@ -333,9 +439,14 @@ async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
                     v.to_str().unwrap_or("").to_string(),
                 ));
             }
+            // A few KB of body is plenty to spot a challenge/block page.
+            let body = read_body_capped(r).await;
+            let body_prefix: String = body.chars().take(16_384).collect();
             Some(BaseResp {
-                is_https: base.starts_with("https://"),
+                is_https,
+                status,
                 headers,
+                body_prefix,
             })
         }
         Err(_) => None,

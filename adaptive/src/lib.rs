@@ -31,6 +31,7 @@
 //! Time is not read internally (no `Instant::now`), so behaviour is fully
 //! deterministic and unit-testable: callers record `(class, rtt_ms)` and tick.
 
+pub mod challenge;
 pub mod congestion;
 pub mod coord;
 pub mod health;
@@ -39,6 +40,7 @@ pub mod rate;
 pub mod resilience;
 pub mod wire;
 
+pub use challenge::{Challenge, Reaction};
 pub use congestion::{
     Decision, Estimator, Limits, Outcome, Sample, WINDOW_MS, Window, decide as congestion_decide,
 };
