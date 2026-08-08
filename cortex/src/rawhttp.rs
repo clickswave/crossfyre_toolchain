@@ -9,6 +9,7 @@
 //! unchanged. TLS uses the same accept-any-cert posture as the reqwest client
 //! (cortex scans hosts with self-signed / mismatched certs).
 
+#[cfg(not(feature = "impersonate"))]
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -138,6 +139,9 @@ async fn send_plain(host: &str, port: u16, data: &[u8]) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+// Open build: rustls handshake (accept-any-cert). Its ClientHello is the
+// fingerprint a WAF flags, but the open toolchain ships no browser emulation.
+#[cfg(not(feature = "impersonate"))]
 async fn send_tls(host: &str, port: u16, data: &[u8]) -> Option<Vec<u8>> {
     let connector = tokio_rustls::TlsConnector::from(tls_config());
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string()).ok()?;
@@ -153,6 +157,44 @@ async fn send_tls(host: &str, port: u16, data: &[u8]) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+// First-party build: BoringSSL handshake with GREASE and a browser cipher/curve
+// profile, so even the verbatim-path (`unsafe`) probes present a browser-family
+// ClientHello rather than the flagged rustls one. Not byte-identical to the wreq
+// scan-client profile - the raw sender is HTTP/1.1, so ALPN is `http/1.1` only -
+// but a genuine BoringSSL browser-shaped handshake. Cert verification is off, to
+// match the rest of cortex (it scans hosts with self-signed / mismatched certs).
+#[cfg(feature = "impersonate")]
+async fn send_tls(host: &str, port: u16, data: &[u8]) -> Option<Vec<u8>> {
+    use boring2::ssl::{SslConnector, SslMethod, SslVerifyMode};
+
+    let mut b = SslConnector::builder(SslMethod::tls_client()).ok()?;
+    b.set_verify(SslVerifyMode::NONE);
+    b.set_grease_enabled(true);
+    let _ = b.set_cipher_list(
+        "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:\
+         ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:\
+         ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:\
+         ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:\
+         AES256-GCM-SHA384:AES128-SHA:AES256-SHA",
+    );
+    let _ = b.set_curves_list("X25519:P-256:P-384");
+    let _ = b.set_alpn_protos(b"\x08http/1.1");
+    let connector = b.build();
+    let mut cfg = connector.configure().ok()?;
+    cfg.set_verify_hostname(false);
+    let stream = TcpStream::connect((host, port)).await.ok()?;
+    let mut tls = tokio_boring2::connect(cfg, host, stream).await.ok()?;
+    tls.write_all(data).await.ok()?;
+    tls.flush().await.ok()?;
+    let mut buf = Vec::new();
+    tls.take(MAX_RESPONSE_BYTES)
+        .read_to_end(&mut buf)
+        .await
+        .ok()?;
+    Some(buf)
+}
+
+#[cfg(not(feature = "impersonate"))]
 fn tls_config() -> Arc<rustls::ClientConfig> {
     use std::sync::OnceLock;
     static CFG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
@@ -172,8 +214,11 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
 
 /// Accept any certificate: cortex deliberately scans hosts with invalid certs,
 /// matching the reqwest client's danger_accept_invalid_certs.
+#[cfg(not(feature = "impersonate"))]
 #[derive(Debug)]
 struct NoVerify;
+
+#[cfg(not(feature = "impersonate"))]
 
 impl rustls::client::danger::ServerCertVerifier for NoVerify {
     fn verify_server_cert(

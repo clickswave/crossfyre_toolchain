@@ -862,6 +862,7 @@ dependencies = [
  "adaptive",
  "aes-gcm",
  "base64 0.22.1",
+ "boring2",
  "cfx_tui",
  "clap",
  "rand 0.8.7",
@@ -875,6 +876,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tokio",
+ "tokio-boring2",
  "tokio-rustls",
  "transport",
  "uuid",
@@ -2655,7 +2657,7 @@ dependencies = [
 
 [[package]]
 name = "node"
-version = "0.1.32"
+version = "0.1.33"
 dependencies = [
  "cfx_core",
  "clap",
