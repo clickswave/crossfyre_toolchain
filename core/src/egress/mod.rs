@@ -26,4 +26,20 @@
 #[cfg_attr(not(egress_private), path = "baseline.rs")]
 mod imp;
 
-pub use imp::{TunnelGuard, bring_up, process_network_config};
+mod proxy;
+
+pub use imp::{TunnelGuard, bring_up};
+
+/// Ingest a node's network config. Delegates the tunnel mechanism to the selected
+/// egress impl, then applies the BYO residential-proxy egress env (shared across
+/// impls: a client-level proxy, orthogonal to the tunnel `kind`).
+pub fn process_network_config(
+    raw: &serde_json::Value,
+    net_dir: &std::path::Path,
+) -> Option<crate::NetworkConfig> {
+    let cfg = imp::process_network_config(raw, net_dir);
+    if let Some(ref net) = cfg {
+        proxy::apply(net);
+    }
+    cfg
+}

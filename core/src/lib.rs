@@ -528,6 +528,12 @@ pub struct NetworkConfig {
     wg_endpoint: Option<String>,
     #[serde(default)]
     wg_public_key: Option<String>,
+    /// BYO residential / mobile egress proxy URL (`http(s)://` or `socks5://`,
+    /// with optional `user:pass@`). When set, engine clients route through it via
+    /// `CROSSFYRE_EGRESS_PROXY`. Orthogonal to the tunnel `kind`: a rotating
+    /// residential provider is one gateway URL, no netns tunnel needed.
+    #[serde(default)]
+    proxy: Option<String>,
 }
 
 pub fn default_nats_url() -> String {
