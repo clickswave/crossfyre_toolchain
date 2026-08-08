@@ -336,7 +336,10 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
                 tmpl.info.severity.to_lowercase()
             };
             if allow(&sev) {
-                for m in template::eval_template(&client, &base, tmpl, oast.as_ref()).await {
+                for m in
+                    template::eval_template(&client, &base, tmpl, oast.as_ref(), params.evasive)
+                        .await
+                {
                     found += 1;
                     let _ = tx.send(json!({
                         "type": "finding",
