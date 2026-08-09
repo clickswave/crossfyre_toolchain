@@ -512,28 +512,18 @@ fn build_client(params: &InjectParams) -> Option<Client> {
     let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
     let seed = (!params.target.is_empty()).then_some(params.target.as_str());
     let browser = adaptive::identity::resolve(&mode, seed);
-    let emulate = !matches!(mode, adaptive::identity::Mode::Fast);
-    let mut browser_headers = transport::HeaderMap::new();
-    for (k, v) in &browser.headers {
-        if let (Ok(n), Ok(val)) = (transport::HeaderName::from_bytes(k.as_bytes()), transport::HeaderValue::from_str(v)) {
-            browser_headers.insert(n, val);
-        }
-    }
-    let mut extra_headers = transport::HeaderMap::new();
-    if let Some(a) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
-        for (k, v) in a.to_header_map().iter() {
-            extra_headers.insert(k.clone(), v.clone());
-        }
-    }
-    transport::build_client(transport::ClientConfig {
-        timeout: Some(Duration::from_millis(params.timeout_ms.clamp(1000, 120_000).max((SLEEP_SECS as u64) * 1000 + 3000))),
+    transport::build_scan_client(transport::ScanClient {
+        identity_headers: &browser.headers,
+        user_agent: &browser.user_agent,
+        auth: params.auth.as_ref(),
+        attribution_token: None,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+        timeout: Some(Duration::from_millis(
+            params.timeout_ms.clamp(1000, 120_000).max((SLEEP_SECS as u64) * 1000 + 3000),
+        )),
         redirect: transport::Redirect::Limited(3),
         accept_invalid_certs: true,
         cookie_store: true,
-        user_agent: Some(browser.user_agent.clone()),
-        browser_headers,
-        extra_headers,
-        emulate,
         resolve: Vec::new(),
     })
     .ok()

@@ -256,28 +256,17 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
 
     let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
     let ident = adaptive::identity::resolve(&mode, Some(&seed_host));
-    let mut extra_headers = transport::HeaderMap::new();
-    if let Some(auth) = params.auth.as_ref().filter(|a| a.is_meaningful()) {
-        for (k, v) in auth.to_header_map().iter() {
-            extra_headers.insert(k.clone(), v.clone());
-        }
-    }
-    if let adaptive::identity::Mode::Identify(token) = &mode {
-        if let Ok(val) = transport::HeaderValue::from_str(token) {
-            extra_headers.insert(transport::HeaderName::from_static("x-bug-bounty"), val);
-        }
-    }
-    let client = match transport::build_client(transport::ClientConfig {
-        timeout: Some(std::time::Duration::from_millis(
-            params.timeout_ms.max(1000),
-        )),
+    let token = if let adaptive::identity::Mode::Identify(t) = &mode { Some(t.as_str()) } else { None };
+    let client = match transport::build_scan_client(transport::ScanClient {
+        identity_headers: &ident.headers,
+        user_agent: &ident.user_agent,
+        auth: params.auth.as_ref(),
+        attribution_token: token,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+        timeout: Some(std::time::Duration::from_millis(params.timeout_ms.max(1000))),
         redirect: transport::Redirect::Limited(5),
         accept_invalid_certs: true,
         cookie_store: true,
-        user_agent: Some(ident.user_agent.clone()),
-        browser_headers: transport::headers_from_pairs(&ident.headers),
-        extra_headers,
-        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
         resolve: Vec::new(),
     }) {
         Ok(c) => c,

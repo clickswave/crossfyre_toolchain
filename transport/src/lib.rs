@@ -205,6 +205,79 @@ pub fn build_client(cfg: ClientConfig) -> Result<Client, Error> {
     b.build()
 }
 
+/// A scan client described in terms an engine already has: a resolved browser
+/// identity (headers + UA, from the private `adaptive` catalogue), optional
+/// request auth, an optional attribution token, and the per-op transport policy.
+///
+/// [`build_scan_client`] turns this into a [`Client`], centralizing the ~15-line
+/// "identity headers -> browser_headers, auth -> app headers, Identify token ->
+/// `x-bug-bounty`" assembly that cortex (inject/authz), mach and scout each
+/// reimplemented around [`build_client`]. The caller still resolves the identity,
+/// so the `adaptive` dependency stays out of `transport`.
+pub struct ScanClient<'a> {
+    /// Resolved browser identity headers (`adaptive::identity::Identity::headers`).
+    pub identity_headers: &'a [(&'static str, String)],
+    /// The identity's User-Agent. Also selects the emulation browser family.
+    pub user_agent: &'a str,
+    /// Request auth applied as app headers (survives emulation). `None` or a
+    /// non-meaningful spec means unauthenticated.
+    pub auth: Option<&'a AuthSpec>,
+    /// Attribution token for the Identify posture, sent as `x-bug-bounty`. An app
+    /// header, so it too survives emulation.
+    pub attribution_token: Option<&'a str>,
+    pub emulate: bool,
+    pub timeout: Option<Duration>,
+    pub redirect: Redirect,
+    pub accept_invalid_certs: bool,
+    pub cookie_store: bool,
+    pub resolve: Vec<(String, std::net::SocketAddr)>,
+}
+
+impl<'a> Default for ScanClient<'a> {
+    fn default() -> Self {
+        ScanClient {
+            identity_headers: &[],
+            user_agent: "",
+            auth: None,
+            attribution_token: None,
+            emulate: false,
+            timeout: Some(Duration::from_secs(30)),
+            redirect: Redirect::Limited(5),
+            accept_invalid_certs: false,
+            cookie_store: false,
+            resolve: Vec::new(),
+        }
+    }
+}
+
+/// Build a scan [`Client`] from a [`ScanClient`] description. Assembles the app
+/// (auth + attribution) headers and the browser (identity) headers, then defers
+/// to [`build_client`] for all backend-specific construction.
+pub fn build_scan_client(spec: ScanClient) -> Result<Client, Error> {
+    let mut extra_headers = HeaderMap::new();
+    if let Some(a) = spec.auth.filter(|a| a.is_meaningful()) {
+        for (k, v) in a.to_header_map().iter() {
+            extra_headers.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(tok) = spec.attribution_token {
+        if let Ok(val) = HeaderValue::from_str(tok) {
+            extra_headers.insert(HeaderName::from_static("x-bug-bounty"), val);
+        }
+    }
+    build_client(ClientConfig {
+        timeout: spec.timeout,
+        redirect: spec.redirect,
+        accept_invalid_certs: spec.accept_invalid_certs,
+        cookie_store: spec.cookie_store,
+        user_agent: Some(spec.user_agent.to_string()),
+        browser_headers: headers_from_pairs(spec.identity_headers),
+        extra_headers,
+        emulate: spec.emulate,
+        resolve: spec.resolve,
+    })
+}
+
 /// Map the identity's User-Agent to a `wreq_util` emulation profile by browser
 /// family. The family variety across targets comes from the private catalogue's
 /// per-target UA choice; only the family -> profile mapping is here (public).
