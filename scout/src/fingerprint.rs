@@ -46,37 +46,10 @@ fn d_tier() -> u8 {
     2
 }
 
-/// Request auth resolved from a credential (see core::creds `AuthContext`).
-#[derive(Debug, serde::Deserialize, Clone, Default)]
-pub struct AuthSpec {
-    #[serde(default)]
-    pub headers: std::collections::HashMap<String, String>,
-    #[serde(default)]
-    pub cookies: String,
-}
-impl AuthSpec {
-    pub fn to_header_map(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
-        let mut hm = HeaderMap::new();
-        for (k, v) in &self.headers {
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_bytes(k.as_bytes()),
-                HeaderValue::from_str(v),
-            ) {
-                hm.insert(name, val);
-            }
-        }
-        if !self.cookies.is_empty()
-            && let Ok(val) = HeaderValue::from_str(&self.cookies)
-        {
-            hm.insert(COOKIE, val);
-        }
-        hm
-    }
-    pub fn is_meaningful(&self) -> bool {
-        !self.headers.is_empty() || !self.cookies.is_empty()
-    }
-}
+/// Request auth resolved from a credential. Shared across all engines via
+/// `transport`; re-exported so existing `AuthSpec` references in this module keep
+/// resolving.
+pub use transport::AuthSpec;
 
 pub async fn run(params: FpParams, tx: mpsc::UnboundedSender<Value>) {
     let (scheme, host, port, url) = match normalize_target(&params.target) {

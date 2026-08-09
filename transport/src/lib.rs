@@ -35,6 +35,9 @@ pub use reqwest::header;
 pub use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 pub use reqwest::{Method, StatusCode, Url};
 
+mod auth;
+pub use auth::AuthSpec;
+
 /// Build a [`HeaderMap`] from `(name, value)` string pairs, skipping any that
 /// fail to parse. Convenience for turning an identity's header list (from
 /// `adaptive::identity`) into `ClientConfig::browser_headers`.

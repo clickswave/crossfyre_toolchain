@@ -64,37 +64,9 @@ pub struct OastSpec {
     pub api_url: String,
 }
 
-/// Request auth resolved from a credential (see core::creds `AuthContext`).
-#[derive(Debug, serde::Deserialize, Clone, Default)]
-pub struct AuthSpec {
-    #[serde(default)]
-    pub headers: std::collections::HashMap<String, String>,
-    #[serde(default)]
-    pub cookies: String,
-}
-impl AuthSpec {
-    pub fn to_header_map(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
-        let mut hm = HeaderMap::new();
-        for (k, v) in &self.headers {
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_bytes(k.as_bytes()),
-                HeaderValue::from_str(v),
-            ) {
-                hm.insert(name, val);
-            }
-        }
-        if !self.cookies.is_empty()
-            && let Ok(val) = HeaderValue::from_str(&self.cookies)
-        {
-            hm.insert(COOKIE, val);
-        }
-        hm
-    }
-    pub fn is_meaningful(&self) -> bool {
-        !self.headers.is_empty() || !self.cookies.is_empty()
-    }
-}
+/// Request auth resolved from a credential. Now shared across all engines via
+/// `transport`; re-exported so `crate::engine::AuthSpec` keeps resolving.
+pub use transport::AuthSpec;
 
 struct BaseResp {
     is_https: bool,
