@@ -256,14 +256,20 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
 
     let mode = adaptive::identity::Mode::from_flags(params.evasive, params.identify.clone());
     let ident = adaptive::identity::resolve(&mode, Some(&seed_host));
-    let token = if let adaptive::identity::Mode::Identify(t) = &mode { Some(t.as_str()) } else { None };
+    let token = if let adaptive::identity::Mode::Identify(t) = &mode {
+        Some(t.as_str())
+    } else {
+        None
+    };
     let client = match transport::build_scan_client(transport::ScanClient {
         identity_headers: &ident.headers,
         user_agent: &ident.user_agent,
         auth: params.auth.as_ref(),
         attribution_token: token,
         emulate: !matches!(mode, adaptive::identity::Mode::Fast),
-        timeout: Some(std::time::Duration::from_millis(params.timeout_ms.max(1000))),
+        timeout: Some(std::time::Duration::from_millis(
+            params.timeout_ms.max(1000),
+        )),
         redirect: transport::Redirect::Limited(5),
         accept_invalid_certs: true,
         cookie_store: true,

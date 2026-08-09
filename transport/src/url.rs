@@ -46,7 +46,11 @@ pub fn normalize_target(t: &str) -> Option<Target> {
         t.to_string()
     } else if let Some((_, p)) = t.rsplit_once(':') {
         if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) {
-            let scheme = if p == "443" || p == "8443" { "https" } else { "http" };
+            let scheme = if p == "443" || p == "8443" {
+                "https"
+            } else {
+                "http"
+            };
             format!("{scheme}://{t}")
         } else {
             format!("http://{t}")

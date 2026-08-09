@@ -219,7 +219,6 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
 struct NoVerify;
 
 #[cfg(not(feature = "impersonate"))]
-
 impl rustls::client::danger::ServerCertVerifier for NoVerify {
     fn verify_server_cert(
         &self,
