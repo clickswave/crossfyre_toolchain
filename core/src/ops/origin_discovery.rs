@@ -3,7 +3,7 @@
 //! A single request/response against the voyage daemon (port 4442): voyage
 //! gathers cert-transparency SANs, resolves them, drops CDN ranges, and validates
 //! the survivors directly. Each confirmed/likely origin is published as a result.
-use super::OpEnv;
+use super::{OpEnv, Relay};
 use crate::*;
 
 pub async fn handle(env: OpEnv) {
@@ -32,6 +32,15 @@ pub async fn handle(env: OpEnv) {
         "evasive": evasive,
         "timeout_ms": timeout_ms,
     });
+
+    let relay = Relay {
+        pubc: &pub_clone,
+        status_subj: &status_subj,
+        result_subj: &result_subj,
+        op_id: &op_id,
+        workflow_id: &workflow_id,
+        node_id: &node_id,
+    };
 
     let mut found_count = 0;
     match tokio::net::TcpStream::connect("127.0.0.1:4442").await {
@@ -97,25 +106,5 @@ pub async fn handle(env: OpEnv) {
         }
     }
 
-    let done_msg = serde_json::json!({
-        "type": "completed",
-        "job_id": format!("{}-{}", workflow_id, op_id),
-        "workflow_id": workflow_id,
-        "code": 0
-    });
-    let _ = pub_clone
-        .publish(result_subj.clone(), done_msg.to_string().into())
-        .await;
-
-    mark_op_done(&op_id);
-    let status_msg = serde_json::json!({
-        "type": "operation_completed",
-        "operation_id": op_id,
-        "workflow_id": workflow_id,
-        "found_count": found_count,
-        "node_id": node_id,
-    });
-    let _ = pub_clone
-        .publish(status_subj.clone(), status_msg.to_string().into())
-        .await;
+    relay.finish(found_count, None).await;
 }

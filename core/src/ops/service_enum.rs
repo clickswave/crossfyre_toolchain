@@ -1,7 +1,7 @@
 //! Service-enum op: scout-driven service/tech identification.
 //!
 //! Extracted verbatim from the run_operation() dispatcher in lib.rs.
-use super::OpEnv;
+use super::{OpEnv, Relay};
 use crate::*;
 
 pub async fn handle(env: OpEnv) {
@@ -51,6 +51,15 @@ pub async fn handle(env: OpEnv) {
             Err(e) => eprintln!("[op] service-enum credential resolve failed ({cid}): {e}"),
         }
     }
+
+    let relay = Relay {
+        pubc: &pub_clone,
+        status_subj: &status_subj,
+        result_subj: &result_subj,
+        op_id: &op_id,
+        workflow_id: &workflow_id,
+        node_id: &node_id,
+    };
 
     let mut found_count: i64 = 0;
     let conn = tokio::net::TcpStream::connect("127.0.0.1:4444").await;
@@ -109,49 +118,10 @@ pub async fn handle(env: OpEnv) {
             eprintln!(
                 "[op] FAIL scout daemon unreachable on 127.0.0.1:4444 ({e}). Is `scout --daemon` running?"
             );
-            let msg = serde_json::json!({
-                "type": "completed",
-                "job_id": format!("{}-{}", workflow_id, op_id),
-                "code": 1
-            });
-            let _ = pub_clone
-                .publish(result_subj.clone(), msg.to_string().into())
-                .await;
+            relay.publish_failed().await;
             return;
         }
     }
 
-    let done_msg = serde_json::json!({
-        "type": "completed",
-        "job_id": format!("{}-{}", workflow_id, op_id),
-        "workflow_id": workflow_id,
-        "code": 0
-    });
-    let _ = pub_clone
-        .publish(result_subj.clone(), done_msg.to_string().into())
-        .await;
-
-    let final_prog = serde_json::json!({
-        "type": "operation_progress",
-        "operation_id": op_id,
-        "workflow_id": workflow_id,
-        "processed": 1,
-        "total": 1,
-        "node_id": node_id,
-    });
-    let _ = pub_clone
-        .publish(status_subj.clone(), final_prog.to_string().into())
-        .await;
-
-    mark_op_done(&op_id);
-    let status_msg = serde_json::json!({
-        "type": "operation_completed",
-        "operation_id": op_id,
-        "workflow_id": workflow_id,
-        "found_count": found_count,
-        "node_id": node_id,
-    });
-    let _ = pub_clone
-        .publish(status_subj.clone(), status_msg.to_string().into())
-        .await;
+    relay.finish(found_count, Some((1, 1))).await;
 }
