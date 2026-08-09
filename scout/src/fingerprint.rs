@@ -273,36 +273,7 @@ async fn read_bytes_capped(mut resp: transport::Response) -> Vec<u8> {
 }
 
 fn normalize_target(t: &str) -> Option<(String, String, u16, String)> {
-    let t = t.trim();
-    if t.is_empty() || t.len() > 2048 {
-        // Reject oversized targets: a multi-kilobyte host string only feeds a
-        // pathological name into blocking DNS resolution (not covered by the
-        // request timeout).
-        return None;
-    }
-    let with_scheme = if t.starts_with("http://") || t.starts_with("https://") {
-        t.to_string()
-    } else if let Some((_, p)) = t.rsplit_once(':') {
-        if p.chars().all(|c| c.is_ascii_digit()) && !p.is_empty() {
-            let scheme = if p == "443" || p == "8443" {
-                "https"
-            } else {
-                "http"
-            };
-            format!("{scheme}://{t}")
-        } else {
-            format!("http://{t}")
-        }
-    } else {
-        format!("http://{t}")
-    };
-    let url = reqwest::Url::parse(&with_scheme).ok()?;
-    let scheme = url.scheme().to_string();
-    let host = url.host_str()?.to_string();
-    let port = url
-        .port_or_known_default()
-        .unwrap_or(if scheme == "https" { 443 } else { 80 });
-    Some((scheme, host, port, url.to_string()))
+    transport::url::normalize_target(t).map(|tgt| (tgt.scheme, tgt.host, tgt.port, tgt.url))
 }
 
 // ---------------------------------------------------------------------------

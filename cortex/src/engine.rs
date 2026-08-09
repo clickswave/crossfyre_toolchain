@@ -482,35 +482,5 @@ async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
 }
 
 fn normalize_base(t: &str) -> Option<String> {
-    let t = t.trim();
-    if t.is_empty() || t.len() > 2048 {
-        // No legitimate target is multi-kilobyte; an oversized string only feeds
-        // a pathological host into blocking DNS resolution (not covered by the
-        // request timeout), so reject it up front.
-        return None;
-    }
-    let with_scheme = if t.starts_with("http://") || t.starts_with("https://") {
-        t.to_string()
-    } else if let Some((_, p)) = t.rsplit_once(':') {
-        if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) {
-            let scheme = if p == "443" || p == "8443" {
-                "https"
-            } else {
-                "http"
-            };
-            format!("{scheme}://{t}")
-        } else {
-            format!("http://{t}")
-        }
-    } else {
-        format!("http://{t}")
-    };
-    let url = reqwest::Url::parse(&with_scheme).ok()?;
-    let scheme = url.scheme();
-    let host = url.host_str()?;
-    let base = match url.port() {
-        Some(p) => format!("{scheme}://{host}:{p}"),
-        None => format!("{scheme}://{host}"),
-    };
-    Some(base)
+    transport::url::normalize_target(t).map(|tgt| tgt.base())
 }
