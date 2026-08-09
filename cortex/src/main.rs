@@ -8,6 +8,7 @@ mod client_tui;
 mod daemon;
 mod dsl;
 mod engine;
+mod inject;
 mod libs;
 mod oast;
 mod rawhttp;

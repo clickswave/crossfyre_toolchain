@@ -171,8 +171,30 @@ pub fn build_client(cfg: ClientConfig) -> Result<Client, Error> {
             b = b.cert_verification(false).verify_hostname(false);
         }
         if cfg.emulate {
-            if let Some(em) = emulation_for_ua(cfg.user_agent.as_deref()) {
-                b = b.emulation(em);
+            let ua = cfg.user_agent.as_deref();
+            if let Some(em) = emulation_for_ua(ua) {
+                // wreq's `emulation()` REPLACES the default header map wholesale
+                // (`std::mem::swap`), which would wipe the app/auth headers we set
+                // above (Authorization, Cookie, attribution token) -- silently
+                // de-authenticating every scan run under the default evasive
+                // posture. Merge them back: take the emulation profile's own
+                // default headers (read off a throwaway client, since the profile's
+                // header map is not otherwise accessible), overlay our extra
+                // headers so auth wins, and apply that AFTER emulation. The TLS /
+                // HTTP2 / header-order fingerprint from `emulation()` is carried in
+                // separate config fields and is unaffected by this final
+                // default_headers() call.
+                let mut merged = Client::builder()
+                    .emulation(em)
+                    .build()
+                    .map(|c| c.headers())
+                    .unwrap_or_default();
+                for (k, v) in cfg.extra_headers.iter() {
+                    merged.insert(k.clone(), v.clone());
+                }
+                if let Some(em2) = emulation_for_ua(ua) {
+                    b = b.emulation(em2).default_headers(merged);
+                }
             }
         }
     }

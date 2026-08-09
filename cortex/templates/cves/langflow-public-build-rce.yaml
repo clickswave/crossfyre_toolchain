@@ -2,7 +2,7 @@ id: langflow-public-build-unauth-rce
 info:
   name: Langflow public build/playground endpoint exposed (unauthenticated RCE)
   severity: critical
-  description: The unauthenticated public build endpoint (/api/v1/build_public_tmp/{id}/flow) is present. Langflow instantiates attacker-supplied flow component code server-side when the build events stream is consumed, giving unauthenticated remote code execution. Confirmed non-destructively by the endpoint processing an unauthenticated request (a non-404/401 response to an empty body). Uses a vhost Host header for name-based routing.
+  description: The unauthenticated public build endpoint (/api/v1/build_public_tmp/{id}/flow) is present on a Langflow instance. Langflow instantiates attacker-supplied flow component code server-side when the build events stream is consumed, giving unauthenticated remote code execution. Confirmed non-destructively: the endpoint must both accept the unauthenticated request (2xx/422, not 404/401/403) AND return a Langflow-shaped response body -- a bare non-error status is not sufficient, so a generic app that returns 500/HTML for an unknown path is not misreported. Uses a vhost Host header for name-based routing.
 http:
   - method: POST
     path:
@@ -13,9 +13,31 @@ http:
     body: "{}"
     matchers-condition: and
     matchers:
-      - type: dsl
-        dsl:
-          - "status_code == 400 || status_code == 422 || status_code == 200 || status_code == 500"
-      - type: dsl
-        dsl:
-          - "status_code != 404 && status_code != 401 && status_code != 403"
+      # Endpoint processes the request (present + unauthenticated), not a hard deny.
+      - type: status
+        status:
+          - 200
+          - 422
+      # Exclude generic framework error pages (e.g. an Express/Rails HTML 500 for
+      # an unknown route) that would otherwise read as "processed".
+      - type: word
+        part: body
+        negative: true
+        condition: or
+        words:
+          - "<html"
+          - "<!DOCTYPE"
+          - "Unexpected path"
+          - "Cannot POST"
+      # Positive Langflow evidence in the response body: the build/flow API shape.
+      - type: word
+        part: body
+        condition: or
+        words:
+          - "langflow"
+          - "\"vertices\""
+          - "\"outputs\""
+          - "\"flow_id\""
+          - "graph_data"
+          - "No flow found"
+          - "vertex_id"

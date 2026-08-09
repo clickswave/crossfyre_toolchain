@@ -68,6 +68,10 @@ async fn handle_connection(
                 handle_authz(req.params, &mut writer).await?;
                 return Ok(());
             }
+            "inject" => {
+                handle_inject(req.params, &mut writer).await?;
+                return Ok(());
+            }
             other => {
                 write_line(
                     &mut writer,
@@ -136,6 +140,36 @@ async fn handle_authz(
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
     tokio::spawn(async move {
         crate::authz::run(ap, tx).await;
+    });
+
+    while let Some(ev) = rx.recv().await {
+        write_line(writer, &ev).await?;
+    }
+    Ok(())
+}
+
+async fn handle_inject(
+    params: Value,
+    writer: &mut OwnedWriteHalf,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let ip: crate::inject::InjectParams = match serde_json::from_value(params) {
+        Ok(p) => p,
+        Err(e) => {
+            write_line(
+                writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid inject params: {}", e),
+                }),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+    tokio::spawn(async move {
+        crate::inject::run(ip, tx).await;
     });
 
     while let Some(ev) = rx.recv().await {
