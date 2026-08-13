@@ -36,6 +36,10 @@ pub struct TraceEvent {
     /// Coarse tech fingerprint from the response `Server` banner, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tech: Option<String>,
+    /// True when the request carried an Authorization header or session cookie. Only the FACT is
+    /// sent (never the credential) so the graph can mark the endpoint auth-required.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub authed: bool,
 }
 
 /// Redact a URL down to a safe shape:
@@ -102,6 +106,9 @@ pub struct RawCapture {
     pub uri: Option<String>,
     pub status: Option<i64>,
     pub server: Option<String>,
+    /// The request carried an Authorization header or a Cookie. We keep only this boolean - the
+    /// header value is deliberately discarded here so a credential never enters a TraceEvent.
+    pub authed: bool,
 }
 
 impl RawCapture {
@@ -151,6 +158,8 @@ pub fn parse_ek_line(line: &str) -> Option<RawCapture> {
             .or_else(|| first("response_code"))
             .and_then(|s| s.parse::<i64>().ok()),
         server: first("http.server").or_else(|| first("_server")).or_else(|| first("server")),
+        // Presence of either header marks the request authenticated; the value is never retained.
+        authed: first("authorization").is_some() || first("cookie").is_some(),
     };
     if raw.is_request() || raw.is_response() {
         Some(raw)
@@ -176,6 +185,7 @@ pub fn shape(raw: &RawCapture, host_filter: Option<&str>) -> Option<TraceEvent> 
         url: redact_url(uri),
         status: raw.status,
         tech: raw.server.clone(),
+        authed: raw.authed,
     })
 }
 
@@ -267,6 +277,10 @@ pub fn tshark_args(interface: &str, keylog_path: &str) -> Vec<String> {
         "-e".into(), "http.request.full_uri".into(),
         "-e".into(), "http.response.code".into(),
         "-e".into(), "http.server".into(),
+        // Presence-only auth detection: these are read to set a boolean and then discarded; the
+        // header VALUES never leave the machine (see shape()).
+        "-e".into(), "http.authorization".into(),
+        "-e".into(), "http.cookie".into(),
     ]
 }
 
@@ -422,6 +436,10 @@ mod tests {
         assert_eq!(raw.status, Some(200));
         assert_eq!(raw.server.as_deref(), Some("nginx/1.25"));
 
+        // presence of an Authorization header sets authed (the value is not retained on RawCapture)
+        let authed = r#"{"layers":{"http.request.method":["GET"],"http.request.full_uri":["https://h.com/me"],"http.authorization":["Bearer eyJ..."]}}"#;
+        assert!(parse_ek_line(authed).expect("parsed").authed, "auth header detected");
+
         // control/index lines and irrelevant packets yield nothing
         assert!(parse_ek_line(r#"{"index":{"_type":"doc"}}"#).is_none());
         assert!(parse_ek_line("not json").is_none());
@@ -434,11 +452,13 @@ mod tests {
             uri: Some("https://user:pw@api.example.com/v1/users/9?secret=abc".into()),
             status: None,
             server: Some("caddy".into()),
+            authed: true,
         };
         let ev = shape(&raw, Some("example.com")).expect("in scope");
         assert_eq!(ev.method, "GET");
         assert_eq!(ev.url, "https://api.example.com/v1/users/9?secret=");
         assert_eq!(ev.tech.as_deref(), Some("caddy"));
+        assert!(ev.authed, "auth flag carried through");
         // filtered out when the host does not match scope
         assert!(shape(&raw, Some("other.com")).is_none());
         // a bare response (no method/uri) is not a shapeable request
@@ -448,7 +468,7 @@ mod tests {
     #[test]
     fn batcher_flushes_at_capacity_and_drains() {
         let mut b = Batcher::new(2);
-        let ev = TraceEvent { method: "GET".into(), url: "https://h/x".into(), status: None, tech: None };
+        let ev = TraceEvent { method: "GET".into(), url: "https://h/x".into(), status: None, tech: None, authed: false };
         assert!(b.push(ev.clone()).is_none());
         let flushed = b.push(ev.clone()).expect("flush at capacity");
         assert_eq!(flushed.len(), 2);
