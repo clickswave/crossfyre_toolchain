@@ -94,6 +94,46 @@ enum Commands {
         targets: Vec<String>,
     },
 
+    /// Web Tracer: capture the sites you browse into a `web_trace` session's asset graph.
+    /// Launches a browser with SSLKEYLOGFILE and packet-captures alongside it (no proxy, no CA
+    /// install); each request is reduced to a redacted shape and streamed to the control plane.
+    /// Create the session in the dashboard (Command Center -> New Web Tracer) and paste the
+    /// `--workflow-id`/`--token` it prints, or copy the whole command from the Setup/Deploy tab.
+    Trace {
+        /// The web_trace workflow id (from the dashboard session).
+        #[arg(long)]
+        workflow_id: String,
+
+        /// The one-time session token (`cfxt_…`) shown when the session was created.
+        #[arg(long)]
+        token: String,
+
+        /// Control-plane origin.
+        #[arg(long, default_value = cfx_core::auth::DEFAULT_API_URL)]
+        api_url: String,
+
+        /// Capture interface (`any` on Linux; a named iface elsewhere).
+        #[arg(long, default_value = "any")]
+        interface: String,
+
+        /// Launch this browser with SSLKEYLOGFILE set (chrome/chromium/firefox/edge). Omit to
+        /// point your own already-configured browser instead.
+        #[arg(long)]
+        browser: Option<String>,
+
+        /// Only capture URLs containing this substring (keep out-of-scope hosts out).
+        #[arg(long)]
+        scope: Option<String>,
+
+        /// Flush a batch once this many shapes are buffered.
+        #[arg(long, default_value_t = 25)]
+        batch_size: usize,
+
+        /// Flush at least this often (seconds), even below the batch size.
+        #[arg(long, default_value_t = 5)]
+        flush_secs: u64,
+    },
+
     /// Update from the release manifest: `self`, an extension name, or `all`
     /// (default: self + every installed extension). For a single extension you
     /// can also use `crossfyre extension update <name>`.
@@ -497,6 +537,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Run { script, targets } => {
             cfx_core::run_script(&script, &targets).await?;
+        }
+        Commands::Trace {
+            workflow_id,
+            token,
+            api_url,
+            interface,
+            browser,
+            scope,
+            batch_size,
+            flush_secs,
+        } => {
+            cfx_core::toolchain::trace::run(cfx_core::toolchain::trace::TraceConfig {
+                api_url,
+                workflow_id,
+                token,
+                interface,
+                browser,
+                host_filter: scope,
+                batch_size,
+                flush_secs,
+            })
+            .await?;
         }
         Commands::Update { target, force } => {
             let self_updated = cfx_core::toolchain::install::update(
