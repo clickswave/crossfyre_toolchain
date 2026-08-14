@@ -66,6 +66,10 @@ pub struct CrawlParams {
     /// Parse JavaScript files/inline scripts for endpoints. Default true.
     #[serde(default = "d_true")]
     pub parse_js: bool,
+    /// Also surface static resources (css/json/map/wasm) as inventory so the asset graph can track
+    /// them appearing/disappearing. JS is fetched regardless (for endpoint mining + body hashing).
+    #[serde(default = "d_true")]
+    pub capture_static: bool,
     /// Substring patterns; any discovered URL containing one is skipped.
     #[serde(default)]
     pub exclude: Vec<String>,
@@ -118,6 +122,8 @@ pub struct CrawlEvent {
     pub method: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub params: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,6 +179,11 @@ impl CrawlEvent {
             } else {
                 Some(p.content_type.clone())
             },
+            content_hash: if p.content_hash.is_empty() {
+                None
+            } else {
+                Some(p.content_hash.clone())
+            },
             params: p.params.clone(),
             discovered_from: p.parent.clone(),
             depth: Some(p.depth),
@@ -196,6 +207,7 @@ impl CrawlEvent {
             status_code: None,
             method: None,
             content_type: None,
+            content_hash: None,
             params: Vec::new(),
             discovered_from: None,
             depth: None,
@@ -238,6 +250,9 @@ struct Page {
     content_type: String,
     links: Vec<String>,
     params: Vec<String>,
+    /// sha256 of the response body for non-HTML text/code (js/json/xml). Empty otherwise. Lets the
+    /// asset graph change-monitor JS/config bundles across scans without storing the body.
+    content_hash: String,
 }
 
 const MAX_VISITED: usize = 20_000;
@@ -342,7 +357,13 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
                     continue;
                 }
                 if is_static_asset(&child) {
-                    // In-scope but a static asset: recorded (deduped) but not mapped or fetched.
+                    // In-scope static asset: not crawled as a page, but (when capture_static) surfaced
+                    // as inventory if it's a trackable code/config file (css/json/map/wasm). Media
+                    // (images/fonts/av) stays dropped as noise. JS is not here - it isn't static-listed,
+                    // so it's fetched above and its body hashed.
+                    if params.capture_static && is_trackable_static(&child) {
+                        let _ = tx.send(CrawlEvent::url_candidate(&child, Some(page.url.to_string()), page.depth + 1));
+                    }
                     continue;
                 }
                 let child_depth = page.depth + 1;
@@ -386,6 +407,7 @@ async fn fetch_page(
         status: 0,
         content_type: String::new(),
         links: Vec::new(),
+        content_hash: String::new(),
     };
 
     match client.get(url.clone()).send().await {
@@ -417,9 +439,13 @@ async fn fetch_page(
                     if parse_js {
                         extract_js(&body, &mut page.links);
                     }
-                } else if parse_js {
-                    // js / json / xml / text: harvest URL-like strings
-                    extract_js(&body, &mut page.links);
+                } else {
+                    // js / json / xml / text: hash the body so the asset graph can change-monitor it,
+                    // and harvest URL-like strings (JS recon).
+                    page.content_hash = sha256_hex(body.as_bytes());
+                    if parse_js {
+                        extract_js(&body, &mut page.links);
+                    }
                 }
             }
         }
@@ -570,6 +596,25 @@ fn is_static_asset(url: &Url) -> bool {
         ".zip", ".gz", ".tar", ".rar", ".7z",
     ];
     EXT.iter().any(|e| path.ends_with(e))
+}
+
+/// A static asset worth inventorying (code/config), as opposed to media noise. These carry attack
+/// surface / change signal; images/fonts/audio/video/archives don't.
+fn is_trackable_static(url: &Url) -> bool {
+    let path = url.path().to_lowercase();
+    const EXT: &[&str] = &[".css", ".json", ".map", ".wasm", ".xml"];
+    EXT.iter().any(|e| path.ends_with(e))
+}
+
+/// Lowercase hex sha256 (no `hex` crate dependency).
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    let mut s = String::with_capacity(64);
+    for b in digest {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
 }
 
 fn dedup(v: &mut Vec<String>) {
