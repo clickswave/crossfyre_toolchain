@@ -219,6 +219,16 @@ impl Batcher {
     }
 }
 
+/// Which capture backend a trace run uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CaptureMethod {
+    /// Method 1: SSLKEYLOGFILE + packet capture (needs Wireshark/tshark + capture privileges).
+    Keylog,
+    /// Method 2: local intercepting proxy (Burp-style), needs only a browser.
+    #[default]
+    Proxy,
+}
+
 /// Configuration for a capture run, assembled from the `crossfyre trace` flags (which the
 /// Setup/Deploy tab pre-fills).
 #[derive(Debug, Clone)]
@@ -226,7 +236,11 @@ pub struct TraceConfig {
     pub api_url: String,
     pub workflow_id: String,
     pub token: String,
-    /// Network interface for capture (`any` on Linux, else the default route iface).
+    /// Capture backend (proxy by default; keylog for passive packet capture).
+    pub method: CaptureMethod,
+    /// Local port for the intercepting proxy (Method 2). 0 = OS-assigned ephemeral port.
+    pub proxy_port: u16,
+    /// Network interface for packet capture (`any` on Linux, else the default route iface).
     pub interface: String,
     /// Browser to launch (`chrome`/`chromium`/`firefox`), or None to let the user drive their own.
     pub browser: Option<String>,
@@ -288,6 +302,11 @@ pub fn tshark_args(interface: &str, keylog_path: &str) -> Vec<String> {
 /// drives is unit tested. Streams `tshark -T ek`, shapes each packet, batches, and POSTs; flushes
 /// on a timer and on shutdown (Ctrl-C or browser exit) with `ended=true`.
 pub async fn run(cfg: TraceConfig) -> Result<(), BoxErr> {
+    // Method 2 (local proxy) is the default, minimal-prerequisite path.
+    if cfg.method == CaptureMethod::Proxy {
+        return super::trace_proxy::run_proxy(cfg).await.map_err(|e| -> BoxErr { e });
+    }
+
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
@@ -385,7 +404,7 @@ pub async fn run(cfg: TraceConfig) -> Result<(), BoxErr> {
     Ok(())
 }
 
-fn browser_binary(name: &str) -> String {
+pub fn browser_binary(name: &str) -> String {
     match name.to_lowercase().as_str() {
         "chrome" | "google-chrome" => "google-chrome".into(),
         "chromium" => "chromium".into(),

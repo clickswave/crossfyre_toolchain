@@ -95,10 +95,10 @@ enum Commands {
     },
 
     /// Web Tracer: capture the sites you browse into a `web_trace` session's asset graph.
-    /// Launches a browser with SSLKEYLOGFILE and packet-captures alongside it (no proxy, no CA
-    /// install); each request is reduced to a redacted shape and streamed to the control plane.
-    /// Create the session in the dashboard (Command Center -> New Web Tracer) and paste the
-    /// `--workflow-id`/`--token` it prints, or copy the whole command from the Setup/Deploy tab.
+    /// Runs a local intercepting proxy (default; needs only a browser) and points a launched browser
+    /// at it, or use `--method keylog` for SSLKEYLOGFILE + packet capture. Each request is reduced to
+    /// a redacted shape and streamed to the control plane. Create the session in the dashboard
+    /// (Command Center -> New Web Tracer) and paste the `--workflow-id`/`--token` it prints.
     Trace {
         /// The web_trace workflow id (from the dashboard session).
         #[arg(long)]
@@ -132,6 +132,15 @@ enum Commands {
         /// Flush at least this often (seconds), even below the batch size.
         #[arg(long, default_value_t = 5)]
         flush_secs: u64,
+
+        /// Capture method: `proxy` (local MITM proxy, needs only a browser - default) or `keylog`
+        /// (SSLKEYLOGFILE + packet capture, needs Wireshark).
+        #[arg(long, default_value = "proxy")]
+        method: String,
+
+        /// Local port for the intercepting proxy (Method 2). 0 = OS-assigned ephemeral port.
+        #[arg(long, default_value_t = 8080)]
+        proxy_port: u16,
     },
 
     /// Update from the release manifest: `self`, an extension name, or `all`
@@ -547,11 +556,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             scope,
             batch_size,
             flush_secs,
+            method,
+            proxy_port,
         } => {
+            let method = match method.to_lowercase().as_str() {
+                "keylog" | "packet" | "pcap" => cfx_core::toolchain::trace::CaptureMethod::Keylog,
+                _ => cfx_core::toolchain::trace::CaptureMethod::Proxy,
+            };
             cfx_core::toolchain::trace::run(cfx_core::toolchain::trace::TraceConfig {
                 api_url,
                 workflow_id,
                 token,
+                method,
+                proxy_port,
                 interface,
                 browser,
                 host_filter: scope,

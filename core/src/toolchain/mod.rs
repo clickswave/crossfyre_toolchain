@@ -14,6 +14,7 @@ pub mod oast;
 pub mod service;
 pub mod status;
 pub mod trace;
+pub mod trace_proxy;
 pub mod sudo_user;
 pub mod ui;
 pub mod uninstall;
