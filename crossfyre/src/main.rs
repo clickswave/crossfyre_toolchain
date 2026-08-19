@@ -138,8 +138,9 @@ enum Commands {
         #[arg(long, default_value = "proxy")]
         method: String,
 
-        /// Local port for the intercepting proxy (Method 2). 0 = OS-assigned ephemeral port.
-        #[arg(long, default_value_t = 8080)]
+        /// Local port for the intercepting proxy (Method 2). Default 0 = OS-assigned free port (the
+        /// tool prints the one it picked); set a fixed port if you drive your own browser.
+        #[arg(long, default_value_t = 0)]
         proxy_port: u16,
     },
 

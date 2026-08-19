@@ -40,6 +40,33 @@ fn empty() -> Body {
     Empty::<Bytes>::new().boxed()
 }
 
+/// Chromium flags that suppress Google/Chrome background traffic so the capture is the operator's
+/// browsing, not the browser phoning home (safebrowsing, optimization hints, account sync, component
+/// + spellcheck-dictionary downloads, metrics, GCM, hyperlink auditing). Mirrors the quiet profile
+/// Burp's embedded browser launches with.
+const CHROMIUM_QUIET_FLAGS: &[&str] = &[
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--disable-domain-reliability",
+    "--disable-client-side-phishing-detection",
+    "--safebrowsing-disable-auto-update",
+    "--disable-default-apps",
+    "--disable-breakpad",
+    "--metrics-recording-only",
+    "--no-pings",
+    "--no-service-autorun",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-search-engine-choice-screen",
+    "--disable-features=OptimizationHints,OptimizationGuideModelDownloading,Translate,MediaRouter,\
+DialMediaRouteProvider,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,\
+AutofillServerCommunication,CertificateTransparencyComponentUpdater",
+];
+
 // ---------------------------------------------------------------------------
 // Session CA + on-the-fly per-host leaf certs
 // ---------------------------------------------------------------------------
@@ -290,11 +317,19 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
         // -errors makes the ephemeral profile trust our MITM cert without installing the CA.
         cmd.arg(format!("--proxy-server={bound}"))
             .arg(format!("--user-data-dir={}", profile.display()))
-            .arg("--ignore-certificate-errors")
-            .arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+            .arg("--ignore-certificate-errors");
+        // Chromium-family only: silence the background/telemetry traffic (safebrowsing, optimization
+        // hints, account sync, component/dictionary downloads, the New Tab Page's promos/doodles, GCM,
+        // metrics) so the capture is the operator's browsing, not Google phoning home - the same reason
+        // Burp's embedded browser is quiet. Firefox is left to its defaults (different flags/prefs).
+        if bin != "firefox" {
+            for flag in CHROMIUM_QUIET_FLAGS {
+                cmd.arg(flag);
+            }
+            // Start on a blank page, not Google's NTP (which itself fetches promos/one-google-bar/doodles).
+            cmd.arg("about:blank");
+        }
+        cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         match cmd.spawn() {
             Ok(c) => {
                 println!("  launched {bin} through the proxy (isolated profile)");
