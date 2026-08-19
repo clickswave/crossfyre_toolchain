@@ -401,6 +401,10 @@ mod imp {
 
     fn unit_body(ext: &str) -> String {
         let bin = ext_bin_path(ext);
+        // Daemon port from the host config.toml (defaults to the protocol
+        // constant). Baked into ExecStart so a reinstall picks up a changed
+        // port; the op-clients and heartbeat read the same source.
+        let port = super::super::config::engine_port(ext);
         // Optional egress-proxy env (BYO residential/mobile egress). The `-`
         // prefix makes it non-fatal when absent, so direct-egress nodes are
         // unaffected; the node writes this file when a proxy egress is configured.
@@ -413,7 +417,7 @@ mod imp {
              [Service]\n\
              Type=simple\n\
              EnvironmentFile=-{egress_env}\n\
-             ExecStart={bin} --daemon\n\
+             ExecStart={bin} --daemon --port {port}\n\
              Restart=on-failure\n\
              RestartSec=5\n\
              \n\
@@ -422,6 +426,7 @@ mod imp {
             ext = ext,
             bin = bin.display(),
             egress_env = egress_env.display(),
+            port = port,
         )
     }
 
@@ -522,6 +527,7 @@ mod imp {
 
     fn plist_body(ext: &str) -> String {
         let bin = ext_bin_path(ext);
+        let port = super::super::config::engine_port(ext);
         format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
              <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -533,6 +539,8 @@ mod imp {
              \x20 <array>\n\
              \x20   <string>{bin}</string>\n\
              \x20   <string>--daemon</string>\n\
+             \x20   <string>--port</string>\n\
+             \x20   <string>{port}</string>\n\
              \x20 </array>\n\
              \x20 <key>RunAtLoad</key>\n\
              \x20 <true/>\n\
@@ -542,6 +550,7 @@ mod imp {
              </plist>\n",
             label = label(ext),
             bin = bin.display(),
+            port = port,
         )
     }
 
@@ -647,8 +656,9 @@ mod imp {
 
     pub fn create(ext: &str) -> Result<(), Box<dyn std::error::Error>> {
         let bin = ext_bin_path(ext);
+        let port = super::super::config::engine_port(ext);
         // Quote the path; ONLOGON mirrors systemd --user (starts at user login).
-        let tr = format!("\"{}\" --daemon", bin.display());
+        let tr = format!("\"{}\" --daemon --port {}", bin.display(), port);
         let status = Command::new("schtasks")
             .args([
                 "/Create",

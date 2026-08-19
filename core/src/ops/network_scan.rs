@@ -60,7 +60,7 @@ pub async fn handle(env: OpEnv) {
         // can grep for known-open ones (53, 80, 5432, etc).
         let log_sample = true;
         let mut found_count = 0;
-        let conn = tokio::net::TcpStream::connect("127.0.0.1:4443").await;
+        let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("pulse")).await;
         match conn {
             Ok(stream) => {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -226,7 +226,8 @@ pub async fn handle(env: OpEnv) {
                 if now_secs.saturating_sub(LAST_LOG.load(Ordering::Relaxed)) >= 60 {
                     LAST_LOG.store(now_secs, Ordering::Relaxed);
                     eprintln!(
-                        "[op] FAIL pulse daemon unreachable on 127.0.0.1:4443 ({e}). Is `pulse --daemon` running? (suppressing further messages for 60s)"
+                        "[op] FAIL pulse daemon unreachable on {} ({e}). Is `pulse --daemon` running? (suppressing further messages for 60s)",
+                        crate::toolchain::config::engine_addr("pulse")
                     );
                 }
                 let msg = serde_json::json!({
@@ -291,7 +292,7 @@ pub async fn handle(env: OpEnv) {
         pulse_req["max_concurrency"] = serde_json::json!(mc);
     }
 
-    let conn = tokio::net::TcpStream::connect("127.0.0.1:4443").await;
+    let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("pulse")).await;
     match conn {
         Ok(stream) => {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

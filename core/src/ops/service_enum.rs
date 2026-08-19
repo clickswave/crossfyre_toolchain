@@ -62,7 +62,7 @@ pub async fn handle(env: OpEnv) {
     };
 
     let mut found_count: i64 = 0;
-    let conn = tokio::net::TcpStream::connect("127.0.0.1:4444").await;
+    let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("scout")).await;
     match conn {
         Ok(stream) => {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -116,7 +116,8 @@ pub async fn handle(env: OpEnv) {
         }
         Err(e) => {
             eprintln!(
-                "[op] FAIL scout daemon unreachable on 127.0.0.1:4444 ({e}). Is `scout --daemon` running?"
+                "[op] FAIL scout daemon unreachable on {} ({e}). Is `scout --daemon` running?",
+                crate::toolchain::config::engine_addr("scout")
             );
             relay.publish_failed().await;
             return;

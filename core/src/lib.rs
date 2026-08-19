@@ -1426,9 +1426,15 @@ pub async fn run_init(
     }
 
     // Write the default toolchain config (postgres connection for the
-    // extension daemons) if this host doesn't have one yet.
-    if let Err(e) = toolchain::config::load_or_create_config() {
-        warn(&format!("could not create toolchain config: {e}"));
+    // extension daemons) if this host doesn't have one yet, then apply any
+    // custom service ports the operator chose in the deploy wizard - so the
+    // engines and database below install on those ports from the start.
+    match toolchain::config::apply_ports_from_json(&json_resp["ports"]) {
+        Ok(changed) if !changed.is_empty() => {
+            step(&format!("Applied custom service ports: {}", changed.join(", ")));
+        }
+        Ok(_) => {}
+        Err(e) => warn(&format!("could not create toolchain config: {e}")),
     }
 
     // Install each extension assigned to this node: download, verify against
@@ -1627,8 +1633,45 @@ pub async fn refresh_node_state(
     if let Some(parent) = config_path.parent() {
         chown_tree_to_sudo_user(parent);
     }
+    // Apply any service-port overrides the operator set in the dashboard and
+    // reconcile the local services to match. Runs on every daemon start, so a
+    // port changed while this node was offline (its live set_ports command was
+    // never delivered) still takes effect the moment it reconnects.
+    let changed = reconcile_ports(&json_resp["ports"]);
+    if !changed.is_empty() {
+        println!("[ports] Reconciled service ports: {}", changed.join(", "));
+    }
+
     println!("Node state refreshed and saved.");
     Ok(())
+}
+
+/// Apply server-provided port overrides to the host `config.toml` and restart the
+/// exact local services whose port moved, so the change takes effect. Shared by
+/// the daemon's startup refresh and the live `set_ports` command. Returns the
+/// list of services that changed. Safe to call when nothing changed (no-op).
+fn reconcile_ports(ports_json: &serde_json::Value) -> Vec<String> {
+    let changed = toolchain::config::apply_ports_from_json(ports_json).unwrap_or_default();
+    if changed.is_empty() {
+        return changed;
+    }
+    // Postgres port moved: re-provision the container on the new port.
+    if changed.iter().any(|c| c == "postgres") {
+        match toolchain::config::load_config() {
+            Ok(cfg) => {
+                let _ = toolchain::db::up(&cfg);
+            }
+            Err(e) => eprintln!("[ports] FAIL reload config for db: {e}"),
+        }
+    }
+    // Engine port moved: rewrite its unit (ExecStart reads config.toml) + restart.
+    for ext in changed.iter().filter(|c| c.as_str() != "postgres") {
+        if toolchain::config::is_extension_installed(ext) {
+            let _ = toolchain::service::create_service_file(ext);
+            let _ = toolchain::service::restart(ext);
+        }
+    }
+    changed
 }
 
 /// A stable seed identifying the physical machine this node runs on, so two
@@ -2148,14 +2191,16 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                 last_rx = rx_now;
                 last_tx = tx_now;
 
-                // Probe only installed extension daemon ports
+                // Probe only installed extension daemon ports. Ports come from
+                // the host config.toml (via engine_port), so a custom port is
+                // both probed and reported to the dashboard correctly.
                 let ext_status: serde_json::Value = {
                     let mut map = serde_json::Map::new();
-                    let known_ports: &[(&str, u16)] = &[("mach", 4441), ("voyage", 4442), ("pulse", 4443), ("scout", 4444), ("cortex", 4445)];
-                    for (ext, port) in known_ports {
+                    for ext in crate::toolchain::EXTENSIONS {
                         if !config.extensions.iter().any(|e| e == ext) { continue; }
+                        let port = crate::toolchain::config::engine_port(ext);
                         let running = std::net::TcpStream::connect_timeout(
-                            &std::net::SocketAddr::from(([127, 0, 0, 1], *port)),
+                            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
                             std::time::Duration::from_millis(200),
                         ).is_ok();
                         map.insert(ext.to_string(), serde_json::json!({
@@ -2168,17 +2213,20 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
 
                 // Toolchain health. The package manager is built into this
                 // binary, so "installed" is always true and the version is
-                // our own; Postgres is probed on its TCP port.
+                // our own; Postgres is probed on its configured TCP port.
                 let toolchain_status: serde_json::Value = {
+                    let pg_port = crate::toolchain::config::load_config()
+                        .map(|c| c.postgres.port)
+                        .unwrap_or(4440);
                     let pg_running = std::net::TcpStream::connect_timeout(
-                        &std::net::SocketAddr::from(([127, 0, 0, 1], 4440)),
+                        &std::net::SocketAddr::from(([127, 0, 0, 1], pg_port)),
                         std::time::Duration::from_millis(200),
                     ).is_ok();
 
                     serde_json::json!({
                         "installed": true,
                         "version": format!("crossfyre {}", env!("CARGO_PKG_VERSION")),
-                        "postgres": { "port": 4440, "running": pg_running }
+                        "postgres": { "port": pg_port, "running": pg_running }
                     })
                 };
 
@@ -2539,6 +2587,26 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                     "type": if success { "extension_stopped" } else { "extension_stop_failed" },
                                     "extension": ext,
                                     "success": success,
+                                    "node_id": &node_id
+                                });
+                                let _ = publisher.publish(status_subject.clone(), msg.to_string().into()).await;
+                            }
+                            Some("set_ports") => {
+                                // Dashboard changed one or more service ports.
+                                // Persist to config.toml, then restart exactly
+                                // the services that moved: re-create the DB
+                                // container on the new port, and rewrite +
+                                // restart each affected engine's unit (the unit
+                                // template reads config.toml for its --port).
+                                println!("\n[ports] Applying service port changes...");
+                                let changed = reconcile_ports(&cmd["ports"]);
+                                if !changed.is_empty() {
+                                    println!("[ports] Applied: {}", changed.join(", "));
+                                }
+
+                                let msg = serde_json::json!({
+                                    "type": "ports_applied",
+                                    "changed": changed,
                                     "node_id": &node_id
                                 });
                                 let _ = publisher.publish(status_subject.clone(), msg.to_string().into()).await;

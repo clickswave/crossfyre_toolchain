@@ -19,9 +19,16 @@ static REGISTRY: Mutex<Option<HashMap<String, ExtensionKind>>> = Mutex::new(None
 pub fn inject_defaults() {
     let mut map = HashMap::new();
 
-    // Crossfyre extension daemons (TCP JSON protocol)
-    map.insert("mach".to_string(), ExtensionKind::Daemon { port: 4441 });
-    map.insert("voyage".to_string(), ExtensionKind::Daemon { port: 4442 });
+    // Crossfyre extension daemons (TCP JSON protocol). Ports come from the
+    // host config.toml so a custom port applies to cfx scripts too.
+    map.insert(
+        "mach".to_string(),
+        ExtensionKind::Daemon { port: crate::toolchain::config::engine_port("mach") },
+    );
+    map.insert(
+        "voyage".to_string(),
+        ExtensionKind::Daemon { port: crate::toolchain::config::engine_port("voyage") },
+    );
 
     // Common CLI recon tools (shell out to binary)
     for name in [

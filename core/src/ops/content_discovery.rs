@@ -53,7 +53,7 @@ pub async fn handle(env: OpEnv) {
             "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(false),
         });
 
-        let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
+        let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("mach")).await;
         match conn {
             Ok(stream) => {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -376,7 +376,7 @@ pub async fn handle(env: OpEnv) {
             obj.insert("auth".into(), auth.clone());
         }
 
-        let conn = tokio::net::TcpStream::connect("127.0.0.1:4441").await;
+        let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("mach")).await;
         match conn {
             Ok(stream) => {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

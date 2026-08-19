@@ -43,7 +43,7 @@ pub async fn handle(env: OpEnv) {
     };
 
     let mut found_count = 0;
-    match tokio::net::TcpStream::connect("127.0.0.1:4442").await {
+    match tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("voyage")).await {
         Ok(stream) => {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
             let (reader, mut writer) = stream.into_split();

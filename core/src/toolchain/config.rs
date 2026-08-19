@@ -11,6 +11,12 @@ use std::path::PathBuf;
 pub struct ToolchainConfig {
     pub postgres: PostgresSection,
     pub container: ContainerSection,
+    // Local TCP ports the extension daemons listen on. Host-level (all nodes on
+    // this machine share one set of engine daemons + one Postgres), overridable
+    // per install so an operator can dodge a port clash. Defaulted via serde so
+    // an older config.toml still parses.
+    #[serde(default)]
+    pub extensions: ExtensionPorts,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +33,67 @@ pub struct ContainerSection {
     pub id: Option<String>,
 }
 
+/// Per-extension daemon ports. Defaults are the protocol constants
+/// ([`super::EXTENSION_PORTS`]); every field is `#[serde(default)]` so a config
+/// that predates this section (or omits a newer engine) still loads.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExtensionPorts {
+    #[serde(default = "def_mach")]
+    pub mach: u16,
+    #[serde(default = "def_voyage")]
+    pub voyage: u16,
+    #[serde(default = "def_pulse")]
+    pub pulse: u16,
+    #[serde(default = "def_scout")]
+    pub scout: u16,
+    #[serde(default = "def_cortex")]
+    pub cortex: u16,
+}
+
+fn def_mach() -> u16 { 4441 }
+fn def_voyage() -> u16 { 4442 }
+fn def_pulse() -> u16 { 4443 }
+fn def_scout() -> u16 { 4444 }
+fn def_cortex() -> u16 { 4445 }
+
+impl Default for ExtensionPorts {
+    fn default() -> Self {
+        Self {
+            mach: def_mach(),
+            voyage: def_voyage(),
+            pulse: def_pulse(),
+            scout: def_scout(),
+            cortex: def_cortex(),
+        }
+    }
+}
+
+impl ExtensionPorts {
+    /// Configured port for `ext`, or 0 if it isn't a known engine.
+    pub fn get(&self, ext: &str) -> u16 {
+        match ext {
+            "mach" => self.mach,
+            "voyage" => self.voyage,
+            "pulse" => self.pulse,
+            "scout" => self.scout,
+            "cortex" => self.cortex,
+            _ => 0,
+        }
+    }
+
+    /// Set `ext`'s port; no-op for an unknown engine name.
+    pub fn set(&mut self, ext: &str, port: u16) {
+        match ext {
+            "mach" => self.mach = port,
+            "voyage" => self.voyage = port,
+            "pulse" => self.pulse = port,
+            "scout" => self.scout = port,
+            "cortex" => self.cortex = port,
+            _ => {}
+        }
+    }
+}
+
 impl Default for ToolchainConfig {
     fn default() -> Self {
         Self {
@@ -38,6 +105,7 @@ impl Default for ToolchainConfig {
                 db_name: "crossfyre".to_string(),
             },
             container: ContainerSection { id: None },
+            extensions: ExtensionPorts::default(),
         }
     }
 }
@@ -103,6 +171,70 @@ pub fn save_config(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::E
     fs::write(&path, toml_string)?;
     super::sudo_user::chown_to_invoking_user(&path);
     Ok(())
+}
+
+/// Resolve an extension daemon's port from `config.toml`, falling back to the
+/// protocol default if the file is missing/unreadable or the engine is unknown.
+/// This is the single lookup every op-client and the service installer use, so
+/// changing a port in one place (config.toml) moves it everywhere consistently.
+/// Reads the file each call - it's tiny, and this keeps the value fresh across
+/// an install that rewrites config.toml mid-process.
+pub fn engine_port(ext: &str) -> u16 {
+    let configured = load_config().ok().map(|c| c.extensions.get(ext)).unwrap_or(0);
+    if configured != 0 {
+        return configured;
+    }
+    // Unknown to the config (old file, or a brand-new engine): protocol default.
+    super::EXTENSION_PORTS
+        .iter()
+        .find(|(name, _)| *name == ext)
+        .map(|(_, p)| *p)
+        .unwrap_or(0)
+}
+
+/// `127.0.0.1:<port>` for an extension daemon, ready to hand to `TcpStream::connect`.
+pub fn engine_addr(ext: &str) -> String {
+    format!("127.0.0.1:{}", engine_port(ext))
+}
+
+/// Merge server-provided port overrides into the host `config.toml`. The JSON
+/// is a flat map of service name to port, e.g.
+/// `{ "postgres": 4440, "mach": 4441, "pulse": 4443 }` - "postgres" targets the
+/// database, every other key an engine daemon. Missing/unknown keys keep their
+/// current value. Ensures `config.toml` exists first, and only writes when
+/// something actually changed. Returns the list of services whose port moved
+/// (so a live re-apply can restart exactly those), postgres included.
+pub fn apply_ports_from_json(
+    ports: &serde_json::Value,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut config = load_or_create_config()?;
+    let obj = match ports.as_object() {
+        Some(o) => o,
+        None => return Ok(Vec::new()),
+    };
+    let mut changed: Vec<String> = Vec::new();
+
+    if let Some(p) = obj.get("postgres").and_then(|v| v.as_u64()) {
+        let p = p as u16;
+        if p != 0 && config.postgres.port != p {
+            config.postgres.port = p;
+            changed.push("postgres".to_string());
+        }
+    }
+    for ext in super::EXTENSIONS {
+        if let Some(p) = obj.get(*ext).and_then(|v| v.as_u64()) {
+            let p = p as u16;
+            if p != 0 && config.extensions.get(ext) != p {
+                config.extensions.set(ext, p);
+                changed.push((*ext).to_string());
+            }
+        }
+    }
+
+    if !changed.is_empty() {
+        save_config(&config)?;
+    }
+    Ok(changed)
 }
 
 /// Load the toolchain config, writing the defaults first if none exists.

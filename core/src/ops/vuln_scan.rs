@@ -99,7 +99,7 @@ pub async fn handle(env: OpEnv) {
     let mut processed: i64 = 0;
     let mut total: i64 = 0;
     let mut last_prog = std::time::Instant::now();
-    let conn = tokio::net::TcpStream::connect("127.0.0.1:4445").await;
+    let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("cortex")).await;
     match conn {
         Ok(stream) => {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -178,7 +178,8 @@ pub async fn handle(env: OpEnv) {
         }
         Err(e) => {
             eprintln!(
-                "[op] FAIL cortex daemon unreachable on 127.0.0.1:4445 ({e}). Is `cortex --daemon` running?"
+                "[op] FAIL cortex daemon unreachable on {} ({e}). Is `cortex --daemon` running?",
+                crate::toolchain::config::engine_addr("cortex")
             );
             relay.publish_failed().await;
             return;
