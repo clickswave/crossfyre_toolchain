@@ -6,7 +6,7 @@ description = "Backend-agnostic outbound HTTP client for the Crossfyre engines. 
 
 [dependencies]
 # Default backend. Always compiled so the shared http/url types are available.
-reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "http2", "charset", "cookies", "gzip", "json"] }
+reqwest = { version = "0.12.22", default-features = false, features = ["rustls-tls", "http2", "charset", "cookies", "gzip", "brotli", "deflate", "zstd", "json"] }
 
 # `AuthSpec` deserializes straight from engine op params.
 serde = { version = "1", features = ["derive"] }

@@ -124,6 +124,14 @@ pub fn build_client(cfg: ClientConfig) -> Result<Client, Error> {
     let mut headers = cfg.extra_headers.clone();
     if !will_emulate(&cfg) {
         for (k, v) in cfg.browser_headers.iter() {
+            // Never forward a browser Accept-Encoding here: reqwest only
+            // auto-decompresses when IT set the header, so a manual `br`/`zstd`
+            // would come back as undecoded bytes (breaking HTML/JS extraction on
+            // any brotli/zstd server). Let reqwest advertise + decode via its
+            // compression features instead.
+            if k.as_str() == "accept-encoding" {
+                continue;
+            }
             headers.insert(k.clone(), v.clone());
         }
         if let Some(ua) = &cfg.user_agent {
