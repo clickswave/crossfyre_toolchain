@@ -63,7 +63,7 @@ pub fn redact_url(raw: &str) -> String {
     // 4. Blank query values, keep keys and their order.
     match query {
         None => base,
-        Some(q) if q.is_empty() => base, // trailing '?'
+        Some("") => base, // trailing '?'
         Some(q) => {
             let blanked: Vec<String> = q
                 .split('&')
@@ -93,7 +93,12 @@ fn strip_userinfo(base: &str) -> String {
     let authority = &rest[..authority_end];
     match authority.rsplit_once('@') {
         Some((_userinfo, hostport)) => {
-            format!("{}{}{}", &base[..authority_start], hostport, &rest[authority_end..])
+            format!(
+                "{}{}{}",
+                &base[..authority_start],
+                hostport,
+                &rest[authority_end..]
+            )
         }
         None => base.to_string(),
     }
@@ -137,7 +142,9 @@ pub fn parse_ek_line(line: &str) -> Option<RawCapture> {
             if k.ends_with(suffix) {
                 // Field values are arrays in `-ek`; accept a bare scalar too.
                 let s = match val {
-                    serde_json::Value::Array(a) => a.first().and_then(|x| x.as_str().map(str::to_string)),
+                    serde_json::Value::Array(a) => {
+                        a.first().and_then(|x| x.as_str().map(str::to_string))
+                    }
                     serde_json::Value::String(s) => Some(s.clone()),
                     other => other.as_str().map(str::to_string),
                 };
@@ -157,7 +164,9 @@ pub fn parse_ek_line(line: &str) -> Option<RawCapture> {
         status: first("response.code")
             .or_else(|| first("response_code"))
             .and_then(|s| s.parse::<i64>().ok()),
-        server: first("http.server").or_else(|| first("_server")).or_else(|| first("server")),
+        server: first("http.server")
+            .or_else(|| first("_server"))
+            .or_else(|| first("server")),
         // Presence of either header marks the request authenticated; the value is never retained.
         authed: first("authorization").is_some() || first("cookie").is_some(),
     };
@@ -181,7 +190,11 @@ pub fn shape(raw: &RawCapture, host_filter: Option<&str>) -> Option<TraceEvent> 
         }
     }
     Some(TraceEvent {
-        method: raw.method.clone().unwrap_or_else(|| "GET".into()).to_uppercase(),
+        method: raw
+            .method
+            .clone()
+            .unwrap_or_else(|| "GET".into())
+            .to_uppercase(),
         url: redact_url(uri),
         status: raw.status,
         tech: raw.server.clone(),
@@ -199,7 +212,10 @@ pub struct Batcher {
 
 impl Batcher {
     pub fn new(max: usize) -> Self {
-        Self { queue: VecDeque::new(), max: max.max(1) }
+        Self {
+            queue: VecDeque::new(),
+            max: max.max(1),
+        }
     }
     /// Push an event; returns a full batch to flush if the buffer reached `max`.
     pub fn push(&mut self, ev: TraceEvent) -> Option<Vec<TraceEvent>> {
@@ -259,7 +275,10 @@ pub async fn post_batch(
     ended: bool,
 ) -> Result<usize, BoxErr> {
     let res = client
-        .post(format!("{}/api/v1/web-trace/ingest", cfg.api_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/v1/web-trace/ingest",
+            cfg.api_url.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({
             "workflow_id": cfg.workflow_id,
             "token": cfg.token,
@@ -271,7 +290,10 @@ pub async fn post_batch(
     let ok = res.status().is_success();
     let body: serde_json::Value = res.json().await.unwrap_or(serde_json::json!({}));
     if !ok {
-        let msg = body["message"].as_str().unwrap_or("ingest rejected").to_string();
+        let msg = body["message"]
+            .as_str()
+            .unwrap_or("ingest rejected")
+            .to_string();
         return Err(msg.into());
     }
     Ok(body["data"]["accepted"].as_u64().unwrap_or(0) as usize)
@@ -282,19 +304,29 @@ pub async fn post_batch(
 /// in). Uses `-T ek` with explicit fields; `-l` line-buffers so we stream shapes live.
 pub fn tshark_args(interface: &str, keylog_path: &str) -> Vec<String> {
     vec![
-        "-i".into(), interface.into(),
+        "-i".into(),
+        interface.into(),
         "-l".into(),
-        "-o".into(), format!("tls.keylog_file:{keylog_path}"),
-        "-Y".into(), "http.request || http.response".into(),
-        "-T".into(), "ek".into(),
-        "-e".into(), "http.request.method".into(),
-        "-e".into(), "http.request.full_uri".into(),
-        "-e".into(), "http.response.code".into(),
-        "-e".into(), "http.server".into(),
+        "-o".into(),
+        format!("tls.keylog_file:{keylog_path}"),
+        "-Y".into(),
+        "http.request || http.response".into(),
+        "-T".into(),
+        "ek".into(),
+        "-e".into(),
+        "http.request.method".into(),
+        "-e".into(),
+        "http.request.full_uri".into(),
+        "-e".into(),
+        "http.response.code".into(),
+        "-e".into(),
+        "http.server".into(),
         // Presence-only auth detection: these are read to set a boolean and then discarded; the
         // header VALUES never leave the machine (see shape()).
-        "-e".into(), "http.authorization".into(),
-        "-e".into(), "http.cookie".into(),
+        "-e".into(),
+        "http.authorization".into(),
+        "-e".into(),
+        "http.cookie".into(),
     ]
 }
 
@@ -304,7 +336,9 @@ pub fn tshark_args(interface: &str, keylog_path: &str) -> Vec<String> {
 pub async fn run(cfg: TraceConfig) -> Result<(), BoxErr> {
     // Method 2 (local proxy) is the default, minimal-prerequisite path.
     if cfg.method == CaptureMethod::Proxy {
-        return super::trace_proxy::run_proxy(cfg).await.map_err(|e| -> BoxErr { e });
+        return super::trace_proxy::run_proxy(cfg)
+            .await
+            .map_err(|e| -> BoxErr { e });
     }
 
     use std::process::Stdio;
@@ -316,7 +350,10 @@ pub async fn run(cfg: TraceConfig) -> Result<(), BoxErr> {
     std::fs::write(&keylog, b"").map_err(|e| format!("cannot create keylog file: {e}"))?;
     let keylog_path = keylog.to_string_lossy().to_string();
 
-    println!("Web Tracer: starting capture on {} (session {})", cfg.interface, cfg.workflow_id);
+    println!(
+        "Web Tracer: starting capture on {} (session {})",
+        cfg.interface, cfg.workflow_id
+    );
     println!("  keylog: {keylog_path}");
 
     // Optionally launch the browser with SSLKEYLOGFILE set. If not, the user points their own
@@ -335,7 +372,9 @@ pub async fn run(cfg: TraceConfig) -> Result<(), BoxErr> {
                 browser_child = Some(c);
             }
             Err(e) => {
-                eprintln!("  could not launch {bin} ({e}); set SSLKEYLOGFILE={keylog_path} in your own browser");
+                eprintln!(
+                    "  could not launch {bin} ({e}); set SSLKEYLOGFILE={keylog_path} in your own browser"
+                );
             }
         }
     } else {
@@ -425,7 +464,10 @@ mod tests {
             "https://api.example.com/v1/users/42?token=&page="
         );
         // key with no value is preserved as-is
-        assert_eq!(redact_url("https://h.com/x?flag&a=1"), "https://h.com/x?flag&a=");
+        assert_eq!(
+            redact_url("https://h.com/x?flag&a=1"),
+            "https://h.com/x?flag&a="
+        );
         // no query, no change
         assert_eq!(redact_url("https://h.com/a/b"), "https://h.com/a/b");
         // trailing '?' collapses away
@@ -457,7 +499,10 @@ mod tests {
 
         // presence of an Authorization header sets authed (the value is not retained on RawCapture)
         let authed = r#"{"layers":{"http.request.method":["GET"],"http.request.full_uri":["https://h.com/me"],"http.authorization":["Bearer eyJ..."]}}"#;
-        assert!(parse_ek_line(authed).expect("parsed").authed, "auth header detected");
+        assert!(
+            parse_ek_line(authed).expect("parsed").authed,
+            "auth header detected"
+        );
 
         // control/index lines and irrelevant packets yield nothing
         assert!(parse_ek_line(r#"{"index":{"_type":"doc"}}"#).is_none());
@@ -481,13 +526,28 @@ mod tests {
         // filtered out when the host does not match scope
         assert!(shape(&raw, Some("other.com")).is_none());
         // a bare response (no method/uri) is not a shapeable request
-        assert!(shape(&RawCapture { status: Some(200), ..Default::default() }, None).is_none());
+        assert!(
+            shape(
+                &RawCapture {
+                    status: Some(200),
+                    ..Default::default()
+                },
+                None
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn batcher_flushes_at_capacity_and_drains() {
         let mut b = Batcher::new(2);
-        let ev = TraceEvent { method: "GET".into(), url: "https://h/x".into(), status: None, tech: None, authed: false };
+        let ev = TraceEvent {
+            method: "GET".into(),
+            url: "https://h/x".into(),
+            status: None,
+            tech: None,
+            authed: false,
+        };
         assert!(b.push(ev.clone()).is_none());
         let flushed = b.push(ev.clone()).expect("flush at capacity");
         assert_eq!(flushed.len(), 2);

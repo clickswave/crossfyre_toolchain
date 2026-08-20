@@ -15,7 +15,7 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -28,7 +28,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 
-use super::trace::{post_batch, shape, Batcher, RawCapture, TraceConfig, TraceEvent};
+use super::trace::{Batcher, RawCapture, TraceConfig, TraceEvent, post_batch, shape};
 
 type BoxErr = Box<dyn Error + Send + Sync>;
 type Body = BoxBody<Bytes, Infallible>;
@@ -42,7 +42,7 @@ fn empty() -> Body {
 
 /// Chromium flags that suppress Google/Chrome background traffic so the capture is the operator's
 /// browsing, not the browser phoning home (safebrowsing, optimization hints, account sync, component
-/// + spellcheck-dictionary downloads, metrics, GCM, hyperlink auditing). Mirrors the quiet profile
+/// and spellcheck-dictionary downloads, metrics, GCM, hyperlink auditing). Mirrors the quiet profile
 /// Burp's embedded browser launches with.
 const CHROMIUM_QUIET_FLAGS: &[&str] = &[
     "--no-first-run",
@@ -84,9 +84,17 @@ fn generate_ca() -> Result<Ca, BoxErr> {
     let key = KeyPair::generate()?;
     let mut params = CertificateParams::new(Vec::<String>::new())?;
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign, KeyUsagePurpose::DigitalSignature];
-    params.distinguished_name.push(DnType::CommonName, "Crossfyre Web Tracer CA");
-    params.distinguished_name.push(DnType::OrganizationName, "Crossfyre");
+    params.key_usages = vec![
+        KeyUsagePurpose::KeyCertSign,
+        KeyUsagePurpose::CrlSign,
+        KeyUsagePurpose::DigitalSignature,
+    ];
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "Crossfyre Web Tracer CA");
+    params
+        .distinguished_name
+        .push(DnType::OrganizationName, "Crossfyre");
     let cert = params.self_signed(&key)?;
     let pem = cert.pem();
     Ok(Ca { cert, key, pem })
@@ -110,7 +118,10 @@ impl MitmResolver {
             return Some(k.clone());
         }
         let ck = make_leaf(&self.ca, host).ok()?;
-        self.cache.lock().unwrap().insert(host.to_string(), ck.clone());
+        self.cache
+            .lock()
+            .unwrap()
+            .insert(host.to_string(), ck.clone());
         Some(ck)
     }
 }
@@ -118,7 +129,10 @@ impl MitmResolver {
 impl ResolvesServerCert for MitmResolver {
     fn resolve(&self, hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         // Prefer SNI; fall back to a wildcard-ish default so a no-SNI client still gets a cert.
-        let host = hello.server_name().map(|s| s.to_string()).unwrap_or_else(|| "localhost".into());
+        let host = hello
+            .server_name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "localhost".into());
         self.leaf_for(&host)
     }
 }
@@ -134,7 +148,10 @@ fn make_leaf(ca: &Ca, host: &str) -> Result<Arc<CertifiedKey>, BoxErr> {
     let ca_der: CertificateDer<'static> = ca.cert.der().clone();
     let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
     let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key_der)?;
-    Ok(Arc::new(CertifiedKey::new(vec![leaf_der, ca_der], signing_key)))
+    Ok(Arc::new(CertifiedKey::new(
+        vec![leaf_der, ca_der],
+        signing_key,
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -145,8 +162,16 @@ fn make_leaf(ca: &Ca, host: &str) -> Result<Arc<CertifiedKey>, BoxErr> {
 fn is_hop_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "connection" | "keep-alive" | "proxy-authenticate" | "proxy-authorization" | "te"
-            | "trailer" | "transfer-encoding" | "upgrade" | "content-length" | "host"
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "content-length"
+            | "host"
     )
 }
 
@@ -175,13 +200,19 @@ fn is_portal_host(host: &str) -> bool {
 /// `/ca` / `/cert` path) and, for anything else, the install-instructions page.
 fn portal_response(path: &str, ca_pem: &str) -> Response<Body> {
     let p = path.trim_end_matches('/').to_ascii_lowercase();
-    let wants_cert =
-        p == "/ca" || p == "/cert" || p == "/download" || p.ends_with("ca.pem") || p.ends_with("ca.crt");
+    let wants_cert = p == "/ca"
+        || p == "/cert"
+        || p == "/download"
+        || p.ends_with("ca.pem")
+        || p.ends_with("ca.crt");
     if wants_cert {
         return Response::builder()
             .status(200)
             .header("content-type", "application/x-x509-ca-cert")
-            .header("content-disposition", "attachment; filename=\"crossfyre-ca.pem\"")
+            .header(
+                "content-disposition",
+                "attachment; filename=\"crossfyre-ca.pem\"",
+            )
             .header("cache-control", "no-store")
             .body(full(Bytes::from(ca_pem.to_string())))
             .unwrap_or_else(|_| Response::new(empty()));
@@ -215,12 +246,20 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
         return portal_response(uri.path(), &ctx.ca_pem);
     }
 
-    let url = if base.is_empty() { uri.to_string() } else { format!("{base}{uri}") };
+    let url = if base.is_empty() {
+        uri.to_string()
+    } else {
+        format!("{base}{uri}")
+    };
     let authed = req.headers().contains_key(hyper::header::AUTHORIZATION)
         || req.headers().contains_key(hyper::header::COOKIE);
 
     let (parts, body) = req.into_parts();
-    let body_bytes = body.collect().await.map(|c| c.to_bytes()).unwrap_or_default();
+    let body_bytes = body
+        .collect()
+        .await
+        .map(|c| c.to_bytes())
+        .unwrap_or_default();
 
     let mut rb = ctx.client.request(method.clone(), url.as_str());
     for (name, value) in parts.headers.iter() {
@@ -259,11 +298,16 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
                 }
             }
             let bytes = resp.bytes().await.unwrap_or_default();
-            builder.body(full(bytes)).unwrap_or_else(|_| Response::new(empty()))
+            builder
+                .body(full(bytes))
+                .unwrap_or_else(|_| Response::new(empty()))
         }
         Err(e) => {
             let msg = format!("crossfyre trace proxy: upstream error: {e}");
-            Response::builder().status(502).body(full(Bytes::from(msg))).unwrap()
+            Response::builder()
+                .status(502)
+                .body(full(Bytes::from(msg)))
+                .unwrap()
         }
     }
 }
@@ -278,22 +322,21 @@ async fn handle(req: Request<Incoming>, ctx: Ctx) -> Result<Response<Body>, Infa
         let host = authority.host().to_string();
         let ctx2 = ctx.clone();
         tokio::spawn(async move {
-            match hyper::upgrade::on(req).await {
-                Ok(upgraded) => {
-                    let tls = match ctx2.acceptor.accept(TokioIo::new(upgraded)).await {
-                        Ok(t) => t,
-                        Err(_) => return, // browser rejected the cert (CA not trusted) or handshake failed
-                    };
-                    let base = format!("https://{host}");
-                    let inner = ctx2.clone();
-                    let svc = service_fn(move |r| {
-                        let inner = inner.clone();
-                        let base = base.clone();
-                        async move { Ok::<_, Infallible>(forward(r, &base, &inner).await) }
-                    });
-                    let _ = http1::Builder::new().serve_connection(TokioIo::new(tls), svc).await;
-                }
-                Err(_) => {}
+            if let Ok(upgraded) = hyper::upgrade::on(req).await {
+                let tls = match ctx2.acceptor.accept(TokioIo::new(upgraded)).await {
+                    Ok(t) => t,
+                    Err(_) => return, // browser rejected the cert (CA not trusted) or handshake failed
+                };
+                let base = format!("https://{host}");
+                let inner = ctx2.clone();
+                let svc = service_fn(move |r| {
+                    let inner = inner.clone();
+                    let base = base.clone();
+                    async move { Ok::<_, Infallible>(forward(r, &base, &inner).await) }
+                });
+                let _ = http1::Builder::new()
+                    .serve_connection(TokioIo::new(tls), svc)
+                    .await;
             }
         });
         // 200 lets the browser proceed to the TLS handshake we then intercept.
@@ -327,7 +370,10 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let ca = Arc::new(generate_ca()?);
-    let resolver = Arc::new(MitmResolver { ca: ca.clone(), cache: Mutex::new(HashMap::new()) });
+    let resolver = Arc::new(MitmResolver {
+        ca: ca.clone(),
+        cache: Mutex::new(HashMap::new()),
+    });
 
     let mut server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -341,15 +387,26 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
         .build()?;
 
     let addr = format!("127.0.0.1:{}", cfg.proxy_port);
-    let listener = TcpListener::bind(&addr).await.map_err(|e| format!("cannot bind proxy on {addr}: {e}"))?;
-    let bound = listener.local_addr().map(|a| a.to_string()).unwrap_or(addr.clone());
+    let listener = TcpListener::bind(&addr)
+        .await
+        .map_err(|e| format!("cannot bind proxy on {addr}: {e}"))?;
+    let bound = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or(addr.clone());
 
     // Write the CA so a bring-your-own browser can trust it.
     let ca_path = std::env::temp_dir().join(format!("cfx-trace-ca-{}.pem", std::process::id()));
     std::fs::write(&ca_path, ca.pem.as_bytes()).ok();
 
-    println!("Web Tracer: local proxy on {bound} (session {})", cfg.workflow_id);
-    println!("  CA cert: {} (install it to trace with your own browser)", ca_path.display());
+    println!(
+        "Web Tracer: local proxy on {bound} (session {})",
+        cfg.workflow_id
+    );
+    println!(
+        "  CA cert: {} (install it to trace with your own browser)",
+        ca_path.display()
+    );
     println!("  or browse to http://cfx through the proxy to download + install it");
 
     let (tx, mut rx) = mpsc::channel::<TraceEvent>(1024);
@@ -373,7 +430,8 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
         // Chromium flags entirely (which is why `--browser firefox*` captured
         // nothing before). Branch on the family.
         let is_firefox = bin.contains("firefox");
-        let profile = std::env::temp_dir().join(format!("cfx-trace-profile-{}", std::process::id()));
+        let profile =
+            std::env::temp_dir().join(format!("cfx-trace-profile-{}", std::process::id()));
         let mut cmd = tokio::process::Command::new(&bin);
         if is_firefox {
             // Firefox: an isolated profile whose prefs route through the proxy.
@@ -384,7 +442,11 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
             // --ignore-certificate-errors equivalent).
             let _ = std::fs::create_dir_all(&profile);
             // `bound` is "127.0.0.1:<port>"; pull the port for the profile prefs.
-            let port = bound.rsplit(':').next().and_then(|s| s.parse::<u16>().ok()).unwrap_or_default();
+            let port = bound
+                .rsplit(':')
+                .next()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or_default();
             // Proxy prefs, then the Firefox equivalent of CHROMIUM_QUIET_FLAGS:
             // silence captive-portal detection (detectportal success.txt), the
             // connectivity checks (success.txt?ipv4/ipv6, generate_204), Remote
@@ -464,19 +526,26 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
             }
             cmd.arg("about:blank");
         }
-        cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
         match cmd.spawn() {
             Ok(c) => {
                 println!("  launched {bin} through the proxy (isolated profile)");
                 if is_firefox {
-                    println!("  firefox: HTTP targets capture now; for HTTPS import the CA above (Settings -> Privacy -> Certificates)");
+                    println!(
+                        "  firefox: HTTP targets capture now; for HTTPS import the CA above (Settings -> Privacy -> Certificates)"
+                    );
                 }
                 browser_child = Some(c);
             }
-            Err(e) => eprintln!("  could not launch {bin} ({e}); point your browser at http://{bound} and trust the CA above"),
+            Err(e) => eprintln!(
+                "  could not launch {bin} ({e}); point your browser at http://{bound} and trust the CA above"
+            ),
         }
     } else {
-        println!("  point your browser's HTTP/HTTPS proxy at {bound}, trust the CA, then browse your target");
+        println!(
+            "  point your browser's HTTP/HTTPS proxy at {bound}, trust the CA, then browse your target"
+        );
     }
     println!("  browsing captures into the session; Ctrl-C (or close the browser) to end.");
 

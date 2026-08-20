@@ -1431,7 +1431,10 @@ pub async fn run_init(
     // engines and database below install on those ports from the start.
     match toolchain::config::apply_ports_from_json(&json_resp["ports"]) {
         Ok(changed) if !changed.is_empty() => {
-            step(&format!("Applied custom service ports: {}", changed.join(", ")));
+            step(&format!(
+                "Applied custom service ports: {}",
+                changed.join(", ")
+            ));
         }
         Ok(_) => {}
         Err(e) => warn(&format!("could not create toolchain config: {e}")),

@@ -60,7 +60,8 @@ pub async fn handle(env: OpEnv) {
         // can grep for known-open ones (53, 80, 5432, etc).
         let log_sample = true;
         let mut found_count = 0;
-        let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("pulse")).await;
+        let conn =
+            tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("pulse")).await;
         match conn {
             Ok(stream) => {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

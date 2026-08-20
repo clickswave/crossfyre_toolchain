@@ -23,11 +23,15 @@ pub fn inject_defaults() {
     // host config.toml so a custom port applies to cfx scripts too.
     map.insert(
         "mach".to_string(),
-        ExtensionKind::Daemon { port: crate::toolchain::config::engine_port("mach") },
+        ExtensionKind::Daemon {
+            port: crate::toolchain::config::engine_port("mach"),
+        },
     );
     map.insert(
         "voyage".to_string(),
-        ExtensionKind::Daemon { port: crate::toolchain::config::engine_port("voyage") },
+        ExtensionKind::Daemon {
+            port: crate::toolchain::config::engine_port("voyage"),
+        },
     );
 
     // Common CLI recon tools (shell out to binary)

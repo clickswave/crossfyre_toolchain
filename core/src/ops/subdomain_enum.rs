@@ -131,7 +131,8 @@ pub async fn handle(env: OpEnv) {
             "posture": data["posture"].as_str().unwrap_or("balanced"),
         });
 
-        let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("voyage")).await;
+        let conn =
+            tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("voyage")).await;
         match conn {
             Ok(stream) => {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

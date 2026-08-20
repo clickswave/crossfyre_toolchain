@@ -362,7 +362,11 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
                     // (images/fonts/av) stays dropped as noise. JS is not here - it isn't static-listed,
                     // so it's fetched above and its body hashed.
                     if params.capture_static && is_trackable_static(&child) {
-                        let _ = tx.send(CrawlEvent::url_candidate(&child, Some(page.url.to_string()), page.depth + 1));
+                        let _ = tx.send(CrawlEvent::url_candidate(
+                            &child,
+                            Some(page.url.to_string()),
+                            page.depth + 1,
+                        ));
                     }
                     continue;
                 }
@@ -479,9 +483,16 @@ async fn probe_specs(
     tx: &mpsc::UnboundedSender<CrawlEvent>,
 ) {
     const SPEC_PATHS: &[&str] = &[
-        "/openapi.json", "/swagger.json", "/api-docs", "/v2/api-docs", "/v3/api-docs",
-        "/swagger/v1/swagger.json", "/api/openapi.json", "/api-docs/swagger.json",
-        "/swagger/doc.json", "/api/swagger.json",
+        "/openapi.json",
+        "/swagger.json",
+        "/api-docs",
+        "/v2/api-docs",
+        "/v3/api-docs",
+        "/swagger/v1/swagger.json",
+        "/api/openapi.json",
+        "/api-docs/swagger.json",
+        "/swagger/doc.json",
+        "/api/swagger.json",
     ];
     // Probe all locations concurrently with a short timeout: on an app that serves
     // its SPA for unknown paths, sequential probing with the full crawl timeout
@@ -494,10 +505,13 @@ async fn probe_specs(
         };
         let client = client.clone();
         set.spawn(async move {
-            let resp = tokio::time::timeout(std::time::Duration::from_secs(5), client.get(url.clone()).send())
-                .await
-                .ok()?
-                .ok()?;
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                client.get(url.clone()).send(),
+            )
+            .await
+            .ok()?
+            .ok()?;
             if !resp.status().is_success() {
                 return None;
             }
@@ -515,7 +529,10 @@ async fn probe_specs(
                 .ok()?
                 .ok()?;
             // Only harvest something that actually looks like an API spec.
-            if !(body.contains("\"paths\"") || body.contains("\"swagger\"") || body.contains("\"openapi\"")) {
+            if !(body.contains("\"paths\"")
+                || body.contains("\"swagger\"")
+                || body.contains("\"openapi\""))
+            {
                 return None;
             }
             Some((url, body))

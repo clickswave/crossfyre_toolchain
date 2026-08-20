@@ -99,7 +99,8 @@ pub async fn handle(env: OpEnv) {
     let mut processed: i64 = 0;
     let mut total: i64 = 0;
     let mut last_prog = std::time::Instant::now();
-    let conn = tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("cortex")).await;
+    let conn =
+        tokio::net::TcpStream::connect(crate::toolchain::config::engine_addr("cortex")).await;
     match conn {
         Ok(stream) => {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

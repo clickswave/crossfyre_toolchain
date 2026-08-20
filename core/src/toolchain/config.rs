@@ -50,11 +50,21 @@ pub struct ExtensionPorts {
     pub cortex: u16,
 }
 
-fn def_mach() -> u16 { 4441 }
-fn def_voyage() -> u16 { 4442 }
-fn def_pulse() -> u16 { 4443 }
-fn def_scout() -> u16 { 4444 }
-fn def_cortex() -> u16 { 4445 }
+fn def_mach() -> u16 {
+    4441
+}
+fn def_voyage() -> u16 {
+    4442
+}
+fn def_pulse() -> u16 {
+    4443
+}
+fn def_scout() -> u16 {
+    4444
+}
+fn def_cortex() -> u16 {
+    4445
+}
 
 impl Default for ExtensionPorts {
     fn default() -> Self {
@@ -180,7 +190,10 @@ pub fn save_config(config: &ToolchainConfig) -> Result<(), Box<dyn std::error::E
 /// Reads the file each call - it's tiny, and this keeps the value fresh across
 /// an install that rewrites config.toml mid-process.
 pub fn engine_port(ext: &str) -> u16 {
-    let configured = load_config().ok().map(|c| c.extensions.get(ext)).unwrap_or(0);
+    let configured = load_config()
+        .ok()
+        .map(|c| c.extensions.get(ext))
+        .unwrap_or(0);
     if configured != 0 {
         return configured;
     }
