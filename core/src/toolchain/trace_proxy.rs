@@ -157,6 +157,41 @@ struct Ctx {
     acceptor: TlsAcceptor,
     tx: mpsc::Sender<TraceEvent>,
     scope: Option<String>,
+    /// The session CA in PEM, served by the built-in cert portal (http://cfx).
+    ca_pem: Arc<String>,
+}
+
+/// Magic hostnames the proxy answers itself (Burp-style) to hand out the CA,
+/// instead of forwarding upstream. Reached because the browser sends proxied
+/// requests by name without resolving DNS.
+fn is_portal_host(host: &str) -> bool {
+    matches!(
+        host.trim().to_ascii_lowercase().as_str(),
+        "cfx" | "crossfyre" | "cfx.trace" | "crossfyre.trace"
+    )
+}
+
+/// The cert portal: a download endpoint for the CA (any `*ca.pem` / `*ca.crt` /
+/// `/ca` / `/cert` path) and, for anything else, the install-instructions page.
+fn portal_response(path: &str, ca_pem: &str) -> Response<Body> {
+    let p = path.trim_end_matches('/').to_ascii_lowercase();
+    let wants_cert =
+        p == "/ca" || p == "/cert" || p == "/download" || p.ends_with("ca.pem") || p.ends_with("ca.crt");
+    if wants_cert {
+        return Response::builder()
+            .status(200)
+            .header("content-type", "application/x-x509-ca-cert")
+            .header("content-disposition", "attachment; filename=\"crossfyre-ca.pem\"")
+            .header("cache-control", "no-store")
+            .body(full(Bytes::from(ca_pem.to_string())))
+            .unwrap_or_else(|_| Response::new(empty()));
+    }
+    Response::builder()
+        .status(200)
+        .header("content-type", "text/html; charset=utf-8")
+        .header("cache-control", "no-store")
+        .body(full(Bytes::from(PORTAL_HTML)))
+        .unwrap_or_else(|_| Response::new(empty()))
 }
 
 /// Forward one request to its origin, relay the response back, and emit a shape. `base` is empty for
@@ -165,6 +200,21 @@ struct Ctx {
 async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body> {
     let method = req.method().clone();
     let uri = req.uri().clone();
+
+    // Built-in cert portal (Burp-style). A request whose host is one of the magic
+    // names is answered here - the CA download + install page - and never
+    // forwarded upstream or recorded as a captured endpoint.
+    let portal_host = if base.is_empty() {
+        uri.host().unwrap_or("").to_string()
+    } else {
+        base.trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .to_string()
+    };
+    if is_portal_host(&portal_host) {
+        return portal_response(uri.path(), &ctx.ca_pem);
+    }
+
     let url = if base.is_empty() { uri.to_string() } else { format!("{base}{uri}") };
     let authed = req.headers().contains_key(hyper::header::AUTHORIZATION)
         || req.headers().contains_key(hyper::header::COOKIE);
@@ -300,9 +350,16 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
 
     println!("Web Tracer: local proxy on {bound} (session {})", cfg.workflow_id);
     println!("  CA cert: {} (install it to trace with your own browser)", ca_path.display());
+    println!("  or browse to http://cfx through the proxy to download + install it");
 
     let (tx, mut rx) = mpsc::channel::<TraceEvent>(1024);
-    let ctx = Ctx { client, acceptor, tx, scope: cfg.host_filter.clone() };
+    let ctx = Ctx {
+        client,
+        acceptor,
+        tx,
+        scope: cfg.host_filter.clone(),
+        ca_pem: Arc::new(ca.pem.clone()),
+    };
     tokio::spawn(serve(listener, ctx));
 
     // Launch a browser pointed at the proxy, isolated so it can't clobber the user's real profile.
@@ -311,28 +368,109 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let mut browser_child = None;
     if let Some(browser) = &cfg.browser {
         let bin = super::trace::browser_binary(browser);
+        // Firefox and Chromium point at a proxy in completely different ways:
+        // Chromium takes CLI flags, Firefox takes profile prefs and ignores the
+        // Chromium flags entirely (which is why `--browser firefox*` captured
+        // nothing before). Branch on the family.
+        let is_firefox = bin.contains("firefox");
         let profile = std::env::temp_dir().join(format!("cfx-trace-profile-{}", std::process::id()));
         let mut cmd = tokio::process::Command::new(&bin);
-        // Bare host:port -> Chromium uses it for both HTTP and HTTPS (via CONNECT). --ignore-certificate
-        // -errors makes the ephemeral profile trust our MITM cert without installing the CA.
-        cmd.arg(format!("--proxy-server={bound}"))
-            .arg(format!("--user-data-dir={}", profile.display()))
-            .arg("--ignore-certificate-errors");
-        // Chromium-family only: silence the background/telemetry traffic (safebrowsing, optimization
-        // hints, account sync, component/dictionary downloads, the New Tab Page's promos/doodles, GCM,
-        // metrics) so the capture is the operator's browsing, not Google phoning home - the same reason
-        // Burp's embedded browser is quiet. Firefox is left to its defaults (different flags/prefs).
-        if bin != "firefox" {
+        if is_firefox {
+            // Firefox: an isolated profile whose prefs route through the proxy.
+            // `allow_hijacking_localhost` is the key one - Firefox, like Chromium,
+            // bypasses loopback by default, so without it a http://localhost
+            // target never reaches the proxy. HTTPS needs the printed CA imported
+            // into Firefox (it has its own trust store; there is no
+            // --ignore-certificate-errors equivalent).
+            let _ = std::fs::create_dir_all(&profile);
+            // `bound` is "127.0.0.1:<port>"; pull the port for the profile prefs.
+            let port = bound.rsplit(':').next().and_then(|s| s.parse::<u16>().ok()).unwrap_or_default();
+            // Proxy prefs, then the Firefox equivalent of CHROMIUM_QUIET_FLAGS:
+            // silence captive-portal detection (detectportal success.txt), the
+            // connectivity checks (success.txt?ipv4/ipv6, generate_204), Remote
+            // Settings, safebrowsing updates, telemetry, update pings, region +
+            // discovery services and Activity Stream feeds - so the capture is the
+            // operator's browsing, not Firefox phoning home.
+            let prefs = format!(
+                "user_pref(\"network.proxy.type\", 1);\n\
+                 user_pref(\"network.proxy.http\", \"127.0.0.1\");\n\
+                 user_pref(\"network.proxy.http_port\", {port});\n\
+                 user_pref(\"network.proxy.ssl\", \"127.0.0.1\");\n\
+                 user_pref(\"network.proxy.ssl_port\", {port});\n\
+                 user_pref(\"network.proxy.allow_hijacking_localhost\", true);\n\
+                 user_pref(\"network.proxy.no_proxies_on\", \"\");\n\
+                 user_pref(\"security.enterprise_roots.enabled\", true);\n\
+                 user_pref(\"browser.shell.checkDefaultBrowser\", false);\n\
+                 user_pref(\"network.captive-portal-service.enabled\", false);\n\
+                 user_pref(\"network.connectivity-service.enabled\", false);\n\
+                 user_pref(\"captivedetect.canonicalURL\", \"\");\n\
+                 user_pref(\"services.settings.server\", \"\");\n\
+                 user_pref(\"browser.safebrowsing.malware.enabled\", false);\n\
+                 user_pref(\"browser.safebrowsing.phishing.enabled\", false);\n\
+                 user_pref(\"browser.safebrowsing.downloads.enabled\", false);\n\
+                 user_pref(\"browser.safebrowsing.provider.google4.updateURL\", \"\");\n\
+                 user_pref(\"browser.safebrowsing.provider.mozilla.updateURL\", \"\");\n\
+                 user_pref(\"extensions.blocklist.enabled\", false);\n\
+                 user_pref(\"app.update.enabled\", false);\n\
+                 user_pref(\"app.update.auto\", false);\n\
+                 user_pref(\"browser.region.network.url\", \"\");\n\
+                 user_pref(\"browser.region.update.enabled\", false);\n\
+                 user_pref(\"browser.discovery.enabled\", false);\n\
+                 user_pref(\"browser.ping-centre.telemetry\", false);\n\
+                 user_pref(\"browser.newtabpage.activity-stream.feeds.telemetry\", false);\n\
+                 user_pref(\"browser.newtabpage.activity-stream.telemetry\", false);\n\
+                 user_pref(\"browser.newtabpage.activity-stream.feeds.snippets\", false);\n\
+                 user_pref(\"browser.newtabpage.activity-stream.feeds.section.topstories\", false);\n\
+                 user_pref(\"browser.newtabpage.activity-stream.default.sites\", \"\");\n\
+                 user_pref(\"dom.push.enabled\", false);\n\
+                 user_pref(\"extensions.getAddons.cache.enabled\", false);\n\
+                 user_pref(\"extensions.systemAddon.update.enabled\", false);\n\
+                 user_pref(\"network.prefetch-next\", false);\n\
+                 user_pref(\"datareporting.healthreport.uploadEnabled\", false);\n\
+                 user_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\n\
+                 user_pref(\"toolkit.telemetry.enabled\", false);\n\
+                 user_pref(\"toolkit.telemetry.unified\", false);\n\
+                 user_pref(\"toolkit.telemetry.archive.enabled\", false);\n\
+                 user_pref(\"toolkit.telemetry.server\", \"\");\n\
+                 user_pref(\"app.normandy.enabled\", false);\n\
+                 user_pref(\"app.normandy.first_run\", false);\n\
+                 user_pref(\"app.shield.optoutstudies.enabled\", false);\n\
+                 user_pref(\"browser.aboutwelcome.enabled\", false);\n\
+                 user_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");\n"
+            );
+            let _ = std::fs::write(profile.join("user.js"), &prefs);
+            cmd.arg("--no-remote")
+                .arg("--profile")
+                .arg(&profile)
+                .arg("about:blank");
+        } else {
+            // Chromium family: --proxy-server routes both HTTP and HTTPS (via
+            // CONNECT). --proxy-bypass-list=<-loopback> is essential for testing a
+            // local app - Chromium bypasses loopback by default, so without it a
+            // http://localhost target never hits the proxy. --ignore-certificate
+            // -errors lets the ephemeral profile trust our MITM cert without
+            // installing the CA.
+            cmd.arg(format!("--proxy-server={bound}"))
+                .arg("--proxy-bypass-list=<-loopback>")
+                .arg(format!("--user-data-dir={}", profile.display()))
+                .arg("--ignore-certificate-errors");
+            // Silence background/telemetry traffic (safebrowsing, optimization
+            // hints, account sync, component/dictionary downloads, the New Tab
+            // Page's promos/doodles, GCM, metrics) so the capture is the operator's
+            // browsing, not Google phoning home - the same reason Burp's embedded
+            // browser is quiet.
             for flag in CHROMIUM_QUIET_FLAGS {
                 cmd.arg(flag);
             }
-            // Start on a blank page, not Google's NTP (which itself fetches promos/one-google-bar/doodles).
             cmd.arg("about:blank");
         }
         cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         match cmd.spawn() {
             Ok(c) => {
                 println!("  launched {bin} through the proxy (isolated profile)");
+                if is_firefox {
+                    println!("  firefox: HTTP targets capture now; for HTTPS import the CA above (Settings -> Privacy -> Certificates)");
+                }
                 browser_child = Some(c);
             }
             Err(e) => eprintln!("  could not launch {bin} ({e}); point your browser at http://{bound} and trust the CA above"),
@@ -384,3 +522,131 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     println!("\nWeb Tracer: session ended, {total} endpoints captured.");
     Ok(())
 }
+
+/// The cert-install portal served at http://cfx (Burp-style). Self-contained
+/// (inline CSS, no external assets) so it renders with the browser offline from
+/// everything but this proxy. The download button hits `/crossfyre-ca.pem`,
+/// which `portal_response` serves as the CA.
+const PORTAL_HTML: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossfyre Web Tracer - Install CA</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0b0e; color: #e4e4e7; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  .brand { display: flex; align-items: center; gap: .6rem; font-weight: 800; letter-spacing: .01em; font-size: 1.05rem; }
+  .brand .dot { width: 11px; height: 11px; border-radius: 50%; background: #ff6b35; box-shadow: 0 0 14px rgba(255,107,53,.7); }
+  .brand .sub { color: #71717a; font-weight: 600; }
+  h1 { font-size: 1.7rem; margin: 1.4rem 0 .4rem; font-weight: 800; }
+  .lede { color: #a1a1aa; margin: 0 0 1.6rem; }
+  .card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.09); border-radius: 14px; padding: 1.25rem 1.35rem; margin: 1rem 0; }
+  .dl { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; background: linear-gradient(90deg, rgba(255,107,53,.12), rgba(255,107,53,.03)); border-color: rgba(255,107,53,.3); }
+  .dl .txt { flex: 1; min-width: 220px; }
+  .dl .txt b { display: block; font-size: 1.05rem; }
+  .dl .txt span { color: #a1a1aa; font-size: .85rem; }
+  a.btn { display: inline-flex; align-items: center; gap: .5rem; background: #ff6b35; color: #12100e; font-weight: 700; text-decoration: none; padding: .7rem 1.15rem; border-radius: 10px; border: 1px solid #ff6b35; white-space: nowrap; transition: filter .15s; }
+  a.btn:hover { filter: brightness(1.08); }
+  h2 { font-size: 1.02rem; margin: 1.6rem 0 .6rem; }
+  details { border: 1px solid rgba(255,255,255,.09); border-radius: 10px; margin: .5rem 0; background: rgba(255,255,255,.02); }
+  summary { cursor: pointer; padding: .7rem .95rem; font-weight: 650; list-style: none; display: flex; align-items: center; gap: .5rem; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "+"; color: #ff8c5a; font-weight: 800; }
+  details[open] summary::before { content: "-"; }
+  .body { padding: 0 .95rem 1rem 2rem; color: #c9c9d1; font-size: .9rem; }
+  ol { margin: .3rem 0; padding-left: 1.1rem; }
+  li { margin: .3rem 0; }
+  code { background: #16161a; border: 1px solid rgba(255,255,255,.1); border-radius: 5px; padding: .05rem .4rem; font-family: ui-monospace, "JetBrains Mono", monospace; font-size: .85em; color: #ffd3bf; }
+  pre { background: #16161a; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: .7rem .85rem; overflow-x: auto; font-family: ui-monospace, monospace; font-size: .82rem; color: #d6f9e4; }
+  .note { color: #71717a; font-size: .82rem; margin-top: 1.4rem; }
+  .kbd { color: #ff8c5a; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="dot"></span> Crossfyre <span class="sub">/ Web Tracer</span></div>
+  <h1>Install the trace CA</h1>
+  <p class="lede">You're browsing through the Crossfyre trace proxy. To read <b>HTTPS</b> traffic, your browser needs to trust this session's certificate authority. It's ephemeral - minted for this capture only.</p>
+
+  <div class="card dl">
+    <div class="txt">
+      <b>CA certificate</b>
+      <span>crossfyre-ca.pem - trust it as a website-identifying authority.</span>
+    </div>
+    <a class="btn" href="/crossfyre-ca.pem" download>Download CA certificate</a>
+  </div>
+
+  <h2>Install it</h2>
+
+  <details open>
+    <summary>Chrome / Edge / Brave / Chromium</summary>
+    <div class="body">
+      <ol>
+        <li>Open <span class="kbd">Settings -> Privacy and security -> Security -> Manage certificates</span> (or visit <code>chrome://certificate-manager</code>).</li>
+        <li>Go to the <b>Authorities</b> tab and click <b>Import</b>.</li>
+        <li>Select the downloaded <code>crossfyre-ca.pem</code>.</li>
+        <li>Tick <b>Trust this certificate for identifying websites</b>, then OK.</li>
+        <li>Reload your target and keep browsing - HTTPS now captures.</li>
+      </ol>
+      <p>On macOS/Windows, Chrome and Edge use the OS trust store instead - see those tabs below.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Firefox</summary>
+    <div class="body">
+      <ol>
+        <li>Open <span class="kbd">Settings -> Privacy &amp; Security -> Certificates -> View Certificates</span>.</li>
+        <li>On the <b>Authorities</b> tab, click <b>Import</b> and pick <code>crossfyre-ca.pem</code>.</li>
+        <li>Tick <b>Trust this CA to identify websites</b>, then OK.</li>
+      </ol>
+      <p>Firefox has its own trust store, so this is needed even if the OS already trusts the CA. The browser Crossfyre launches for you sets the proxy automatically; you still import the CA here for HTTPS.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>macOS (system trust - Safari, Chrome, Edge)</summary>
+    <div class="body">
+      <ol>
+        <li>Double-click <code>crossfyre-ca.pem</code> to open it in <b>Keychain Access</b> (add to the <b>login</b> or <b>System</b> keychain).</li>
+        <li>Find <b>Crossfyre</b> under Certificates, double-click it.</li>
+        <li>Expand <b>Trust</b>, set <b>When using this certificate</b> to <b>Always Trust</b>, close, and authenticate.</li>
+      </ol>
+      <p>Or via terminal:</p>
+      <pre>sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain crossfyre-ca.pem</pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>Windows (system trust - Chrome, Edge)</summary>
+    <div class="body">
+      <ol>
+        <li>Rename the file to <code>crossfyre-ca.crt</code> and double-click it.</li>
+        <li>Click <b>Install Certificate</b> -> <b>Current User</b> (or Local Machine).</li>
+        <li>Choose <b>Place all certificates in the following store</b> -> <b>Trusted Root Certification Authorities</b>.</li>
+        <li>Finish and accept the security prompt.</li>
+      </ol>
+    </div>
+  </details>
+
+  <details>
+    <summary>Linux (system trust)</summary>
+    <div class="body">
+      <p>Debian / Ubuntu:</p>
+      <pre>sudo cp crossfyre-ca.pem /usr/local/share/ca-certificates/crossfyre-ca.crt
+sudo update-ca-certificates</pre>
+      <p>Fedora / RHEL:</p>
+      <pre>sudo cp crossfyre-ca.pem /etc/pki/ca-trust/source/anchors/
+sudo update-ca-trust</pre>
+      <p>Chrome/Chromium on Linux keep their own NSS store; the Authorities-tab import above is the reliable path there.</p>
+    </div>
+  </details>
+
+  <p class="note">Plain <b>HTTP</b> targets capture without any of this - the CA is only for decrypting HTTPS. When the capture ends, the CA is gone; remove it from your trust store afterwards if you like.</p>
+</div>
+</body>
+</html>"#;
