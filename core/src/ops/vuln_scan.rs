@@ -31,7 +31,7 @@ pub async fn handle(env: OpEnv) {
 
     let host = target_host(&target);
     let mode = data["mode"].as_str().unwrap_or("scan");
-    let cortex_req = if mode == "authz" {
+    let mut cortex_req = if mode == "authz" {
         // Authorization testing (BOLA/BFLA): resolve the identity
         // matrix and hand cortex the endpoints + identities.
         let idents = data["identities"].as_array().cloned().unwrap_or_default();
@@ -85,6 +85,16 @@ pub async fn handle(env: OpEnv) {
         }
         req
     };
+
+    // Forward the Evasiveness switch + attribution token when the workflow set them,
+    // so the operator's posture reaches cortex (which otherwise defaults to
+    // evasive=true / identify=none) for both the scan and authz operations.
+    if let Some(ev) = data["evasive"].as_bool() {
+        cortex_req["evasive"] = serde_json::json!(ev);
+    }
+    if let Some(tok) = data["identify"].as_str().filter(|s| !s.is_empty()) {
+        cortex_req["identify"] = serde_json::json!(tok);
+    }
 
     let relay = Relay {
         pubc: &pub_clone,

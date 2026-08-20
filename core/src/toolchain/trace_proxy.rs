@@ -774,6 +774,9 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let mut batcher = Batcher::new(cfg.batch_size);
     let mut total = 0usize;
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(cfg.flush_secs.max(1)));
+    // Signature of the last-seeded credential set, so periodic seeding re-posts only when the
+    // observed session auth actually changed (a new host, or a rotated secret).
+    let mut last_seed_sig: Option<String> = None;
 
     loop {
         tokio::select! {
@@ -794,6 +797,21 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
                 if !batcher.is_empty() {
                     let batch = batcher.drain();
                     if let Ok(n) = post_batch(&post_client, &cfg, &batch, false).await { total += n; }
+                }
+                // Seed observed session credentials live, so they land in the arsenal while the
+                // operator is still browsing instead of only at Ctrl-C. Idempotent upsert on the
+                // server; skip the round-trip when nothing changed since the last seed.
+                if let Some(store) = &seed_store {
+                    let creds = build_seed_creds(store);
+                    if !creds.is_empty() {
+                        let sig = serde_json::to_string(&creds).unwrap_or_default();
+                        if last_seed_sig.as_deref() != Some(sig.as_str()) {
+                            match super::trace::post_seed_credentials(&post_client, &cfg, &creds).await {
+                                Ok(_) => last_seed_sig = Some(sig),
+                                Err(e) => eprintln!("\n  credential seed error: {e}"),
+                            }
+                        }
+                    }
                 }
             }
             _ = tokio::signal::ctrl_c() => { println!("\n  stopping…"); break; }
