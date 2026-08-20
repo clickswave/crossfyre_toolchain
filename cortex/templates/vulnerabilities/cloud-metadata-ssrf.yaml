@@ -18,14 +18,19 @@ http:
       - "{{BaseURL}}/?url=http://metadata.google.internal/computeMetadata/v1/"
     matchers-condition: and
     matchers:
+      # Match ONLY strings that appear in a real IMDS response, never ones that
+      # are also in the request payload (e.g. "security-credentials") - otherwise
+      # any app that reflects its query string trips this as a critical FP.
       - type: word
         part: body
         words:
           - "ami-id"
+          - "ami-launch-index"
           - "instance-id"
-          - "security-credentials"
-          - "iam/security-credentials"
           - "instance-action"
+          - "instance-type"
+          - "AccessKeyId"
+          - "SecretAccessKey"
         condition: or
       - type: status
         status:

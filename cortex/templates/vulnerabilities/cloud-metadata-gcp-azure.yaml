@@ -16,13 +16,17 @@ http:
       - "{{BaseURL}}/?dest=http://metadata.google.internal/computeMetadata/v1/instance/"
     matchers-condition: and
     matchers:
+      # Match ONLY fields returned by the real GCP/Azure metadata service, never
+      # "computeMetadata" (which is in the request payload) - else any app that
+      # reflects its query string trips this as a critical FP.
       - type: word
         part: body
         words:
-          - "computeMetadata"
           - "numericProjectId"
           - "azEnvironment"
           - "\"vmId\""
+          - "subscriptionId"
+          - "resourceGroupName"
         condition: or
       - type: status
         status:
