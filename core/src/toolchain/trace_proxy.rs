@@ -154,6 +154,27 @@ fn load_ca(cert_path: &std::path::Path, key_path: &std::path::Path) -> Result<Ca
     Ok(Ca { cert, key, pem })
 }
 
+/// Pre-trust the session CA in a Firefox profile's NSS store via `certutil`, so the operator never
+/// has to import it by hand. Each launch uses a throwaway profile that would otherwise start with an
+/// empty trust store (which is why a persistent CA alone was not enough: the profile, not the CA, was
+/// the thing being thrown away). Best-effort: returns false when `certutil` (from nss) is absent, and
+/// the caller falls back to printing the manual-install steps.
+fn firefox_trust_ca(profile: &std::path::Path, ca_pem: &std::path::Path) -> bool {
+    use std::process::Command;
+    let db = format!("sql:{}", profile.display());
+    // A fresh profile has no NSS db yet; create one with an empty password (a no-op if it exists).
+    let _ = Command::new("certutil")
+        .args(["-N", "-d", &db, "--empty-password"])
+        .output();
+    Command::new("certutil")
+        .args(["-A", "-n", "Crossfyre Web Tracer CA", "-t", "C,,", "-i"])
+        .arg(ca_pem)
+        .args(["-d", &db])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Resolves (and caches) a leaf cert per SNI hostname, signed by the session CA.
 struct MitmResolver {
     ca: Arc<Ca>,
@@ -624,14 +645,16 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
         let profile =
             std::env::temp_dir().join(format!("cfx-trace-profile-{}", std::process::id()));
         let mut cmd = tokio::process::Command::new(&bin);
+        let mut ca_trusted = false;
         if is_firefox {
             // Firefox: an isolated profile whose prefs route through the proxy.
             // `allow_hijacking_localhost` is the key one - Firefox, like Chromium,
             // bypasses loopback by default, so without it a http://localhost
-            // target never reaches the proxy. HTTPS needs the printed CA imported
-            // into Firefox (it has its own trust store; there is no
-            // --ignore-certificate-errors equivalent).
+            // target never reaches the proxy. HTTPS needs the CA trusted; Firefox has
+            // its own trust store with no --ignore-certificate-errors equivalent, so
+            // we pre-install the CA into this profile via certutil below.
             let _ = std::fs::create_dir_all(&profile);
+            ca_trusted = firefox_trust_ca(&profile, &ca_path);
             // `bound` is "127.0.0.1:<port>"; pull the port for the profile prefs.
             let port = bound
                 .rsplit(':')
@@ -723,9 +746,15 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
             Ok(c) => {
                 println!("  launched {bin} through the proxy (isolated profile)");
                 if is_firefox {
-                    println!(
-                        "  firefox: HTTP targets capture now; for HTTPS import the CA above (Settings -> Privacy -> Certificates)"
-                    );
+                    if ca_trusted {
+                        println!(
+                            "  firefox: CA auto-trusted in this profile - HTTPS captures immediately, nothing to import"
+                        );
+                    } else {
+                        println!(
+                            "  firefox: HTTP captures now; for HTTPS import the CA above (Settings -> Privacy -> Certificates), or install `certutil` (nss) so it auto-trusts next time"
+                        );
+                    }
                 }
                 browser_child = Some(c);
             }
