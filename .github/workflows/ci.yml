@@ -57,7 +57,7 @@ jobs:
         run: |
           set -eu
           leaked=0
-          for p in adaptive-private .cargo/config.toml core/src/egress/private.rs; do
+          for p in adaptive-private .cargo/config.toml core/src/egress/private.rs cortex/src/authz/private.rs; do
             if git ls-files --error-unmatch "$p" >/dev/null 2>&1; then
               echo "::error file=$p::$p is tracked in git. This is a private \
           drop-in and must never ship in the open repo."
@@ -65,7 +65,7 @@ jobs:
             fi
           done
           # Also catch the whole directory being added under any path.
-          if git ls-files | grep -qE '(^|/)adaptive-private/|(^|/)egress/private\.rs$'; then
+          if git ls-files | grep -qE '(^|/)adaptive-private/|(^|/)egress/private\.rs$|(^|/)authz/private\.rs$'; then
             echo "::error::a private drop-in path is tracked in git"
             leaked=1
           fi
@@ -82,6 +82,8 @@ jobs:
           test -f adaptive/src/lib.rs        || { echo "::error::open adaptive crate missing"; exit 1; }
           test -f core/src/egress/baseline.rs || { echo "::error::open egress baseline missing"; exit 1; }
           test ! -e core/src/egress/private.rs
+          test -f cortex/src/authz/baseline.rs || { echo "::error::open authz baseline missing"; exit 1; }
+          test ! -e cortex/src/authz/private.rs
           echo "clean checkout resolves to the open baseline"
 
   build:
