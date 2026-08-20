@@ -112,7 +112,7 @@ These are offensive-security tools. **Only scan systems you own or have explicit
 
 ## Contributing
 
-Issues and pull requests are welcome. For a bug, include the tool, the exact command, and what you expected. For larger changes, open an issue first so we can agree on the approach before you invest the work. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome. Open pull requests against the `dev` branch: that is where development happens, and `main` tracks the latest release. For a bug, include the tool, the exact command, and what you expected. For larger changes, open an issue first so we can agree on the approach before you invest the work. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Found a security issue? Please don't open a public issue. See [SECURITY.md](SECURITY.md) or email **team@clickswave.org**.
 

@@ -23,6 +23,10 @@ For anything security-sensitive, do **not** open a public issue. See [SECURITY.m
 - For small fixes (typos, obvious bugs), a pull request is fine.
 - For anything larger (new flags, new behavior, new sources), open an issue first so we can agree on the approach before you invest the work. It saves everyone time.
 
+## Branching
+
+Development happens on `dev`; `main` tracks the latest release. Branch your work off `dev` and open the pull request against `dev`, not `main`. Maintainers promote `dev` to `main` when a release is cut.
+
 ## Development
 
 You need a recent stable [Rust toolchain](https://rustup.rs).
