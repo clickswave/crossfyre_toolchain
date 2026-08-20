@@ -142,6 +142,12 @@ enum Commands {
         /// tool prints the one it picked); set a fixed port if you drive your own browser.
         #[arg(long, default_value_t = 0)]
         proxy_port: u16,
+
+        /// Seed the session auth you browse with (cookies, bearer/API-key headers) into the
+        /// Credentials arsenal as encrypted, host-scoped credentials, ready for authenticated scans
+        /// and authz testing. Off by default; only the hosts you actually visit are captured.
+        #[arg(long)]
+        seed_credentials: bool,
     },
 
     /// Update from the release manifest: `self`, an extension name, or `all`
@@ -559,6 +565,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             flush_secs,
             method,
             proxy_port,
+            seed_credentials,
         } => {
             let method = match method.to_lowercase().as_str() {
                 "keylog" | "packet" | "pcap" => cfx_core::toolchain::trace::CaptureMethod::Keylog,
@@ -575,6 +582,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 host_filter: scope,
                 batch_size,
                 flush_secs,
+                seed_credentials,
             })
             .await?;
         }

@@ -238,6 +238,102 @@ struct Ctx {
     scope: Option<String>,
     /// The session CA in PEM, served by the built-in cert portal (http://cfx).
     ca_pem: Arc<String>,
+    /// Present only under `--seed-credentials`: the per-host auth material observed so far. When
+    /// absent (the default) no secret value is ever read or retained.
+    seed: Option<SeedStore>,
+}
+
+// ---------------------------------------------------------------------------
+// Opt-in session-credential capture
+// ---------------------------------------------------------------------------
+
+/// The latest auth material seen for one host. Values refresh in place (sessions rotate); only the
+/// most recent is kept. Populated exclusively when the operator passed `--seed-credentials`.
+#[derive(Default, Clone)]
+struct HostAuth {
+    cookie: Option<String>,
+    authorization: Option<String>,
+    /// Original-cased custom auth-header name -> value.
+    custom: HashMap<String, String>,
+}
+
+type SeedStore = Arc<Mutex<HashMap<String, HostAuth>>>;
+
+/// Request headers (besides Cookie/Authorization) that carry an API credential. Deliberately a small
+/// allowlist so ordinary headers (Content-Type, Accept, CSRF tokens, ...) are never captured.
+const AUTH_HEADERS: &[&str] = &[
+    "x-api-key",
+    "apikey",
+    "api-key",
+    "x-auth-token",
+    "x-access-token",
+    "x-session-token",
+];
+
+/// Record the auth material on one request against its host. No-op when nothing auth-bearing is present.
+fn capture_auth(store: &SeedStore, host: &str, headers: &hyper::HeaderMap) {
+    let cookie = headers
+        .get(hyper::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let authz = headers
+        .get(hyper::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    let mut custom: Vec<(String, String)> = Vec::new();
+    for (name, value) in headers.iter() {
+        if AUTH_HEADERS.contains(&name.as_str().to_ascii_lowercase().as_str()) {
+            if let Ok(v) = value.to_str() {
+                custom.push((name.as_str().to_string(), v.to_string()));
+            }
+        }
+    }
+    if cookie.is_none() && authz.is_none() && custom.is_empty() {
+        return;
+    }
+    let mut map = store.lock().unwrap();
+    let e = map.entry(host.to_string()).or_default();
+    if cookie.is_some() {
+        e.cookie = cookie;
+    }
+    if authz.is_some() {
+        e.authorization = authz;
+    }
+    for (k, v) in custom {
+        e.custom.insert(k, v);
+    }
+}
+
+/// Turn the captured material into the `{host, auth_type, config?, secret}` entries the seed endpoint
+/// expects: Cookie -> cookie cred, `Authorization: Bearer x` -> bearer cred, any other Authorization
+/// or allowlisted header -> header cred.
+fn build_seed_creds(store: &SeedStore) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let map = store.lock().unwrap();
+    let mut out = Vec::new();
+    for (host, auth) in map.iter() {
+        if let Some(cookie) = &auth.cookie {
+            out.push(
+                json!({ "host": host, "auth_type": "cookie", "secret": { "cookie": cookie } }),
+            );
+        }
+        if let Some(a) = &auth.authorization {
+            if a.to_ascii_lowercase().starts_with("bearer ") {
+                let token = a[7..].trim().to_string();
+                out.push(
+                    json!({ "host": host, "auth_type": "bearer", "secret": { "token": token } }),
+                );
+            } else {
+                out.push(json!({ "host": host, "auth_type": "header",
+                    "config": { "header_name": "Authorization" }, "secret": { "header_value": a } }));
+            }
+        }
+        for (name, val) in auth.custom.iter() {
+            out.push(json!({ "host": host, "auth_type": "header",
+                "config": { "header_name": name }, "secret": { "header_value": val } }));
+        }
+    }
+    out
 }
 
 /// Magic hostnames the proxy answers itself (Burp-style) to hand out the CA,
@@ -309,6 +405,12 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
         || req.headers().contains_key(hyper::header::COOKIE);
 
     let (parts, body) = req.into_parts();
+
+    // Opt-in credential capture (never runs unless --seed-credentials armed the store).
+    if let Some(store) = &ctx.seed {
+        capture_auth(store, &portal_host, &parts.headers);
+    }
+
     let body_bytes = body
         .collect()
         .await
@@ -463,6 +565,16 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     );
     println!("  or browse to http://cfx through the proxy to download + install it");
 
+    // Armed only under --seed-credentials; otherwise no secret is ever read.
+    let seed_store: Option<SeedStore> = if cfg.seed_credentials {
+        println!(
+            "  --seed-credentials: session auth for the hosts you browse will be saved to the arsenal"
+        );
+        Some(Arc::new(Mutex::new(HashMap::new())))
+    } else {
+        None
+    };
+
     let (tx, mut rx) = mpsc::channel::<TraceEvent>(1024);
     let ctx = Ctx {
         client,
@@ -470,6 +582,7 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
         tx,
         scope: cfg.host_filter.clone(),
         ca_pem: Arc::new(ca.pem.clone()),
+        seed: seed_store.clone(),
     };
     tokio::spawn(serve(listener, ctx));
 
@@ -631,6 +744,17 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
                 }
             }
             _ = tokio::signal::ctrl_c() => { println!("\n  stopping…"); break; }
+        }
+    }
+
+    // Seed captured credentials while the session is still live (before the final `ended` flush).
+    if let Some(store) = &seed_store {
+        let creds = build_seed_creds(store);
+        if !creds.is_empty() {
+            match super::trace::post_seed_credentials(&post_client, &cfg, &creds).await {
+                Ok(n) => println!("\n  seeded {n} session credential(s) to the arsenal"),
+                Err(e) => eprintln!("\n  credential seed error: {e}"),
+            }
         }
     }
 

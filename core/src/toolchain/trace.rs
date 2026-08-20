@@ -264,6 +264,10 @@ pub struct TraceConfig {
     pub host_filter: Option<String>,
     pub batch_size: usize,
     pub flush_secs: u64,
+    /// Opt-in: capture the session auth (cookie/bearer/API-key header) the browse presents and seed
+    /// it into the Credentials arsenal as an encrypted, host-scoped credential. Off by default; the
+    /// normal capture pipeline never touches secret values.
+    pub seed_credentials: bool,
 }
 
 /// POST one batch to the nodeless ingest endpoint. `ended=true` on the final flush closes the
@@ -297,6 +301,38 @@ pub async fn post_batch(
         return Err(msg.into());
     }
     Ok(body["data"]["accepted"].as_u64().unwrap_or(0) as usize)
+}
+
+/// POST the session credentials the proxy observed to the token-gated seed endpoint. Each entry is
+/// `{host, auth_type, config?, secret}`; the server encrypts the secret and stores a host-scoped
+/// credential. Returns the number seeded. Only ever called when `--seed-credentials` is set.
+pub async fn post_seed_credentials(
+    client: &reqwest::Client,
+    cfg: &TraceConfig,
+    credentials: &[serde_json::Value],
+) -> Result<usize, BoxErr> {
+    let res = client
+        .post(format!(
+            "{}/api/v1/web-trace/seed-credential",
+            cfg.api_url.trim_end_matches('/')
+        ))
+        .json(&serde_json::json!({
+            "workflow_id": cfg.workflow_id,
+            "token": cfg.token,
+            "credentials": credentials,
+        }))
+        .send()
+        .await?;
+    let ok = res.status().is_success();
+    let body: serde_json::Value = res.json().await.unwrap_or(serde_json::json!({}));
+    if !ok {
+        let msg = body["message"]
+            .as_str()
+            .unwrap_or("seed rejected")
+            .to_string();
+        return Err(msg.into());
+    }
+    Ok(body["data"]["seeded"].as_u64().unwrap_or(0) as usize)
 }
 
 /// The `tshark` argv for a decrypted-HTTP capture over the given keylog file. Split out so the
