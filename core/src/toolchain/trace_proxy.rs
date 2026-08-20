@@ -71,17 +71,20 @@ AutofillServerCommunication,CertificateTransparencyComponentUpdater",
 // Session CA + on-the-fly per-host leaf certs
 // ---------------------------------------------------------------------------
 
-/// A short-lived CA minted for this capture session. The user installs `pem` in their browser (or,
-/// for the browser we launch, we pass `--ignore-certificate-errors` so it isn't even needed).
+/// The Web Tracer CA. This is PERSISTED (see [`load_or_generate_ca`]): the user installs `pem` in
+/// their browser once, and it keeps working across sessions because the signing key is stable. A
+/// fresh CA per session (same name, new key) is exactly what makes an already installed CA fail with
+/// SEC_ERROR_BAD_SIGNATURE, because the leaf is signed by a key the installed CA does not match.
 struct Ca {
     cert: rcgen::Certificate,
     key: rcgen::KeyPair,
     pem: String,
 }
 
-fn generate_ca() -> Result<Ca, BoxErr> {
-    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose};
-    let key = KeyPair::generate()?;
+/// The CA's fixed parameters. Shared by generation and reload so a reloaded issuer has the same
+/// subject and (with the persisted key) the same public key and identifier the installed CA carries.
+fn ca_params() -> Result<rcgen::CertificateParams, BoxErr> {
+    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyUsagePurpose};
     let mut params = CertificateParams::new(Vec::<String>::new())?;
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.key_usages = vec![
@@ -95,8 +98,59 @@ fn generate_ca() -> Result<Ca, BoxErr> {
     params
         .distinguished_name
         .push(DnType::OrganizationName, "Crossfyre");
-    let cert = params.self_signed(&key)?;
+    Ok(params)
+}
+
+fn generate_ca() -> Result<Ca, BoxErr> {
+    let key = rcgen::KeyPair::generate()?;
+    let cert = ca_params()?.self_signed(&key)?;
     let pem = cert.pem();
+    Ok(Ca { cert, key, pem })
+}
+
+/// On-disk home for the persistent CA: `~/.config/crossfyre/web-tracer/` (honors SUDO_USER, same
+/// base as the node configs). Returns (cert path, key path).
+fn ca_paths() -> (std::path::PathBuf, std::path::PathBuf) {
+    let dir = crate::toolchain::config::get_toolchain_dir().join("web-tracer");
+    (dir.join("ca-cert.pem"), dir.join("ca-key.pem"))
+}
+
+/// Load the persisted CA if present, otherwise mint one and persist it. The key is the half that
+/// matters for trust: as long as it is stable, every leaf the proxy mints verifies against the CA
+/// the user already installed, so they install it exactly once.
+fn load_or_generate_ca() -> Result<Ca, BoxErr> {
+    let (cert_path, key_path) = ca_paths();
+    if cert_path.exists() && key_path.exists() {
+        match load_ca(&cert_path, &key_path) {
+            Ok(ca) => return Ok(ca),
+            // A corrupt or partial file must not wedge tracing: regenerate and let the user
+            // re-install the new CA once.
+            Err(e) => eprintln!("web tracer: saved CA unreadable ({e}); regenerating"),
+        }
+    }
+    let ca = generate_ca()?;
+    if let Some(parent) = cert_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&cert_path, ca.pem.as_bytes());
+    if std::fs::write(&key_path, ca.key.serialize_pem().as_bytes()).is_ok() {
+        // The CA private key can mint a trusted cert for ANY site: keep it owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    Ok(ca)
+}
+
+/// Reconstruct the CA from its persisted cert + key. `pem` is the saved cert (what the user
+/// installed, served verbatim by the portal); the issuer used for signing is re-derived from the
+/// fixed [`ca_params`] and the stable key, so it shares the installed CA's subject and public key.
+fn load_ca(cert_path: &std::path::Path, key_path: &std::path::Path) -> Result<Ca, BoxErr> {
+    let pem = std::fs::read_to_string(cert_path)?;
+    let key = rcgen::KeyPair::from_pem(&std::fs::read_to_string(key_path)?)?;
+    let cert = ca_params()?.self_signed(&key)?;
     Ok(Ca { cert, key, pem })
 }
 
@@ -369,7 +423,7 @@ async fn serve(listener: TcpListener, ctx: Ctx) {
 pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    let ca = Arc::new(generate_ca()?);
+    let ca = Arc::new(load_or_generate_ca()?);
     let resolver = Arc::new(MitmResolver {
         ca: ca.clone(),
         cache: Mutex::new(HashMap::new()),
