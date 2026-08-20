@@ -270,6 +270,30 @@ const AUTH_HEADERS: &[&str] = &[
     "x-session-token",
 ];
 
+/// The host[:port] a request targets, keeping a non-default port so it matches the asset graph's
+/// host convention (and so two apps on the same host but different ports do not share a credential).
+fn target_authority(base: &str, uri: &hyper::Uri) -> String {
+    if base.is_empty() {
+        let host = uri.host().unwrap_or("");
+        match uri.port_u16() {
+            Some(p)
+                if !matches!(
+                    (uri.scheme_str(), p),
+                    (Some("http"), 80) | (Some("https"), 443) | (None, 80)
+                ) =>
+            {
+                format!("{host}:{p}")
+            }
+            _ => host.to_string(),
+        }
+    } else {
+        // MITM https: base is already "https://host" (default :443 elided upstream).
+        base.trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .to_string()
+    }
+}
+
 /// Record the auth material on one request against its host. No-op when nothing auth-bearing is present.
 fn capture_auth(store: &SeedStore, host: &str, headers: &hyper::HeaderMap) {
     let cookie = headers
@@ -408,7 +432,7 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
 
     // Opt-in credential capture (never runs unless --seed-credentials armed the store).
     if let Some(store) = &ctx.seed {
-        capture_auth(store, &portal_host, &parts.headers);
+        capture_auth(store, &target_authority(base, &uri), &parts.headers);
     }
 
     let body_bytes = body
