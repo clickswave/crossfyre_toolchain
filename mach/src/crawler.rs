@@ -385,6 +385,15 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
         let _ = tx.send(CrawlEvent::url_candidate(&u, parent, d));
     }
 
+    // Probe API-spec locations AFTER the link crawl so the burst of probe requests
+    // (some apps rate-limit / serve their SPA for unknown paths) can't perturb the
+    // main crawl. A bare REST API exposes no HTML/JS to crawl, but its
+    // OpenAPI/Swagger doc lists every route; we harvest the spec's quoted path keys
+    // as candidates so spec-defined endpoints still enter the asset graph.
+    if params.parse_js {
+        probe_specs(&client, &seed, &seed_host, &params, &tx).await;
+    }
+
     let _ = tx.send(CrawlEvent::done(pages_crawled));
 }
 
@@ -457,6 +466,73 @@ async fn fetch_page(
     dedup(&mut page.links);
     dedup(&mut page.params);
     page
+}
+
+/// Fetch well-known OpenAPI/Swagger locations and harvest their route keys, so a
+/// bare API (no crawlable HTML/JS) still yields its endpoints. Runs before the
+/// main crawl and emits candidates directly; it never touches the crawl frontier.
+async fn probe_specs(
+    client: &Client,
+    seed: &Url,
+    seed_host: &str,
+    params: &CrawlParams,
+    tx: &mpsc::UnboundedSender<CrawlEvent>,
+) {
+    const SPEC_PATHS: &[&str] = &[
+        "/openapi.json", "/swagger.json", "/api-docs", "/v2/api-docs", "/v3/api-docs",
+        "/swagger/v1/swagger.json", "/api/openapi.json", "/api-docs/swagger.json",
+        "/swagger/doc.json", "/api/swagger.json",
+    ];
+    // Probe all locations concurrently with a short timeout: on an app that serves
+    // its SPA for unknown paths, sequential probing with the full crawl timeout
+    // would starve the actual crawl. Capped so the whole pass is a few seconds.
+    let mut set = tokio::task::JoinSet::new();
+    for p in SPEC_PATHS {
+        let url = match seed.join(p) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        let client = client.clone();
+        set.spawn(async move {
+            let resp = tokio::time::timeout(std::time::Duration::from_secs(5), client.get(url.clone()).send())
+                .await
+                .ok()?
+                .ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let ct = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_lowercase();
+            if !ct.contains("json") {
+                return None;
+            }
+            let body = tokio::time::timeout(std::time::Duration::from_secs(6), resp.text())
+                .await
+                .ok()?
+                .ok()?;
+            // Only harvest something that actually looks like an API spec.
+            if !(body.contains("\"paths\"") || body.contains("\"swagger\"") || body.contains("\"openapi\"")) {
+                return None;
+            }
+            Some((url, body))
+        });
+    }
+    while let Some(joined) = set.join_next().await {
+        if let Ok(Some((url, body))) = joined {
+            let mut links = Vec::new();
+            extract_js(&body, &mut links);
+            dedup(&mut links);
+            for raw in &links {
+                if let Some(child) = resolve_and_scope(raw, &url, params, seed_host) {
+                    let _ = tx.send(CrawlEvent::url_candidate(&child, Some(url.to_string()), 1));
+                }
+            }
+        }
+    }
 }
 
 fn extract_html(body: &str, out: &mut Vec<String>) {
