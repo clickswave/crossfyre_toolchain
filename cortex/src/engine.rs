@@ -68,12 +68,13 @@ pub struct OastSpec {
 /// `transport`; re-exported so `crate::engine::AuthSpec` keeps resolving.
 pub use transport::AuthSpec;
 
-struct BaseResp {
-    is_https: bool,
-    status: u16,
-    headers: Vec<(String, String)>,
+pub(crate) struct BaseResp {
+    #[allow(dead_code)]
+    pub(crate) is_https: bool,
+    pub(crate) status: u16,
+    pub(crate) headers: Vec<(String, String)>,
     /// First chunk of the body, for WAF/anti-bot challenge detection.
-    body_prefix: String,
+    pub(crate) body_prefix: String,
 }
 
 pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
@@ -455,7 +456,7 @@ pub async fn read_body_capped(mut resp: transport::Response) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
+pub(crate) async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> {
     match client.get(base).send().await {
         Ok(r) => {
             let status = r.status().as_u16();

@@ -456,11 +456,22 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
         capture_auth(store, &target_authority(base, &uri), &parts.headers);
     }
 
+    // Content-Type is a structural, non-secret header describing the request contract; keep it.
+    let content_type = parts
+        .headers
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
     let body_bytes = body
         .collect()
         .await
         .map(|c| c.to_bytes())
         .unwrap_or_default();
+
+    // Body-side of the capture: field NAMES only (values discarded), mirroring the query-key rule.
+    let body_params =
+        crate::toolchain::trace::body_param_keys(content_type.as_deref(), &body_bytes);
 
     let mut rb = ctx.client.request(method.clone(), url.as_str());
     for (name, value) in parts.headers.iter() {
@@ -487,6 +498,8 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
                 status: Some(status.as_u16() as i64),
                 server,
                 authed,
+                content_type: content_type.clone(),
+                body_params: body_params.clone(),
             };
             if let Some(ev) = shape(&raw, ctx.scope.as_deref()) {
                 let _ = ctx.tx.send(ev).await;
@@ -504,12 +517,48 @@ async fn forward(req: Request<Incoming>, base: &str, ctx: &Ctx) -> Response<Body
                 .unwrap_or_else(|_| Response::new(empty()))
         }
         Err(e) => {
-            let msg = format!("crossfyre trace proxy: upstream error: {e}");
+            let detail = upstream_error_detail(&e);
+            eprintln!("[trace] upstream {method} {url} failed: {detail}");
+            let msg = format!("crossfyre trace proxy: upstream error ({detail})");
             Response::builder()
                 .status(502)
                 .body(full(Bytes::from(msg)))
                 .unwrap()
         }
+    }
+}
+
+/// reqwest's `Display` collapses to "error sending request for url (...)" and hides WHY. Walk the
+/// source chain (the TLS handshake failure, connection refused, timeout, DNS error, ...) and label
+/// the kind, so the operator sees the real cause instead of a dead-end. A common one against old
+/// government / enterprise sites is a TLS handshake failure: the server only offers a legacy cipher
+/// (RSA key exchange / CBC, e.g. TLS_RSA_WITH_AES_128_CBC_SHA256) that the proxy's rustls stack does
+/// not implement - that surfaces here as "connect: ... handshake ...".
+fn upstream_error_detail(e: &reqwest::Error) -> String {
+    let kind = if e.is_connect() {
+        "connect"
+    } else if e.is_timeout() {
+        "timeout"
+    } else if e.is_redirect() {
+        "redirect"
+    } else if e.is_body() {
+        "body"
+    } else {
+        "request"
+    };
+    let mut chain: Vec<String> = Vec::new();
+    let mut src: Option<&(dyn Error + 'static)> = e.source();
+    while let Some(s) = src {
+        let m = s.to_string();
+        if chain.last().map(|p| p != &m).unwrap_or(true) {
+            chain.push(m);
+        }
+        src = s.source();
+    }
+    if chain.is_empty() {
+        format!("{kind}: {e}")
+    } else {
+        format!("{kind}: {}", chain.join(": "))
     }
 }
 
@@ -585,6 +634,14 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .danger_accept_invalid_certs(false)
+        // OpenSSL, not rustls, for the upstream leg: a MITM proxy must reach whatever TLS the origin
+        // offers, including legacy RSA-kx / CBC ciphers that rustls refuses (e.g. many old gov and
+        // enterprise sites). OpenSSL still negotiates those, so browsing through the proxy works
+        // wherever the browser itself would. Scoped here only; other clients keep rustls.
+        .use_native_tls()
+        // Bound the connect/handshake so an unreachable or stalled origin returns a clear 502 to the
+        // browser instead of hanging the tab. No overall timeout: large downloads/streams must survive.
+        .connect_timeout(std::time::Duration::from_secs(15))
         .build()?;
 
     let addr = format!("127.0.0.1:{}", cfg.proxy_port);
@@ -774,6 +831,9 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let mut batcher = Batcher::new(cfg.batch_size);
     let mut total = 0usize;
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(cfg.flush_secs.max(1)));
+    // Signature of the last-seeded credential set, so periodic seeding re-posts only when the
+    // observed session auth actually changed (a new host, or a rotated secret).
+    let mut last_seed_sig: Option<String> = None;
 
     loop {
         tokio::select! {
@@ -794,6 +854,21 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
                 if !batcher.is_empty() {
                     let batch = batcher.drain();
                     if let Ok(n) = post_batch(&post_client, &cfg, &batch, false).await { total += n; }
+                }
+                // Seed observed session credentials live, so they land in the arsenal while the
+                // operator is still browsing instead of only at Ctrl-C. Idempotent upsert on the
+                // server; skip the round-trip when nothing changed since the last seed.
+                if let Some(store) = &seed_store {
+                    let creds = build_seed_creds(store);
+                    if !creds.is_empty() {
+                        let sig = serde_json::to_string(&creds).unwrap_or_default();
+                        if last_seed_sig.as_deref() != Some(sig.as_str()) {
+                            match super::trace::post_seed_credentials(&post_client, &cfg, &creds).await {
+                                Ok(_) => last_seed_sig = Some(sig),
+                                Err(e) => eprintln!("\n  credential seed error: {e}"),
+                            }
+                        }
+                    }
                 }
             }
             _ = tokio::signal::ctrl_c() => { println!("\n  stopping…"); break; }

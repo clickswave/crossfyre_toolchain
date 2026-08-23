@@ -27,9 +27,9 @@ use serde::Deserialize;
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct AuthzParams {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::probe::de_null_seq")]
     pub endpoints: Vec<Endpoint>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::probe::de_null_seq")]
     pub identities: Vec<Identity>,
     #[serde(default = "d_timeout")]
     pub timeout_ms: u64,

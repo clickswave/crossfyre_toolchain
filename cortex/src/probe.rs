@@ -1,0 +1,294 @@
+//! Shared request/response machinery for cortex's active operations (`inject`, `fuzz`, `discover`).
+//!
+//! These operations all speak the same language: build an evasion-aware HTTP client, send a request
+//! with an optional typed body, read a capped response, and read simple oracles off it (server
+//! error, JSON typing). Keeping that in one place is what lets each operation be a thin, focused
+//! module instead of re-implementing the transport every time.
+
+use crate::engine::{AuthSpec, read_body_capped};
+use regex::Regex;
+use serde::Deserialize;
+use serde_json::Value;
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
+use transport::Client;
+
+/// Deserialize a `Vec<String>` that tolerates an explicit JSON `null` (treated as empty),
+/// not just an absent field. Callers upstream (the node forwarder) pass `"classes": null`
+/// when no classes are configured; plain `#[serde(default)]` rejects that with
+/// "invalid type: null, expected a sequence". Use with `#[serde(default, deserialize_with = ...)]`.
+pub fn de_null_seq<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// A captured response reduced to what the oracles need.
+pub struct Resp {
+    pub status: u16,
+    pub body: String,
+    pub elapsed_ms: u128,
+    /// The `Location` header value, if any (open-redirect / CRLF oracle).
+    pub location: Option<String>,
+    /// All response headers (lowercased name, value) - the CORS and CRLF/header-injection oracles read
+    /// arbitrary headers off this. Bounded (responses have few headers), so cheap to keep.
+    pub headers: Vec<(String, String)>,
+}
+
+impl Resp {
+    /// First value of a response header, case-insensitive.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let n = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find(|(k, _)| *k == n)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Build an evasion-aware scan client. `min_timeout_ms` is the floor the operation needs (e.g. an
+/// injection SLEEP probe needs the timeout above the sleep); pass 0 when there is no such floor.
+pub fn build_client(
+    evasive: bool,
+    identify: Option<String>,
+    auth: Option<&AuthSpec>,
+    target: &str,
+    timeout_ms: u64,
+    min_timeout_ms: u64,
+) -> Option<Client> {
+    let mode = adaptive::identity::Mode::from_flags(evasive, identify);
+    let seed = (!target.is_empty()).then_some(target);
+    let browser = adaptive::identity::resolve(&mode, seed);
+    transport::build_scan_client(transport::ScanClient {
+        identity_headers: &browser.headers,
+        user_agent: &browser.user_agent,
+        auth,
+        attribution_token: None,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+        timeout: Some(Duration::from_millis(
+            timeout_ms.clamp(1000, 120_000).max(min_timeout_ms),
+        )),
+        redirect: transport::Redirect::Limited(3),
+        accept_invalid_certs: true,
+        cookie_store: true,
+        resolve: Vec::new(),
+    })
+    .ok()
+}
+
+/// Same as [`build_client`] but with redirects DISABLED, so the caller sees the raw 3xx + `Location`
+/// instead of the followed destination. The open-redirect / header-injection oracles need that.
+pub fn build_client_no_redirect(
+    evasive: bool,
+    identify: Option<String>,
+    auth: Option<&AuthSpec>,
+    target: &str,
+    timeout_ms: u64,
+) -> Option<Client> {
+    let mode = adaptive::identity::Mode::from_flags(evasive, identify);
+    let seed = (!target.is_empty()).then_some(target);
+    let browser = adaptive::identity::resolve(&mode, seed);
+    transport::build_scan_client(transport::ScanClient {
+        identity_headers: &browser.headers,
+        user_agent: &browser.user_agent,
+        auth,
+        attribution_token: None,
+        emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+        timeout: Some(Duration::from_millis(timeout_ms.clamp(1000, 120_000))),
+        redirect: transport::Redirect::None,
+        accept_invalid_certs: true,
+        cookie_store: true,
+        resolve: Vec::new(),
+    })
+    .ok()
+}
+
+/// Send one request with an optional `(body, content-type)` and read the capped response.
+pub async fn send(
+    client: &Client,
+    method: &str,
+    url: &str,
+    body: Option<(&str, &str)>,
+) -> Option<Resp> {
+    send_with(client, method, url, body, &[]).await
+}
+
+/// Like [`send`], but sets `extra_headers` on the request too. This is how injection sites that live
+/// in a request header or cookie (User-Agent, Referer, X-Forwarded-For, Cookie) carry their payload.
+pub async fn send_with(
+    client: &Client,
+    method: &str,
+    url: &str,
+    body: Option<(&str, &str)>,
+    extra_headers: &[(String, String)],
+) -> Option<Resp> {
+    let mut rb = match method {
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "DELETE" => client.delete(url),
+        "PATCH" => client.patch(url),
+        _ => client.get(url),
+    };
+    for (k, v) in extra_headers {
+        rb = rb.header(k.as_str(), v.as_str());
+    }
+    if let Some((b, ctype)) = body {
+        rb = rb.header("content-type", ctype).body(b.to_string());
+    }
+    let t0 = Instant::now();
+    match rb.send().await {
+        Ok(r) => {
+            let status = r.status().as_u16();
+            let headers: Vec<(String, String)> = r
+                .headers()
+                .iter()
+                .filter_map(|(k, v)| {
+                    v.to_str()
+                        .ok()
+                        .map(|s| (k.as_str().to_ascii_lowercase(), s.to_string()))
+                })
+                .collect();
+            let location = headers
+                .iter()
+                .find(|(k, _)| k == "location")
+                .map(|(_, v)| v.clone());
+            let body = read_body_capped(r).await;
+            Some(Resp {
+                status,
+                body,
+                elapsed_ms: t0.elapsed().as_millis(),
+                location,
+                headers,
+            })
+        }
+        Err(_) => None,
+    }
+}
+
+/// A server error for the oracles: an HTTP 5xx, or a 2xx/4xx page that leaks a stack trace.
+pub fn is_server_error(status: u16, body: &str) -> bool {
+    status >= 500 || STACK_ERR_RE.is_match(body)
+}
+
+/// Body carries a database-engine error signature (error-based SQLi oracle). Shared by the REST
+/// injection engine and the GraphQL engine.
+pub fn is_sql_error(body: &str) -> bool {
+    SQL_ERR_RE.is_match(body)
+}
+
+/// Body leaks the shape of `/etc/passwd` (LFI oracle).
+pub fn is_passwd(body: &str) -> bool {
+    PASSWD_RE.is_match(body)
+}
+
+pub static SQL_ERR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(SQL syntax.*MySQL|Warning.*\bmysqli?_|MySqlException|check the manual that corresponds to your (MySQL|MariaDB)|Unknown column '[^']+' in|PostgreSQL.*ERROR|pg_query\(\)|PSQLException|unterminated quoted string|Microsoft SQL Server|ODBC SQL Server Driver|Unclosed quotation mark after the character string|Incorrect syntax near|SQLServerException|\bORA-\d{5}\b|Oracle error|quoted string not properly terminated|SQLite/JDBCDriver|SQLite3?::|sqlite3?\.?(OperationalError|Exception)|SQLITE_ERROR|SQLite error|near "[^"]*": syntax error|unrecognized token|SQL logic error|java\.sql\.SQLException|syntax error at or near|You have an error in your SQL syntax)"#).unwrap()
+});
+pub static PASSWD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"root:.*:0:0:").unwrap());
+
+/// A type-appropriate baseline value for a body field we have no example for, so a JSON body with an
+/// `integer`/`boolean` field is well-typed rather than a string the server rejects.
+pub fn typed_default(ty: Option<&str>) -> &'static str {
+    match ty {
+        Some("integer") | Some("number") => "1",
+        Some("boolean") => "true",
+        Some("array") => "[]",
+        Some("object") => "{}",
+        _ => "test",
+    }
+}
+
+/// Render a baseline body value as its declared JSON type. Falls back to a JSON string when the
+/// value does not parse as the declared type (so a bad example can never produce invalid JSON).
+pub fn json_typed(value: &str, ty: Option<&str>) -> Value {
+    match ty {
+        Some("integer") => value
+            .parse::<i64>()
+            .map(Value::from)
+            .unwrap_or_else(|_| Value::String(value.to_string())),
+        Some("number") => value
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(value.to_string())),
+        Some("boolean") => value
+            .parse::<bool>()
+            .map(Value::Bool)
+            .unwrap_or_else(|_| Value::String(value.to_string())),
+        Some("array") | Some("object") => serde_json::from_str::<Value>(value)
+            .unwrap_or_else(|_| Value::String(value.to_string())),
+        _ => Value::String(value.to_string()),
+    }
+}
+
+/// Percent-encode a string for a URL/form context (keeps unreserved chars).
+pub fn pct_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Decode a percent/`+`-encoded value.
+pub fn pct_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+// Server-side error / stack-trace signatures across common stacks, so a 200-with-error-page counts
+// as a server error for the oracles (not just HTTP 5xx).
+static STACK_ERR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(Traceback \(most recent call last\)|Exception in thread|\bat [\w.$]+\([\w.]+\.java:\d+\)|\.java:\d+\)|java\.lang\.[A-Za-z]+Exception|NullPointerException|undefined method `[^']+' for|NoMethodError|ActionController::|TypeError:|ReferenceError:|at Object\.<anonymous>|node:internal|Fatal error: Uncaught|PHP (Warning|Fatal error|Notice)|Stack trace:|System\.[A-Za-z.]+Exception|goroutine \d+ \[|panic: |Whitelabel Error Page|Internal Server Error)"#).unwrap()
+});
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_error_detects_status_and_stacktrace() {
+        assert!(is_server_error(500, ""));
+        assert!(is_server_error(
+            200,
+            "Traceback (most recent call last): ..."
+        ));
+        assert!(is_server_error(200, "java.lang.NullPointerException"));
+        assert!(!is_server_error(200, "ok"));
+        assert!(!is_server_error(400, "bad request"));
+    }
+
+    #[test]
+    fn typed_helpers() {
+        assert_eq!(typed_default(Some("integer")), "1");
+        assert_eq!(typed_default(Some("boolean")), "true");
+        assert_eq!(typed_default(None), "test");
+        assert_eq!(
+            json_typed("abc", Some("integer")),
+            Value::String("abc".into())
+        );
+        assert_eq!(json_typed("42", Some("integer")), Value::from(42i64));
+        assert_eq!(json_typed("true", Some("boolean")), Value::Bool(true));
+    }
+}
