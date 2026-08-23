@@ -72,6 +72,18 @@ async fn handle_connection(
                 handle_inject(req.params, &mut writer).await?;
                 return Ok(());
             }
+            "discover" => {
+                handle_discover(req.params, &mut writer).await?;
+                return Ok(());
+            }
+            "fuzz" => {
+                handle_fuzz(req.params, &mut writer).await?;
+                return Ok(());
+            }
+            "graphql" => {
+                handle_graphql(req.params, &mut writer).await?;
+                return Ok(());
+            }
             other => {
                 write_line(
                     &mut writer,
@@ -148,6 +160,34 @@ async fn handle_authz(
     Ok(())
 }
 
+async fn handle_graphql(
+    params: Value,
+    writer: &mut OwnedWriteHalf,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let gp: crate::graphql::GraphqlParams = match serde_json::from_value(params) {
+        Ok(p) => p,
+        Err(e) => {
+            write_line(
+                writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid graphql params: {}", e),
+                }),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+    tokio::spawn(async move {
+        crate::graphql::run(gp, tx).await;
+    });
+    while let Some(ev) = rx.recv().await {
+        write_line(writer, &ev).await?;
+    }
+    Ok(())
+}
+
 async fn handle_inject(
     params: Value,
     writer: &mut OwnedWriteHalf,
@@ -170,6 +210,66 @@ async fn handle_inject(
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
     tokio::spawn(async move {
         crate::inject::run(ip, tx).await;
+    });
+
+    while let Some(ev) = rx.recv().await {
+        write_line(writer, &ev).await?;
+    }
+    Ok(())
+}
+
+async fn handle_discover(
+    params: Value,
+    writer: &mut OwnedWriteHalf,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let dp: crate::discover::DiscoverParams = match serde_json::from_value(params) {
+        Ok(p) => p,
+        Err(e) => {
+            write_line(
+                writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid discover params: {}", e),
+                }),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+    tokio::spawn(async move {
+        crate::discover::run(dp, tx).await;
+    });
+
+    while let Some(ev) = rx.recv().await {
+        write_line(writer, &ev).await?;
+    }
+    Ok(())
+}
+
+async fn handle_fuzz(
+    params: Value,
+    writer: &mut OwnedWriteHalf,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fp: crate::fuzz::FuzzParams = match serde_json::from_value(params) {
+        Ok(p) => p,
+        Err(e) => {
+            write_line(
+                writer,
+                &serde_json::json!({
+                    "type": "error",
+                    "message": format!("Invalid fuzz params: {}", e),
+                }),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+    tokio::spawn(async move {
+        crate::fuzz::run(fp, tx).await;
     });
 
     while let Some(ev) = rx.recv().await {

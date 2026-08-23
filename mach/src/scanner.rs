@@ -183,7 +183,10 @@ impl Scanner {
         let arc_tested = Arc::new(AtomicU64::new(0));
 
         let arc_prober = match crate::prober::Prober::new(&self.config).await {
-            Ok(prober) => Arc::new(prober),
+            Ok(mut prober) => {
+                prober.calibrate().await;
+                Arc::new(prober)
+            }
             Err(e) => {
                 eprintln!("Failed to create prober: {e:?}");
                 self.logger
@@ -235,7 +238,12 @@ impl Scanner {
         let arc_tx = Arc::new(tx);
 
         let arc_prober = match crate::prober::Prober::new(&self.config).await {
-            Ok(prober) => Arc::new(prober),
+            Ok(mut prober) => {
+                // Learn the target's soft-404 behaviour before the wordlist runs, so a wildcard
+                // "200 for everything" target does not turn every probe into a false finding.
+                prober.calibrate().await;
+                Arc::new(prober)
+            }
             Err(e) => {
                 self.logger
                     .error(&format!("Failed to create prober: {e:?}"))
@@ -372,7 +380,10 @@ impl Scanner {
         let arc_scan_id = Arc::new(self.scan_id);
 
         let arc_prober = match crate::prober::Prober::new(&self.config).await {
-            Ok(prober) => Arc::new(prober),
+            Ok(mut prober) => {
+                prober.calibrate().await;
+                Arc::new(prober)
+            }
             Err(e) => {
                 eprintln!("Failed to create prober: {e:?}");
                 self.logger

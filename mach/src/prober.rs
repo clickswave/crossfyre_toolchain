@@ -9,6 +9,19 @@ use transport::Client;
 pub struct Prober {
     config: cli_args::Args,
     client: Client,
+    /// Wildcard/soft-404 baseline learned at calibration time. When a target answers
+    /// "success" for paths that cannot exist (an SPA serving index.html for everything,
+    /// a catch-all 200 error page), every wordlist entry would otherwise be a false
+    /// "found". If set, a probe whose status + body size match this baseline is demoted
+    /// to not_found. `None` = the target 404s honestly, so no suppression happens.
+    soft404: Option<Soft404>,
+}
+
+#[derive(Debug, Clone)]
+struct Soft404 {
+    status: u16,
+    len_lo: i64,
+    len_hi: i64,
 }
 
 #[derive(Debug)]
@@ -143,7 +156,63 @@ impl Prober {
         Ok(Self {
             config: config.clone(),
             client: reqwest_client,
+            soft404: None,
         })
+    }
+
+    /// Probe a few paths that almost certainly do not exist. If the target answers with a
+    /// "success" status and a stable body size for them, it wildcards (soft-404s), and we record
+    /// that baseline so real probes matching it are not reported as findings. Only engages when at
+    /// least two synthetic probes agree on the same success status with a tight body-length spread,
+    /// so an honest 404 target (or one with genuinely varied pages) is left untouched.
+    pub async fn calibrate(&mut self) {
+        let bases = self.config.url.clone();
+        let Some(base) = bases.first() else { return };
+        let b = base.trim_end_matches('/');
+        let synthetic = [
+            "cfx404probe-zqx1w9",
+            "this-path-should-not-exist-8f3a2b",
+            "wildcard-calibration-5m7k",
+        ];
+        let mut hits: Vec<(u16, i64)> = Vec::new();
+        for p in synthetic {
+            let work = Work {
+                url: format!("{b}/{p}"),
+                entry_id: -1,
+                method: "get".to_string(),
+            };
+            if let Ok(res) = self.probe_url(&work, false).await {
+                if res.status == "found" {
+                    hits.push((res.response.status, res.response.body_length));
+                }
+            }
+        }
+        // Need >=2 agreeing on the same success status.
+        if hits.len() < 2 {
+            return;
+        }
+        let status = hits[0].0;
+        if !hits.iter().all(|(s, _)| *s == status) {
+            return;
+        }
+        let lens: Vec<i64> = hits.iter().map(|(_, l)| *l).collect();
+        let lo = *lens.iter().min().unwrap();
+        let hi = *lens.iter().max().unwrap();
+        // Require a tight spread; a widely varying "not found" page is not a reliable oracle and we
+        // would rather report a few extra hits than silently swallow real endpoints of varied size.
+        if hi - lo > 512 {
+            return;
+        }
+        // Small margin absorbs the length difference from the reflected path itself.
+        let margin = 128;
+        self.soft404 = Some(Soft404 {
+            status,
+            len_lo: lo - margin,
+            len_hi: hi + margin,
+        });
+        eprintln!(
+            "[mach] soft-404 wildcard detected (status={status}, body ~{lo}-{hi}B); suppressing matching probes"
+        );
     }
 
     pub async fn probe_url(
@@ -191,7 +260,7 @@ impl Prober {
         // final hop; captured before the body is consumed below.
         let final_url = valid_response.url().to_string();
 
-        let probe_status = match &self.config.success_status_codes.contains(&response_status) {
+        let mut probe_status = match &self.config.success_status_codes.contains(&response_status) {
             true => "found",
             false => "not_found",
         }
@@ -242,6 +311,18 @@ impl Prober {
                 }
             }
         };
+
+        // Demote a "found" that matches the learned soft-404 wildcard (same success status and a
+        // body size inside the calibrated band): the target answers this way for absent paths too,
+        // so it is not a real discovery.
+        if probe_status == "found" {
+            if let Some(s) = &self.soft404 {
+                if response_status == s.status && body_length >= s.len_lo && body_length <= s.len_hi
+                {
+                    probe_status = "not_found".to_string();
+                }
+            }
+        }
 
         // Create and return the ProbeResult
         Ok(ProbeResult {

@@ -44,10 +44,54 @@ pub async fn handle(env: OpEnv) {
             "endpoints": data["endpoints"].clone(),
             "identities": resolved,
         })
+    } else if mode == "inject" {
+        // Active parameter injection (SQLi/XSS/cmdi/LFI). The endpoints carry the
+        // request shape (method, url, query params, typed body fields) built by
+        // api_switch from the asset graph, so cortex fuzzes real body + query + path
+        // sites - not just whatever it can parse off the URL.
+        serde_json::json!({
+            "operation": "inject",
+            "response": "stream",
+            "target": target,
+            "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(12000),
+            "endpoints": data["endpoints"].clone(),
+            "classes": data["classes"].clone(),
+        })
+    } else if mode == "fuzz" {
+        // Structure / type fuzzing over the typed request shape (type confusion + mass assignment).
+        serde_json::json!({
+            "operation": "fuzz",
+            "response": "stream",
+            "target": target,
+            "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(12000),
+            "endpoints": data["endpoints"].clone(),
+            "classes": data["classes"].clone(),
+        })
+    } else if mode == "discover" {
+        // Request-shape discovery: cortex probes each endpoint (error-mining +
+        // calibrated field brute-force) and streams the body fields it learns as
+        // `shape_field` findings, which the control plane ingests as inferred params.
+        serde_json::json!({
+            "operation": "discover",
+            "response": "stream",
+            "target": target,
+            "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(12000),
+            "endpoints": data["endpoints"].clone(),
+        })
+    } else if mode == "graphql" {
+        // GraphQL: cortex live-introspects the endpoint and runs GraphQL-native checks
+        // (introspection exposure, suggestion leak, argument injection, alias DoS). No
+        // per-endpoint request shapes needed - just the GraphQL route on the target.
+        serde_json::json!({
+            "operation": "graphql",
+            "response": "stream",
+            "target": target,
+            "endpoint": data["graphql_endpoint"].as_str().unwrap_or("/graphql"),
+            "timeout_ms": data["timeout_ms"].as_i64().unwrap_or(12000),
+        })
     } else {
-        // Standard vuln scan. Optionally authenticated via a single
-        // attached credential.
-        let mut req = serde_json::json!({
+        // Standard vuln scan (templates).
+        serde_json::json!({
             "operation": "scan",
             "response": "stream",
             "target": target,
@@ -55,25 +99,30 @@ pub async fn handle(env: OpEnv) {
             "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(true),
             "severity": sev_arr,
             "templates_dir": data["templates_dir"].clone(),
-        });
+        })
+    };
+
+    // Both the template scan and the injection engine reach the target directly, so both may need
+    // an attached credential (authed testing) and an OAST endpoint (blind/OOB confirmation). Authz
+    // resolves its own per-identity credentials, so it is skipped here.
+    if mode != "authz" {
         if let Some(cid) = data["credential_id"].as_str().filter(|s| !s.is_empty()) {
             match creds::resolve_auth(&http, &api_url, &api_key, cid, &host).await {
                 Ok(auth) => {
-                    if let Some(cr) = req.as_object_mut() {
+                    if let Some(cr) = cortex_req.as_object_mut() {
                         cr.insert("auth".into(), auth);
                     }
                 }
                 Err(e) => eprintln!("[op] vuln-scan credential resolve failed ({cid}): {e}"),
             }
         }
-        // OAST endpoint for out-of-band (blind) confirmation. Default
-        // ("" / "managed") resolves to the managed pool; a UUID to a BYO
-        // endpoint; "off" disables OOB. The node hands cortex the
+        // OAST endpoint for out-of-band (blind) confirmation. Default ("" / "managed") resolves to
+        // the managed pool; a UUID to a BYO endpoint; "off" disables OOB. The node hands cortex the
         // resolved { domains, api_url }; cortex registers/polls directly.
         let oast_ep = data["oast_endpoint_id"].as_str().unwrap_or("");
         match oast::resolve(&http, &api_url, &api_key, oast_ep).await {
             Ok(Some((domains, poll_url))) => {
-                if let Some(cr) = req.as_object_mut() {
+                if let Some(cr) = cortex_req.as_object_mut() {
                     cr.insert(
                         "oast".into(),
                         serde_json::json!({ "domains": domains, "api_url": poll_url }),
@@ -83,8 +132,7 @@ pub async fn handle(env: OpEnv) {
             Ok(None) => {}
             Err(e) => eprintln!("[op] vuln-scan oast resolve failed ({oast_ep}): {e}"),
         }
-        req
-    };
+    }
 
     // Forward the Evasiveness switch + attribution token when the workflow set them,
     // so the operator's posture reaches cortex (which otherwise defaults to

@@ -134,6 +134,10 @@ pub async fn handle(env: OpEnv) {
                                 "method": event["method"],
                                 "content_type": event["content_type"],
                                 "params": event["params"],
+                                // Body field names for a form/API endpoint (POST form inputs). The
+                                // asset graph turns these into location=body params so the injection
+                                // engine fuzzes the body, reaching SQLi/cmdi behind form submissions.
+                                "body_params": event["body_params"],
                                 "discovered_from": event["discovered_from"],
                                 "depth": event["depth"],
                                 "operation_id": op_id,

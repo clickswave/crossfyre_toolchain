@@ -40,6 +40,15 @@ pub struct TraceEvent {
     /// sent (never the credential) so the graph can mark the endpoint auth-required.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub authed: bool,
+    /// Request body media type (e.g. `application/json`), when the request carried a body. This is
+    /// a structural fact about the operation's request contract, never a value.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub content_type: Option<String>,
+    /// Request-body field NAMES only (e.g. `["email", "role"]`), extracted from a JSON or form body.
+    /// Like the URL query keys, the KEYS are the operation's request shape; the VALUES are secrets
+    /// and are never captured. Empty when there was no parseable body.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub body_params: Vec<String>,
 }
 
 /// Redact a URL down to a safe shape:
@@ -114,6 +123,11 @@ pub struct RawCapture {
     /// The request carried an Authorization header or a Cookie. We keep only this boolean - the
     /// header value is deliberately discarded here so a credential never enters a TraceEvent.
     pub authed: bool,
+    /// Request body media type, when a body was present (set by the proxy backend, which has the
+    /// body; the packet backend leaves this None).
+    pub content_type: Option<String>,
+    /// Request body field NAMES only (values discarded). Populated by the proxy backend.
+    pub body_params: Vec<String>,
 }
 
 impl RawCapture {
@@ -169,6 +183,9 @@ pub fn parse_ek_line(line: &str) -> Option<RawCapture> {
             .or_else(|| first("server")),
         // Presence of either header marks the request authenticated; the value is never retained.
         authed: first("authorization").is_some() || first("cookie").is_some(),
+        // The packet backend does not reassemble request bodies; body shape comes from the proxy.
+        content_type: None,
+        body_params: Vec::new(),
     };
     if raw.is_request() || raw.is_response() {
         Some(raw)
@@ -199,7 +216,86 @@ pub fn shape(raw: &RawCapture, host_filter: Option<&str>) -> Option<TraceEvent> 
         status: raw.status,
         tech: raw.server.clone(),
         authed: raw.authed,
+        content_type: raw.content_type.clone(),
+        body_params: raw.body_params.clone(),
     })
+}
+
+/// Extract the request body's field NAMES (never values) from a captured body, for the two content
+/// types an API request almost always uses. This is the body-side analogue of keeping URL query
+/// KEYS while blanking their values: the field set is the operation's request contract; the values
+/// are user data / secrets and are deliberately discarded.
+///
+/// - `application/json`: top-level object keys. For a JSON array body we look at the first object
+///   element's keys (list endpoints post arrays of uniform objects). Non-object JSON yields nothing.
+/// - `application/x-www-form-urlencoded`: the `a=1&b=2` keys.
+/// - anything else (multipart, binary, text): no keys (we do not guess).
+///
+/// Returns a de-duplicated, order-preserving list. Pure and panic-free.
+pub fn body_param_keys(content_type: Option<&str>, body: &[u8]) -> Vec<String> {
+    let ct = content_type.unwrap_or("").to_ascii_lowercase();
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |k: String| {
+        if !k.is_empty() && !out.contains(&k) {
+            out.push(k);
+        }
+    };
+    if ct.contains("application/json") || ct.contains("+json") {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) {
+            let obj = match &v {
+                serde_json::Value::Object(_) => Some(&v),
+                serde_json::Value::Array(a) => a.iter().find(|x| x.is_object()),
+                _ => None,
+            };
+            if let Some(serde_json::Value::Object(map)) = obj {
+                for k in map.keys() {
+                    push(k.clone());
+                }
+            }
+        }
+    } else if ct.contains("application/x-www-form-urlencoded") {
+        // Parse KEYS out of `a=1&b=2`; never decode/keep the values.
+        let s = std::str::from_utf8(body).unwrap_or("");
+        for pair in s.split('&') {
+            let key = pair.split('=').next().unwrap_or("").trim();
+            if !key.is_empty() {
+                // percent-decode just the key so `user%5Bid%5D` reads as `user[id]`.
+                push(percent_decode_key(key));
+            }
+        }
+    }
+    out
+}
+
+/// Minimal percent-decode for form KEYS (we never decode values). `+` -> space, `%XX` -> byte.
+fn percent_decode_key(k: &str) -> String {
+    let bytes = k.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                let hi = (bytes[i + 1] as char).to_digit(16);
+                let lo = (bytes[i + 2] as char).to_digit(16);
+                if let (Some(h), Some(l)) = (hi, lo) {
+                    out.push((h * 16 + l) as u8);
+                    i += 3;
+                } else {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Size/flush-time batcher. Requests and their responses arrive as separate packets; correlating
@@ -553,6 +649,8 @@ mod tests {
             status: None,
             server: Some("caddy".into()),
             authed: true,
+            content_type: None,
+            body_params: Vec::new(),
         };
         let ev = shape(&raw, Some("example.com")).expect("in scope");
         assert_eq!(ev.method, "GET");
@@ -575,6 +673,35 @@ mod tests {
     }
 
     #[test]
+    fn body_param_keys_extracts_names_never_values() {
+        // JSON object: keys only, values discarded.
+        // serde_json's default object map is sorted, so the field SET comes back alphabetical
+        // (order is not meaningful for a request-shape field set).
+        let keys = body_param_keys(
+            Some("application/json"),
+            br#"{"email":"a@b.com","role":"admin","nested":{"x":1}}"#,
+        );
+        assert_eq!(keys, vec!["email", "nested", "role"]);
+        // JSON array of objects: shape from the first element.
+        let keys = body_param_keys(
+            Some("application/json; charset=utf-8"),
+            br#"[{"id":1,"name":"x"}]"#,
+        );
+        assert_eq!(keys, vec!["id", "name"]);
+        // form-urlencoded: keys only, bracket keys percent-decoded.
+        let keys = body_param_keys(
+            Some("application/x-www-form-urlencoded"),
+            b"user%5Bid%5D=7&token=SECRET&user%5Bid%5D=9",
+        );
+        assert_eq!(keys, vec!["user[id]", "token"]);
+        // no body / unknown type -> nothing.
+        assert!(body_param_keys(Some("text/plain"), b"hello").is_empty());
+        assert!(body_param_keys(None, b"").is_empty());
+        // malformed JSON -> nothing, never panics.
+        assert!(body_param_keys(Some("application/json"), b"{not json").is_empty());
+    }
+
+    #[test]
     fn batcher_flushes_at_capacity_and_drains() {
         let mut b = Batcher::new(2);
         let ev = TraceEvent {
@@ -583,6 +710,8 @@ mod tests {
             status: None,
             tech: None,
             authed: false,
+            content_type: None,
+            body_params: Vec::new(),
         };
         assert!(b.push(ev.clone()).is_none());
         let flushed = b.push(ev.clone()).expect("flush at capacity");

@@ -126,6 +126,11 @@ pub struct CrawlEvent {
     pub content_hash: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub params: Vec<String>,
+    /// Body field NAMES for a form/API endpoint that takes a request body (POST/PUT/PATCH). The asset
+    /// graph turns these into `location=body` params so the injection engine fuzzes the body, not just
+    /// the URL query - which is what reaches SQLi/cmdi/etc. behind HTML form submissions.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub body_params: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovered_from: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -200,6 +205,21 @@ impl CrawlEvent {
             ..Self::blank()
         }
     }
+    /// An HTML `<form>` as a testable operation: its action URL, its method, and its fields as query
+    /// params (GET form) or body params (write form) so the engine fuzzes the right location.
+    fn form(u: &Url, method: &str, fields: &[String], parent: Option<String>, depth: u32) -> Self {
+        let write = matches!(method, "POST" | "PUT" | "PATCH" | "DELETE");
+        Self {
+            kind: "url".into(),
+            url: Some(u.to_string()),
+            method: Some(method.to_string()),
+            params: if write { Vec::new() } else { fields.to_vec() },
+            body_params: if write { fields.to_vec() } else { Vec::new() },
+            discovered_from: parent,
+            depth: Some(depth),
+            ..Self::blank()
+        }
+    }
     fn blank() -> Self {
         Self {
             kind: String::new(),
@@ -209,6 +229,7 @@ impl CrawlEvent {
             content_type: None,
             content_hash: None,
             params: Vec::new(),
+            body_params: Vec::new(),
             discovered_from: None,
             depth: None,
             processed: None,
@@ -229,14 +250,44 @@ static RE_HTML_ATTR: LazyLock<Regex> =
 static RE_INPUT_NAME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)<(?:input|select|textarea)[^>]*\bname\s*=\s*["']([^"']+)["']"#).unwrap()
 });
+/// A whole `<form ...> ... </form>` block: attr string + inner HTML.
+static RE_FORM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)<form\b([^>]*)>(.*?)</form>"#).unwrap());
+static RE_ATTR_ACTION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\baction\s*=\s*["']([^"']*)["']"#).unwrap());
+static RE_ATTR_METHOD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bmethod\s*=\s*["']([^"']*)["']"#).unwrap());
 /// Quoted absolute paths or full URLs inside JS/JSON/text.
 static RE_JS_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"["'`](https?://[^"'`\s<>]+|/[A-Za-z0-9_./\-]{2,})["'`]"#).unwrap()
 });
-/// fetch()/axios()/.get()/.post()/.ajax() first string argument.
+/// fetch()/axios()/.get()/.post()/.ajax() first string argument (URL only, method-agnostic).
 static RE_JS_CALL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)(?:fetch|axios(?:\.\w+)?|\.(?:get|post|put|delete|patch|ajax))\s*\(\s*["'`]([^"'`]+)["'`]"#).unwrap()
 });
+
+/// Same call sites, but capturing the HTTP verb: `axios.post('/x')`, `http.put('/x')`, `.delete('/x')`.
+/// Group 1 or 2 is the verb; group 3 is the URL. `fetch(...)` has no verb here (stays GET).
+static RE_JS_CALL_METHOD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:\w+\.(get|post|put|delete|patch)|\.(get|post|put|delete|patch))\s*\(\s*["'`]([^"'`]+)["'`]"#).unwrap()
+});
+
+/// Mine `(method, url)` from JS API calls that name a non-GET verb, so the SPA's write endpoints are
+/// recorded with the right method (a param-less GET is untestable by the fuzz/discover engines).
+fn extract_js_calls(body: &str, out: &mut Vec<(String, String)>) {
+    for c in RE_JS_CALL_METHOD.captures_iter(body) {
+        let verb = c
+            .get(1)
+            .or_else(|| c.get(2))
+            .map(|m| m.as_str().to_uppercase());
+        let url = c.get(3).map(|m| m.as_str().to_string());
+        if let (Some(v), Some(u)) = (verb, url) {
+            if v != "GET" {
+                out.push((v, u));
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Crawl state
@@ -250,6 +301,14 @@ struct Page {
     content_type: String,
     links: Vec<String>,
     params: Vec<String>,
+    /// (method, url) pairs mined from `fetch()/axios.post()/.put()...` calls in JS: the SPA's real
+    /// API surface with its verb, so a mined `axios.post('/api/x')` becomes a POST operation the
+    /// shape-discovery and injection engines can then work, not a param-less GET.
+    api_calls: Vec<(String, String)>,
+    /// (raw_action, METHOD, field_names) per `<form>` on the page: a form's action becomes a testable
+    /// operation carrying its fields as body params (write forms) or query params (GET forms), so the
+    /// injection engine reaches SQLi/cmdi/etc. behind form submissions.
+    forms: Vec<(String, String, Vec<String>)>,
     /// sha256 of the response body for non-HTML text/code (js/json/xml). Empty otherwise. Lets the
     /// asset graph change-monitor JS/config bundles across scans without storing the body.
     content_hash: String,
@@ -380,6 +439,40 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
                 }
             }
 
+            // Mined write-verb API calls (axios.post/.put/...): surface each with its real method so
+            // the asset graph records a POST/PUT/... operation the shape-discovery and injection
+            // engines can then exercise, instead of a param-less GET they skip.
+            for (method, raw) in &page.api_calls {
+                let Some(child) = resolve_and_scope(raw, &page.url, &params, &seed_host) else {
+                    continue;
+                };
+                let mut ev =
+                    CrawlEvent::url_candidate(&child, Some(page.url.to_string()), page.depth + 1);
+                ev.method = Some(method.clone());
+                let _ = tx.send(ev);
+            }
+
+            // HTML forms -> testable operations. Resolve the action against the page (empty action =
+            // the page's own URL), scope it, and emit with the form's method + fields so the injection
+            // engine fuzzes the BODY of a POST form (SQLi/cmdi/XPath behind form submissions).
+            for (action, method, fields) in &page.forms {
+                let raw = if action.is_empty() {
+                    page.url.as_str()
+                } else {
+                    action.as_str()
+                };
+                let Some(child) = resolve_and_scope(raw, &page.url, &params, &seed_host) else {
+                    continue;
+                };
+                let _ = tx.send(CrawlEvent::form(
+                    &child,
+                    method,
+                    fields,
+                    Some(page.url.to_string()),
+                    page.depth + 1,
+                ));
+            }
+
             let _ = tx.send(CrawlEvent::progress(pages_crawled, max_pages));
         }
     }
@@ -420,6 +513,8 @@ async fn fetch_page(
         status: 0,
         content_type: String::new(),
         links: Vec::new(),
+        api_calls: Vec::new(),
+        forms: Vec::new(),
         content_hash: String::new(),
     };
 
@@ -449,8 +544,10 @@ async fn fetch_page(
                 if is_html {
                     extract_html(&body, &mut page.links);
                     extract_input_names(&body, &mut page.params);
+                    page.forms = extract_forms(&body);
                     if parse_js {
                         extract_js(&body, &mut page.links);
+                        extract_js_calls(&body, &mut page.api_calls);
                     }
                 } else {
                     // js / json / xml / text: hash the body so the asset graph can change-monitor it,
@@ -458,6 +555,7 @@ async fn fetch_page(
                     page.content_hash = sha256_hex(body.as_bytes());
                     if parse_js {
                         extract_js(&body, &mut page.links);
+                        extract_js_calls(&body, &mut page.api_calls);
                     }
                 }
             }
@@ -469,6 +567,8 @@ async fn fetch_page(
 
     dedup(&mut page.links);
     dedup(&mut page.params);
+    page.api_calls.sort();
+    page.api_calls.dedup();
     page
 }
 
@@ -558,6 +658,41 @@ fn extract_html(body: &str, out: &mut Vec<String>) {
             out.push(m.as_str().to_string());
         }
     }
+}
+
+/// Each `<form>` on the page as (raw_action, METHOD, field_names). Field names come from the inputs
+/// INSIDE that form, so a POST form's fields are attributed to the form's action + POST method rather
+/// than smeared across the page as query params. Empty action = submits to the page's own URL.
+fn extract_forms(body: &str) -> Vec<(String, String, Vec<String>)> {
+    let mut out = Vec::new();
+    for f in RE_FORM.captures_iter(body) {
+        let attrs = f.get(1).map(|m| m.as_str()).unwrap_or("");
+        let inner = f.get(2).map(|m| m.as_str()).unwrap_or("");
+        let action = RE_ATTR_ACTION
+            .captures(attrs)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+        let method = RE_ATTR_METHOD
+            .captures(attrs)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().trim().to_uppercase())
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| "GET".into());
+        let mut fields = Vec::new();
+        for c in RE_INPUT_NAME.captures_iter(inner) {
+            if let Some(m) = c.get(1) {
+                let n = m.as_str().to_string();
+                if !n.is_empty() && !fields.contains(&n) {
+                    fields.push(n);
+                }
+            }
+        }
+        if !fields.is_empty() {
+            out.push((action, method, fields));
+        }
+    }
+    out
 }
 
 fn extract_input_names(body: &str, out: &mut Vec<String>) {

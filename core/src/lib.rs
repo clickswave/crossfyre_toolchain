@@ -1704,7 +1704,7 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     println!("Starting Crossfyre Node Client Daemon...");
     println!("Node id       : {}", paths.node_id);
     println!("Config root   : {}", paths.base.display());
-    print_privilege_banner(true);
+    print_privilege_banner(std::env::var("CFX_ALLOW_UNPRIV_DAEMON").is_err());
 
     // --- PID lock: scoped to this node-id, so multiple nodes can coexist in
     // the same config root - each holds its own `nodes.d/<node-id>.pid`. ---
@@ -2163,6 +2163,12 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("failed to install SIGTERM handler");
 
+    // A revoked key gives a persistent 401; a control-plane restart/deploy gives a TRANSIENT one.
+    // Evicting on the first 401 meant a brief blip could permanently kill the node (and, in prod, the
+    // whole fleet during a deploy). So only evict after several CONSECUTIVE 401s; any success resets.
+    let mut consecutive_401 = 0u32;
+    const EVICT_AFTER_401: u32 = 4; // ~20s of sustained auth failure at the 5s interval
+
     loop {
         tokio::select! {
             // Credential refresh (every 6 days)
@@ -2275,16 +2281,25 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                     .await;
 
                 match status_res {
-                    Ok(res) if res.status().is_success() => print!("."),
+                    Ok(res) if res.status().is_success() => {
+                        consecutive_401 = 0;
+                        print!(".");
+                    }
                     Ok(res) if res.status() == 401 => {
-                        eprintln!("\n[EVICTION] Heartbeat returned 401 - API key has been revoked. Shutting down...");
-                        let msg = serde_json::json!({
-                            "type": "terminated",
-                            "reason": "api_key_revoked",
-                            "node_id": &node_id
-                        });
-                        let _ = publisher.publish(status_subject.clone(), msg.to_string().into()).await;
-                        break;
+                        consecutive_401 += 1;
+                        if consecutive_401 >= EVICT_AFTER_401 {
+                            eprintln!("\n[EVICTION] Heartbeat returned 401 x{consecutive_401} - API key has been revoked. Shutting down...");
+                            let msg = serde_json::json!({
+                                "type": "terminated",
+                                "reason": "api_key_revoked",
+                                "node_id": &node_id
+                            });
+                            let _ = publisher.publish(status_subject.clone(), msg.to_string().into()).await;
+                            break;
+                        }
+                        eprintln!(
+                            "Warning: Heartbeat 401 ({consecutive_401}/{EVICT_AFTER_401}) - likely a transient control-plane blip; retrying"
+                        );
                     }
                     Ok(res) => eprintln!("Warning: Heartbeat returned {}", res.status()),
                     Err(e) => eprintln!("Warning: Failed to send heartbeat: {e}"),
