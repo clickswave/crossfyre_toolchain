@@ -40,6 +40,7 @@ tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time", "
 # needs only a browser (no Wireshark). rcgen mints a session CA + per-host leaf certs; hyper serves
 # HTTP/1.1 over the tokio-rustls-terminated tunnel; reqwest (above) forwards to the origin.
 rcgen = "0.13"
+cfx_capture = { path = "../capture" }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"

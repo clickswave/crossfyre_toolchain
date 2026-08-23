@@ -6,6 +6,10 @@
 // into a shell. Extensions (mach, voyage, pulse) remain separate closed-source
 // daemon binaries downloaded from bins.crossfyre.io.
 
+// The traffic-capture core (session CA, per-SNI MITM leaves, egress) is its own crate so the mobile
+// VpnService netstack can reuse it without pulling in the rest of cfx_core. Re-exported here so the
+// desktop proxy keeps referring to it as `toolchain::capture`.
+pub use cfx_capture as capture;
 pub mod config;
 pub mod db;
 pub mod doctor;

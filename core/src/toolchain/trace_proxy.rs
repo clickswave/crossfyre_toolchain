@@ -71,42 +71,10 @@ AutofillServerCommunication,CertificateTransparencyComponentUpdater",
 // Session CA + on-the-fly per-host leaf certs
 // ---------------------------------------------------------------------------
 
-/// The Web Tracer CA. This is PERSISTED (see [`load_or_generate_ca`]): the user installs `pem` in
-/// their browser once, and it keeps working across sessions because the signing key is stable. A
-/// fresh CA per session (same name, new key) is exactly what makes an already installed CA fail with
-/// SEC_ERROR_BAD_SIGNATURE, because the leaf is signed by a key the installed CA does not match.
-struct Ca {
-    cert: rcgen::Certificate,
-    key: rcgen::KeyPair,
-    pem: String,
-}
-
-/// The CA's fixed parameters. Shared by generation and reload so a reloaded issuer has the same
-/// subject and (with the persisted key) the same public key and identifier the installed CA carries.
-fn ca_params() -> Result<rcgen::CertificateParams, BoxErr> {
-    use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyUsagePurpose};
-    let mut params = CertificateParams::new(Vec::<String>::new())?;
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    params.key_usages = vec![
-        KeyUsagePurpose::KeyCertSign,
-        KeyUsagePurpose::CrlSign,
-        KeyUsagePurpose::DigitalSignature,
-    ];
-    params
-        .distinguished_name
-        .push(DnType::CommonName, "Crossfyre Web Tracer CA");
-    params
-        .distinguished_name
-        .push(DnType::OrganizationName, "Crossfyre");
-    Ok(params)
-}
-
-fn generate_ca() -> Result<Ca, BoxErr> {
-    let key = rcgen::KeyPair::generate()?;
-    let cert = ca_params()?.self_signed(&key)?;
-    let pem = cert.pem();
-    Ok(Ca { cert, key, pem })
-}
+/// The session CA machinery (mint, reload, per-SNI leaves, MITM acceptor) lives in the shared
+/// [`capture`] module so the desktop proxy and the mobile netstack behave identically. This file
+/// keeps only the DESKTOP-specific persistence + browser-trust plumbing around it.
+use super::capture::{self, SessionCa};
 
 /// On-disk home for the persistent CA: `~/.config/crossfyre/web-tracer/` (honors SUDO_USER, same
 /// base as the node configs). Returns (cert path, key path).
@@ -118,17 +86,23 @@ fn ca_paths() -> (std::path::PathBuf, std::path::PathBuf) {
 /// Load the persisted CA if present, otherwise mint one and persist it. The key is the half that
 /// matters for trust: as long as it is stable, every leaf the proxy mints verifies against the CA
 /// the user already installed, so they install it exactly once.
-fn load_or_generate_ca() -> Result<Ca, BoxErr> {
+fn load_or_generate_ca() -> Result<SessionCa, BoxErr> {
     let (cert_path, key_path) = ca_paths();
     if cert_path.exists() && key_path.exists() {
-        match load_ca(&cert_path, &key_path) {
-            Ok(ca) => return Ok(ca),
-            // A corrupt or partial file must not wedge tracing: regenerate and let the user
-            // re-install the new CA once.
-            Err(e) => eprintln!("web tracer: saved CA unreadable ({e}); regenerating"),
+        match (
+            std::fs::read_to_string(&cert_path),
+            std::fs::read_to_string(&key_path),
+        ) {
+            (Ok(cert_pem), Ok(key_pem)) => match capture::load_ca(&cert_pem, &key_pem) {
+                Ok(ca) => return Ok(ca),
+                // A corrupt or partial file must not wedge tracing: regenerate and let the user
+                // re-install the new CA once.
+                Err(e) => eprintln!("web tracer: saved CA unreadable ({e}); regenerating"),
+            },
+            _ => eprintln!("web tracer: saved CA unreadable; regenerating"),
         }
     }
-    let ca = generate_ca()?;
+    let ca = capture::generate_ca()?;
     if let Some(parent) = cert_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -142,16 +116,6 @@ fn load_or_generate_ca() -> Result<Ca, BoxErr> {
         }
     }
     Ok(ca)
-}
-
-/// Reconstruct the CA from its persisted cert + key. `pem` is the saved cert (what the user
-/// installed, served verbatim by the portal); the issuer used for signing is re-derived from the
-/// fixed [`ca_params`] and the stable key, so it shares the installed CA's subject and public key.
-fn load_ca(cert_path: &std::path::Path, key_path: &std::path::Path) -> Result<Ca, BoxErr> {
-    let pem = std::fs::read_to_string(cert_path)?;
-    let key = rcgen::KeyPair::from_pem(&std::fs::read_to_string(key_path)?)?;
-    let cert = ca_params()?.self_signed(&key)?;
-    Ok(Ca { cert, key, pem })
 }
 
 /// Pre-trust the session CA in a Firefox profile's NSS store via `certutil`, so the operator never
@@ -175,59 +139,8 @@ fn firefox_trust_ca(profile: &std::path::Path, ca_pem: &std::path::Path) -> bool
         .unwrap_or(false)
 }
 
-/// Resolves (and caches) a leaf cert per SNI hostname, signed by the session CA.
-struct MitmResolver {
-    ca: Arc<Ca>,
-    cache: Mutex<HashMap<String, Arc<CertifiedKey>>>,
-}
-
-impl std::fmt::Debug for MitmResolver {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("MitmResolver")
-    }
-}
-
-impl MitmResolver {
-    fn leaf_for(&self, host: &str) -> Option<Arc<CertifiedKey>> {
-        if let Some(k) = self.cache.lock().unwrap().get(host) {
-            return Some(k.clone());
-        }
-        let ck = make_leaf(&self.ca, host).ok()?;
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(host.to_string(), ck.clone());
-        Some(ck)
-    }
-}
-
-impl ResolvesServerCert for MitmResolver {
-    fn resolve(&self, hello: ClientHello) -> Option<Arc<CertifiedKey>> {
-        // Prefer SNI; fall back to a wildcard-ish default so a no-SNI client still gets a cert.
-        let host = hello
-            .server_name()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "localhost".into());
-        self.leaf_for(&host)
-    }
-}
-
-fn make_leaf(ca: &Ca, host: &str) -> Result<Arc<CertifiedKey>, BoxErr> {
-    use rcgen::{CertificateParams, DnType, KeyPair};
-    let leaf_key = KeyPair::generate()?;
-    let mut params = CertificateParams::new(vec![host.to_string()])?;
-    params.distinguished_name.push(DnType::CommonName, host);
-    let leaf = params.signed_by(&leaf_key, &ca.cert, &ca.key)?;
-
-    let leaf_der: CertificateDer<'static> = leaf.der().clone();
-    let ca_der: CertificateDer<'static> = ca.cert.der().clone();
-    let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
-    let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key_der)?;
-    Ok(Arc::new(CertifiedKey::new(
-        vec![leaf_der, ca_der],
-        signing_key,
-    )))
-}
+// The per-SNI resolver + leaf minting now live in `capture` (shared with the mobile netstack); the
+// proxy builds its acceptor via `capture::mitm_acceptor` below.
 
 // ---------------------------------------------------------------------------
 // proxy
@@ -620,16 +533,7 @@ pub async fn run_proxy(cfg: TraceConfig) -> Result<(), BoxErr> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let ca = Arc::new(load_or_generate_ca()?);
-    let resolver = Arc::new(MitmResolver {
-        ca: ca.clone(),
-        cache: Mutex::new(HashMap::new()),
-    });
-
-    let mut server_config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_cert_resolver(resolver);
-    server_config.alpn_protocols = vec![b"http/1.1".to_vec()]; // force h1 on the browser side (we don't MITM h2)
-    let acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let acceptor = capture::mitm_acceptor(ca.clone());
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())

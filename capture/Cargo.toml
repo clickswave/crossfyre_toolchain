@@ -1,0 +1,11 @@
+[package]
+name = "cfx_capture"
+version = "0.0.1"
+edition = "2024"
+description = "Shared traffic-capture core (session CA, per-SNI MITM leaves, egress) for the Web Tracer family: desktop proxy and mobile VpnService netstack."
+
+[dependencies]
+rustls = { version = "0.23", features = ["aws_lc_rs"] }
+tokio-rustls = "0.26"
+rcgen = "0.13"
+tokio = { version = "1.49.0", features = ["net"] }
