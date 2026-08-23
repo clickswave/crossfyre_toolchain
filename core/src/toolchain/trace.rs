@@ -26,92 +26,10 @@ type BoxErr = Box<dyn Error>;
 
 /// A single captured request/response reduced to its shape. This is the wire format posted to
 /// `/api/v1/web-trace/ingest`; it deliberately carries no bodies, headers, or secret values.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct TraceEvent {
-    pub method: String,
-    /// Redacted absolute URL (userinfo/fragment stripped, query values blanked).
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<i64>,
-    /// Coarse tech fingerprint from the response `Server` banner, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tech: Option<String>,
-    /// True when the request carried an Authorization header or session cookie. Only the FACT is
-    /// sent (never the credential) so the graph can mark the endpoint auth-required.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub authed: bool,
-    /// Request body media type (e.g. `application/json`), when the request carried a body. This is
-    /// a structural fact about the operation's request contract, never a value.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub content_type: Option<String>,
-    /// Request-body field NAMES only (e.g. `["email", "role"]`), extracted from a JSON or form body.
-    /// Like the URL query keys, the KEYS are the operation's request shape; the VALUES are secrets
-    /// and are never captured. Empty when there was no parseable body.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub body_params: Vec<String>,
-}
-
-/// Redact a URL down to a safe shape:
-///   * strip `user:pass@` userinfo from the authority,
-///   * drop the `#fragment`,
-///   * keep query parameter KEYS but blank their VALUES (`?a=secret&b=2` -> `?a=&b=`).
-///
-/// Pure and allocation-light; robust to malformed input (returns the input trimmed of fragment on
-/// anything it cannot parse). The server-side classifier re-extracts host/path/params from the
-/// result, so this only needs to be lossless for keys, never for values.
-pub fn redact_url(raw: &str) -> String {
-    // 1. Drop the fragment.
-    let no_frag = raw.split('#').next().unwrap_or(raw);
-    // 2. Split base vs query at the FIRST '?'.
-    let (base, query) = match no_frag.split_once('?') {
-        Some((b, q)) => (b, Some(q)),
-        None => (no_frag, None),
-    };
-    // 3. Strip userinfo from the authority (everything between "://" and the next '/', before '@').
-    let base = strip_userinfo(base);
-    // 4. Blank query values, keep keys and their order.
-    match query {
-        None => base,
-        Some("") => base, // trailing '?'
-        Some(q) => {
-            let blanked: Vec<String> = q
-                .split('&')
-                .filter(|p| !p.is_empty())
-                .map(|p| match p.split_once('=') {
-                    Some((k, _)) => format!("{k}="),
-                    None => p.to_string(),
-                })
-                .collect();
-            if blanked.is_empty() {
-                base
-            } else {
-                format!("{base}?{}", blanked.join("&"))
-            }
-        }
-    }
-}
-
-fn strip_userinfo(base: &str) -> String {
-    let Some(scheme_end) = base.find("://") else {
-        return base.to_string();
-    };
-    let authority_start = scheme_end + 3;
-    let rest = &base[authority_start..];
-    // Authority ends at the first '/', '?' handled already, so just '/'.
-    let authority_end = rest.find('/').unwrap_or(rest.len());
-    let authority = &rest[..authority_end];
-    match authority.rsplit_once('@') {
-        Some((_userinfo, hostport)) => {
-            format!(
-                "{}{}{}",
-                &base[..authority_start],
-                hostport,
-                &rest[authority_end..]
-            )
-        }
-        None => base.to_string(),
-    }
-}
+// TraceEvent + redact_url live in the shared `cfx_capture` crate (the privacy-safe reduction is used
+// by the mobile netstack too). Re-exported so this module and its callers keep referring to them by
+// the same names.
+pub use cfx_capture::{TraceEvent, redact_url};
 
 /// A raw capture pulled out of one `tshark -T ek` line before shaping.
 #[derive(Debug, Default, Clone, PartialEq)]
