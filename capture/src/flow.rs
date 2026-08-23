@@ -17,7 +17,6 @@ use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_rustls::TlsConnector;
 
@@ -37,16 +36,22 @@ static UPSTREAM_TLS: LazyLock<TlsConnector> = LazyLock::new(|| {
     TlsConnector::from(Arc::new(config))
 });
 
-/// Serve one captured client flow: MITM-terminate it as `target_host`, then inspect + forward every
-/// request on it. Returns when the client closes the connection.
-pub async fn serve_mitm_flow(
-    client: TcpStream,
+/// Serve one captured client flow: MITM-terminate it, then inspect + forward every request on it.
+/// Generic over the client stream so both a tokio `TcpStream` (desktop CONNECT proxy) and a userspace
+/// netstack flow (mobile TUN) work. `target_host`/`target_port` is the flow's original destination and
+/// is used as the forwarding fallback when a request carries no Host header. Returns when the client
+/// closes the connection.
+pub async fn serve_mitm_flow<C>(
+    client: C,
     target_host: String,
     target_port: u16,
     ca: Arc<SessionCa>,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
-) -> Result<(), BoxErr> {
+) -> Result<(), BoxErr>
+where
+    C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let tls = mitm_acceptor(ca).accept(client).await?;
     let host = Arc::new(target_host);
     let svc = service_fn(move |req: Request<Incoming>| {
@@ -118,10 +123,14 @@ async fn forward(
     }
     let up_req = up_req.body(Full::new(body_bytes))?;
 
-    // Dial the origin through the routing egress, TLS-wrapping the upstream for https.
+    // Dial the flow's ACTUAL destination (a hostname for the desktop CONNECT proxy, the original dst
+    // IP for a TUN-captured flow) through the routing egress. For the upstream TLS SNI, use the
+    // request Host (a hostname) so the origin serves the right certificate; fall back to the dial
+    // target when there is no Host.
+    let sni_host = if host_hdr.is_empty() { target_host } else { host_hdr.as_str() };
     let tcp = egress.connect(target_host, target_port).await?;
     let (status, tech, resp_bytes) = if scheme == "https" {
-        let server_name = rustls::pki_types::ServerName::try_from(target_host.to_string())?;
+        let server_name = rustls::pki_types::ServerName::try_from(sni_host.to_string())?;
         let stream = UPSTREAM_TLS.connect(server_name, tcp).await?;
         send_upstream(stream, up_req).await?
     } else {
@@ -172,7 +181,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpStream};
 
     // Bring up a bare HTTP origin that echoes a fixed body, drive a TLS client THROUGH serve_mitm_flow
     // at it, and assert (a) the client gets the origin's response and (b) a correctly-reduced
