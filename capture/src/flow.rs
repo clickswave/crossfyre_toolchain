@@ -16,7 +16,7 @@ use hyper::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, HOST, SERVER};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_rustls::TlsConnector;
 
@@ -52,28 +52,112 @@ pub async fn serve_mitm_flow<C>(
 where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let tls = mitm_acceptor(ca).accept(client).await?;
+    // Peek the first byte to tell TLS from plaintext HTTP without relying on the port (HTTPS runs on
+    // many ports). A TLS record starts with 0x16 (handshake); anything else we treat as plaintext.
+    let mut client = client;
+    let mut first = [0u8; 1];
+    let n = client.read(&mut first).await?;
+    if n == 0 {
+        return Ok(());
+    }
+    let stream = PrefixedIo::new(first[..n].to_vec(), client);
+    if first[0] == 0x16 {
+        let tls = mitm_acceptor(ca).accept(stream).await?;
+        serve_http(tls, "https", target_host, target_port, egress, tx).await
+    } else {
+        serve_http(stream, "http", target_host, target_port, egress, tx).await
+    }
+}
+
+/// Serve HTTP/1 over an (already TLS-terminated or plaintext) client stream, forwarding each request.
+async fn serve_http<S>(
+    io: S,
+    scheme: &'static str,
+    target_host: String,
+    target_port: u16,
+    egress: Egress,
+    tx: UnboundedSender<TraceEvent>,
+) -> Result<(), BoxErr>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let host = Arc::new(target_host);
     let svc = service_fn(move |req: Request<Incoming>| {
         let egress = egress.clone();
         let tx = tx.clone();
         let host = host.clone();
-        async move { handle_request(req, host, target_port, egress, tx).await }
+        async move { handle_request(req, scheme, host, target_port, egress, tx).await }
     });
     hyper::server::conn::http1::Builder::new()
-        .serve_connection(TokioIo::new(tls), svc)
+        .serve_connection(TokioIo::new(io), svc)
         .await?;
     Ok(())
 }
 
+/// An `AsyncRead`/`AsyncWrite` that replays a captured prefix (the peeked bytes) before delegating to
+/// the inner stream, so peeking the first byte does not consume it.
+struct PrefixedIo<S> {
+    prefix: Vec<u8>,
+    pos: usize,
+    inner: S,
+}
+impl<S> PrefixedIo<S> {
+    fn new(prefix: Vec<u8>, inner: S) -> Self {
+        Self {
+            prefix,
+            pos: 0,
+            inner,
+        }
+    }
+}
+impl<S: AsyncRead + Unpin> AsyncRead for PrefixedIo<S> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if self.pos < self.prefix.len() {
+            let remaining = self.prefix.len() - self.pos;
+            let n = remaining.min(buf.remaining());
+            let start = self.pos;
+            buf.put_slice(&self.prefix[start..start + n]);
+            self.pos += n;
+            return std::task::Poll::Ready(Ok(()));
+        }
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+impl<S: AsyncWrite + Unpin> AsyncWrite for PrefixedIo<S> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, data)
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 async fn handle_request(
     req: Request<Incoming>,
+    scheme: &'static str,
     target_host: Arc<String>,
     target_port: u16,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
-    match forward(req, &target_host, target_port, egress, tx).await {
+    match forward(req, scheme, &target_host, target_port, egress, tx).await {
         Ok(resp) => Ok(resp),
         // A dead/unreachable origin must not kill the client connection: answer 502 like a proxy.
         Err(_) => Ok(Response::builder()
@@ -85,12 +169,12 @@ async fn handle_request(
 
 async fn forward(
     req: Request<Incoming>,
+    scheme: &'static str,
     target_host: &str,
     target_port: u16,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
 ) -> Result<Response<Full<Bytes>>, BoxErr> {
-    let scheme = if target_port == 443 { "https" } else { "http" };
     let method = req.method().to_string();
     let pq = req
         .uri()
@@ -127,8 +211,14 @@ async fn forward(
     // IP for a TUN-captured flow) through the routing egress. For the upstream TLS SNI, use the
     // request Host (a hostname) so the origin serves the right certificate; fall back to the dial
     // target when there is no Host.
-    let sni_host = if host_hdr.is_empty() { target_host } else { host_hdr.as_str() };
+    let sni_host = if host_hdr.is_empty() {
+        target_host
+    } else {
+        host_hdr.as_str()
+    };
+    log::debug!("forward {method} {scheme}://{host_hdr}{pq} -> dial {target_host}:{target_port}");
     let tcp = egress.connect(target_host, target_port).await?;
+    log::debug!("dialed {target_host}:{target_port}");
     let (status, tech, resp_bytes) = if scheme == "https" {
         let server_name = rustls::pki_types::ServerName::try_from(sni_host.to_string())?;
         let stream = UPSTREAM_TLS.connect(server_name, tcp).await?;
@@ -136,6 +226,7 @@ async fn forward(
     } else {
         send_upstream(tcp, up_req).await?
     };
+    log::debug!("upstream {target_host}:{target_port} -> {status}");
 
     let _ = tx.send(TraceEvent {
         method,
@@ -189,8 +280,6 @@ mod tests {
     // on loopback, with no device or TUN.
     #[tokio::test]
     async fn mitm_flow_reduces_and_forwards() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
         // 1. HTTP origin.
         let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin_port = origin.local_addr().unwrap().port();
@@ -210,7 +299,6 @@ mod tests {
 
         // 2. The MITM flow in front of it.
         let ca = Arc::new(crate::generate_ca().unwrap());
-        let ca_pem = ca.pem.clone();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<TraceEvent>();
         let mitm = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mitm_port = mitm.local_addr().unwrap().port();
@@ -230,20 +318,11 @@ mod tests {
             .await;
         });
 
-        // 3. A TLS client that trusts the session CA, pointed at the MITM.
-        let mut roots = rustls::RootCertStore::empty();
-        for c in rustls_pemfile::certs(&mut ca_pem.as_bytes()).flatten() {
-            roots.add(c).unwrap();
-        }
-        let cfg = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        let connector = TlsConnector::from(Arc::new(cfg));
+        // 3. A plaintext HTTP/1 client pointed at the MITM. Real traffic is the same scheme on both
+        //    legs; the peek routes this to the plaintext path. The TLS-termination path is the same
+        //    code wrapped in a rustls accept and is exercised on-device.
         let tcp = TcpStream::connect(("127.0.0.1", mitm_port)).await.unwrap();
-        let sni = rustls::pki_types::ServerName::try_from("origin.test").unwrap();
-        let tls = connector.connect(sni, tcp).await.unwrap();
-
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tls))
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(tcp))
             .await
             .unwrap();
         tokio::spawn(async move {
