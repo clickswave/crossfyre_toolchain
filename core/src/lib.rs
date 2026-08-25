@@ -2391,6 +2391,66 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                 resp["node_id"] = serde_json::json!(&node_id);
                                 let _ = publisher.publish(status_subject.clone(), resp.to_string().into()).await;
                             }
+                            // Bench Repeater: replay/send one HTTP request FROM THE NODE (so egress is
+                            // the node's IP, never the browser). Authorized server-side in api_switch;
+                            // the node just sends it and replies with the full response by command_id.
+                            Some("repeater") => {
+                                let command_id = cmd["command_id"].as_str().unwrap_or("").to_string();
+                                let method = cmd["method"].as_str().unwrap_or("GET").to_string();
+                                let url = cmd["url"].as_str().unwrap_or("").to_string();
+                                let body = cmd["body"].as_str().map(|s| s.to_string());
+                                let headers: Vec<(String, String)> = cmd["headers"]
+                                    .as_array()
+                                    .map(|a| {
+                                        a.iter()
+                                            .filter_map(|h| {
+                                                let p = h.as_array()?;
+                                                Some((p.first()?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let client = http_client.clone();
+                                let started = std::time::Instant::now();
+                                let m = reqwest::Method::from_bytes(method.as_bytes())
+                                    .unwrap_or(reqwest::Method::GET);
+                                let mut rb = client.request(m, &url);
+                                for (k, v) in &headers {
+                                    // Skip hop-by-hop / auto-managed headers reqwest sets itself.
+                                    let kl = k.to_ascii_lowercase();
+                                    if kl == "host" || kl == "content-length" || kl == "connection" {
+                                        continue;
+                                    }
+                                    rb = rb.header(k.as_str(), v.as_str());
+                                }
+                                if let Some(b) = body {
+                                    rb = rb.body(b);
+                                }
+                                let mut resp = serde_json::json!({
+                                    "type": "repeater_result", "command_id": command_id, "node_id": &node_id,
+                                });
+                                match rb.send().await {
+                                    Ok(r) => {
+                                        let status = r.status().as_u16();
+                                        let resp_headers: Vec<[String; 2]> = r
+                                            .headers()
+                                            .iter()
+                                            .map(|(k, v)| [k.to_string(), v.to_str().unwrap_or("").to_string()])
+                                            .collect();
+                                        let text = r.text().await.unwrap_or_default();
+                                        resp["ok"] = serde_json::json!(true);
+                                        resp["status"] = serde_json::json!(status);
+                                        resp["headers"] = serde_json::json!(resp_headers);
+                                        resp["body"] = serde_json::json!(text);
+                                        resp["duration_ms"] = serde_json::json!(started.elapsed().as_millis() as u64);
+                                    }
+                                    Err(e) => {
+                                        resp["ok"] = serde_json::json!(false);
+                                        resp["error"] = serde_json::json!(e.to_string());
+                                    }
+                                }
+                                let _ = publisher.publish(status_subject.clone(), resp.to_string().into()).await;
+                            }
                             Some("operation") => {
                                 // Hand off to run_operation so the pull path reuses the exact
                                 // same execution as the push path.

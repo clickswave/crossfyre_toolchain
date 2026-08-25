@@ -5,7 +5,7 @@
 //! privacy invariant lives in exactly one place.
 
 /// The privacy-safe event streamed to `/api/v1/web-trace/ingest`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct TraceEvent {
     pub method: String,
     /// Redacted absolute URL (userinfo/fragment stripped, query values blanked).
@@ -26,6 +26,28 @@ pub struct TraceEvent {
     /// are the operation's request shape; the VALUES are secrets and are never captured.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub body_params: Vec<String>,
+
+    // ── Full-capture fields (present ONLY when the workflow opted into full capture) ──────────────
+    // These carry the real bytes for the Requests tab / Bench Repeater. Omitted entirely in the
+    // default privacy-safe mode, so a shape-only event never contains a body, header value, or secret.
+    /// The unredacted absolute URL (real query values), for the captured-requests store.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub full_url: Option<String>,
+    /// Full request headers as ordered [name, value] pairs.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub req_headers: Option<Vec<[String; 2]>>,
+    /// Full request body (lossy UTF-8).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub req_body: Option<String>,
+    /// Full response headers as ordered [name, value] pairs.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub resp_headers: Option<Vec<[String; 2]>>,
+    /// Full response body (lossy UTF-8).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub resp_body: Option<String>,
+    /// Round-trip time to the origin, ms.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub duration_ms: Option<u64>,
 }
 
 /// Redact a URL down to a safe shape: strip `user:pass@` userinfo, drop the `#fragment`, and keep

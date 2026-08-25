@@ -146,6 +146,18 @@ impl ResolvesServerCert for MitmResolver {
     }
 }
 
+/// Install aws-lc-rs as the process-wide rustls [`CryptoProvider`]. Idempotent: a second call (or a
+/// lost install race) returns Err, which is ignored. This matters on any target whose dependency
+/// graph also compiles in `ring` (e.g. the mobile app pulls it via quinn-proto / rcgen): with both
+/// the `aws-lc-rs` and `ring` rustls features present, rustls cannot auto-select a provider and every
+/// `ClientConfig`/`ServerConfig::builder()` panics. Calling this once at startup ends the ambiguity.
+/// Desktop, with a single provider, does not need it but may call it harmlessly.
+///
+/// [`CryptoProvider`]: rustls::crypto::CryptoProvider
+pub fn install_default_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 /// A `TlsAcceptor` that terminates any client connection by minting a leaf for its SNI. ALPN is pinned
 /// to HTTP/1.1: we do not MITM h2, so we force the client onto h1 (browsers and OkHttp both accept
 /// this). Both the desktop proxy and the mobile netstack build their acceptor here so the TLS
@@ -157,6 +169,62 @@ pub fn mitm_acceptor(ca: Arc<SessionCa>) -> TlsAcceptor {
         .with_cert_resolver(resolver);
     server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
     TlsAcceptor::from(Arc::new(server_config))
+}
+
+// ---------------------------------------------------------------------------
+// Capture configuration: privacy-safe shapes (default) vs full capture + interception
+// ---------------------------------------------------------------------------
+
+/// An operator-edited request to forward instead of the original (Burp-style modify-and-forward). The
+/// destination host/port is fixed by the already-open flow; only the request line, headers and body
+/// can change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditedRequest {
+    pub method: String,
+    /// Path + query (origin-form), e.g. `/api/x?y=1`.
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+/// A manual-interception decision for one request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterceptDecision {
+    /// Let the request proceed to the origin unchanged.
+    Forward,
+    /// Forward, but with an operator-edited request line/headers/body.
+    ForwardModified(EditedRequest),
+    /// Block it: the client gets a synthetic 403 and nothing is forwarded.
+    Drop,
+}
+
+/// A hook the host (mobile app / desktop proxy) implements to gate a request in MANUAL intercept
+/// mode. The capture core calls `decide` before forwarding; the implementation parks the request with
+/// the control plane and blocks until a human forwards or drops it. Returning `Forward` on any error
+/// keeps traffic flowing (fail-open) - implementors choose their own policy.
+pub trait InterceptGate: Send + Sync {
+    fn decide<'a>(
+        &'a self,
+        method: &'a str,
+        url: &'a str,
+        headers: &'a [(String, String)],
+        body: &'a [u8],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = InterceptDecision> + Send + 'a>>;
+}
+
+/// How a capture session behaves. Default = privacy-safe shapes only, no interception (the historic
+/// behaviour). `full` also records complete request/response bytes; `gate` (when set) intercepts each
+/// request for manual approval.
+#[derive(Clone, Default)]
+pub struct CaptureCfg {
+    pub full: bool,
+    pub gate: Option<Arc<dyn InterceptGate>>,
+}
+
+impl std::fmt::Debug for CaptureCfg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureCfg").field("full", &self.full).field("gate", &self.gate.is_some()).finish()
+    }
 }
 
 // ---------------------------------------------------------------------------

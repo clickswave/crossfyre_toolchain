@@ -136,6 +136,7 @@ pub fn shape(raw: &RawCapture, host_filter: Option<&str>) -> Option<TraceEvent> 
         authed: raw.authed,
         content_type: raw.content_type.clone(),
         body_params: raw.body_params.clone(),
+        ..Default::default()
     })
 }
 
@@ -630,6 +631,7 @@ mod tests {
             authed: false,
             content_type: None,
             body_params: Vec::new(),
+            ..Default::default()
         };
         assert!(b.push(ev.clone()).is_none());
         let flushed = b.push(ev.clone()).expect("flush at capacity");

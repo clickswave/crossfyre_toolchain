@@ -21,7 +21,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_rustls::TlsConnector;
 
 use crate::reduce::{TraceEvent, body_field_names, redact_url};
-use crate::{Egress, SessionCa, mitm_acceptor};
+use crate::{CaptureCfg, EditedRequest, Egress, InterceptDecision, SessionCa, mitm_acceptor};
 
 type BoxErr = Box<dyn Error + Send + Sync>;
 
@@ -48,6 +48,7 @@ pub async fn serve_mitm_flow<C>(
     ca: Arc<SessionCa>,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
+    cfg: CaptureCfg,
 ) -> Result<(), BoxErr>
 where
     C: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -62,10 +63,12 @@ where
     }
     let stream = PrefixedIo::new(first[..n].to_vec(), client);
     if first[0] == 0x16 {
+        log::debug!("flow {target_host}:{target_port}: TLS detected, accepting (MITM handshake)");
         let tls = mitm_acceptor(ca).accept(stream).await?;
-        serve_http(tls, "https", target_host, target_port, egress, tx).await
+        log::debug!("flow {target_host}:{target_port}: TLS handshake done, serving HTTP");
+        serve_http(tls, "https", target_host, target_port, egress, tx, cfg).await
     } else {
-        serve_http(stream, "http", target_host, target_port, egress, tx).await
+        serve_http(stream, "http", target_host, target_port, egress, tx, cfg).await
     }
 }
 
@@ -77,6 +80,7 @@ async fn serve_http<S>(
     target_port: u16,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
+    cfg: CaptureCfg,
 ) -> Result<(), BoxErr>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -86,7 +90,8 @@ where
         let egress = egress.clone();
         let tx = tx.clone();
         let host = host.clone();
-        async move { handle_request(req, scheme, host, target_port, egress, tx).await }
+        let cfg = cfg.clone();
+        async move { handle_request(req, scheme, host, target_port, egress, tx, cfg).await }
     });
     hyper::server::conn::http1::Builder::new()
         .serve_connection(TokioIo::new(io), svc)
@@ -156,8 +161,9 @@ async fn handle_request(
     target_port: u16,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
+    cfg: CaptureCfg,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
-    match forward(req, scheme, &target_host, target_port, egress, tx).await {
+    match forward(req, scheme, &target_host, target_port, egress, tx, &cfg).await {
         Ok(resp) => Ok(resp),
         // A dead/unreachable origin must not kill the client connection: answer 502 like a proxy.
         Err(_) => Ok(Response::builder()
@@ -174,6 +180,7 @@ async fn forward(
     target_port: u16,
     egress: Egress,
     tx: UnboundedSender<TraceEvent>,
+    cfg: &CaptureCfg,
 ) -> Result<Response<Full<Bytes>>, BoxErr> {
     let method = req.method().to_string();
     let pq = req
@@ -199,36 +206,65 @@ async fn forward(
     let body_bytes = body.collect().await?.to_bytes();
     let body_params = body_field_names(content_type.as_deref(), &body_bytes);
     let url = redact_url(&format!("{scheme}://{host_hdr}{pq}"));
+    let full_url = format!("{scheme}://{host_hdr}{pq}");
 
-    // Rebuild the request for the origin (same method/uri/headers, buffered body).
-    let mut up_req = Request::builder().method(parts.method).uri(pq.clone());
-    for (k, v) in parts.headers.iter() {
-        up_req = up_req.header(k, v);
+    // Ordered [name, value] header pairs, captured once (used for the gate + full capture).
+    let req_header_pairs: Vec<(String, String)> = parts
+        .headers
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    // MANUAL INTERCEPTION: hold the request for human approval (and optional edit) before it leaves.
+    let mut edited: Option<EditedRequest> = None;
+    if let Some(gate) = &cfg.gate {
+        match gate.decide(&method, &full_url, &req_header_pairs, &body_bytes).await {
+            InterceptDecision::Drop => {
+                log::debug!("intercept: dropped {method} {full_url}");
+                return Ok(Response::builder()
+                    .status(403)
+                    .body(Full::new(Bytes::from_static(b"dropped by interceptor")))?);
+            }
+            InterceptDecision::Forward => {}
+            InterceptDecision::ForwardModified(ed) => edited = Some(ed),
+        }
     }
-    let up_req = up_req.body(Full::new(body_bytes))?;
 
-    // Dial the flow's ACTUAL destination (a hostname for the desktop CONNECT proxy, the original dst
-    // IP for a TUN-captured flow) through the routing egress. For the upstream TLS SNI, use the
-    // request Host (a hostname) so the origin serves the right certificate; fall back to the dial
-    // target when there is no Host.
-    let sni_host = if host_hdr.is_empty() {
-        target_host
+    // Rebuild the request for the origin: the operator-edited version when present, otherwise the
+    // original (same method/uri/headers, buffered body). Host/port stay the flow's destination.
+    let up_req = if let Some(ed) = &edited {
+        let mut b = Request::builder().method(ed.method.as_str()).uri(ed.path.as_str());
+        for (k, v) in &ed.headers {
+            b = b.header(k.as_str(), v.as_str());
+        }
+        b.body(Full::new(Bytes::from(ed.body.clone())))?
     } else {
-        host_hdr.as_str()
+        let mut b = Request::builder().method(parts.method.clone()).uri(pq.clone());
+        for (k, v) in parts.headers.iter() {
+            b = b.header(k, v);
+        }
+        b.body(Full::new(body_bytes.clone()))?
     };
+
+    // Dial the flow's ACTUAL destination through the routing egress. For upstream TLS SNI, use the
+    // request Host so the origin serves the right certificate; fall back to the dial target.
+    let sni_host = if host_hdr.is_empty() { target_host } else { host_hdr.as_str() };
     log::debug!("forward {method} {scheme}://{host_hdr}{pq} -> dial {target_host}:{target_port}");
     let tcp = egress.connect(target_host, target_port).await?;
     log::debug!("dialed {target_host}:{target_port}");
-    let (status, tech, resp_bytes) = if scheme == "https" {
+    let started = std::time::Instant::now();
+    let (status, tech, resp_headers, resp_bytes) = if scheme == "https" {
         let server_name = rustls::pki_types::ServerName::try_from(sni_host.to_string())?;
         let stream = UPSTREAM_TLS.connect(server_name, tcp).await?;
         send_upstream(stream, up_req).await?
     } else {
         send_upstream(tcp, up_req).await?
     };
+    let duration_ms = started.elapsed().as_millis() as u64;
     log::debug!("upstream {target_host}:{target_port} -> {status}");
 
-    let _ = tx.send(TraceEvent {
+    // Base privacy-safe event; enriched with full bytes only when full capture is on.
+    let mut event = TraceEvent {
         method,
         url,
         status: Some(status),
@@ -236,19 +272,33 @@ async fn forward(
         authed,
         content_type,
         body_params,
-    });
+        full_url: None,
+        req_headers: None,
+        req_body: None,
+        resp_headers: None,
+        resp_body: None,
+        duration_ms: None,
+    };
+    if cfg.full {
+        let req_hdr_arr: Vec<[String; 2]> = req_header_pairs.into_iter().map(|(k, v)| [k, v]).collect();
+        event.full_url = Some(full_url);
+        event.req_headers = Some(req_hdr_arr);
+        event.req_body = Some(String::from_utf8_lossy(&body_bytes).into_owned());
+        event.resp_headers = Some(resp_headers);
+        event.resp_body = Some(String::from_utf8_lossy(&resp_bytes).into_owned());
+        event.duration_ms = Some(duration_ms);
+    }
+    let _ = tx.send(event);
 
-    Ok(Response::builder()
-        .status(status as u16)
-        .body(Full::new(resp_bytes))?)
+    Ok(Response::builder().status(status as u16).body(Full::new(resp_bytes))?)
 }
 
 /// HTTP/1 client handshake over an already-connected (optionally TLS) stream: send `req`, return
-/// (status, Server banner, response body bytes).
+/// (status, Server banner, response headers as [name,value] pairs, response body bytes).
 async fn send_upstream<S>(
     stream: S,
     req: Request<Full<Bytes>>,
-) -> Result<(i64, Option<String>, Bytes), BoxErr>
+) -> Result<(i64, Option<String>, Vec<[String; 2]>, Bytes), BoxErr>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -263,8 +313,13 @@ where
         .get(SERVER)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
+    let resp_headers: Vec<[String; 2]> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| [k.to_string(), v.to_str().unwrap_or("").to_string()])
+        .collect();
     let bytes = resp.into_body().collect().await?.to_bytes();
-    Ok((status, tech, bytes))
+    Ok((status, tech, resp_headers, bytes))
 }
 
 #[cfg(test)]
@@ -314,6 +369,7 @@ mod tests {
                 ca2,
                 Egress::Direct,
                 tx,
+                crate::CaptureCfg::default(),
             )
             .await;
         });
