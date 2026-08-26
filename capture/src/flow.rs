@@ -20,8 +20,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_rustls::TlsConnector;
 
-use crate::reduce::{TraceEvent, body_field_names, redact_url};
-use crate::{CaptureCfg, EditedRequest, Egress, InterceptDecision, SessionCa, mitm_acceptor};
+use crate::reduce::{body_field_names, redact_url, TraceEvent};
+use crate::{mitm_acceptor, CaptureCfg, EditedRequest, Egress, InterceptDecision, SessionCa};
 
 type BoxErr = Box<dyn Error + Send + Sync>;
 
@@ -218,9 +218,15 @@ async fn forward(
     // MANUAL INTERCEPTION: hold the request for human approval (and optional edit) before it leaves.
     let mut edited: Option<EditedRequest> = None;
     if let Some(gate) = &cfg.gate {
-        match gate.decide(&method, &full_url, &req_header_pairs, &body_bytes).await {
+        match gate
+            .decide(&method, &full_url, &req_header_pairs, &body_bytes)
+            .await
+        {
             InterceptDecision::Drop => {
-                log::debug!("intercept: dropped {method} {full_url}");
+                log::debug!(
+                    "intercept: dropped {method} {}",
+                    full_url.split('?').next().unwrap_or("")
+                );
                 return Ok(Response::builder()
                     .status(403)
                     .body(Full::new(Bytes::from_static(b"dropped by interceptor")))?);
@@ -233,13 +239,17 @@ async fn forward(
     // Rebuild the request for the origin: the operator-edited version when present, otherwise the
     // original (same method/uri/headers, buffered body). Host/port stay the flow's destination.
     let up_req = if let Some(ed) = &edited {
-        let mut b = Request::builder().method(ed.method.as_str()).uri(ed.path.as_str());
+        let mut b = Request::builder()
+            .method(ed.method.as_str())
+            .uri(ed.path.as_str());
         for (k, v) in &ed.headers {
             b = b.header(k.as_str(), v.as_str());
         }
         b.body(Full::new(Bytes::from(ed.body.clone())))?
     } else {
-        let mut b = Request::builder().method(parts.method.clone()).uri(pq.clone());
+        let mut b = Request::builder()
+            .method(parts.method.clone())
+            .uri(pq.clone());
         for (k, v) in parts.headers.iter() {
             b = b.header(k, v);
         }
@@ -248,8 +258,17 @@ async fn forward(
 
     // Dial the flow's ACTUAL destination through the routing egress. For upstream TLS SNI, use the
     // request Host so the origin serves the right certificate; fall back to the dial target.
-    let sni_host = if host_hdr.is_empty() { target_host } else { host_hdr.as_str() };
-    log::debug!("forward {method} {scheme}://{host_hdr}{pq} -> dial {target_host}:{target_port}");
+    let sni_host = if host_hdr.is_empty() {
+        target_host
+    } else {
+        host_hdr.as_str()
+    };
+    // Path only, never the query: `pq` carries `?access_token=...` and friends,
+    // and this line runs for every forwarded request.
+    let path_only = pq.split('?').next().unwrap_or("");
+    log::debug!(
+        "forward {method} {scheme}://{host_hdr}{path_only} -> dial {target_host}:{target_port}"
+    );
     let tcp = egress.connect(target_host, target_port).await?;
     log::debug!("dialed {target_host}:{target_port}");
     let started = std::time::Instant::now();
@@ -280,7 +299,8 @@ async fn forward(
         duration_ms: None,
     };
     if cfg.full {
-        let req_hdr_arr: Vec<[String; 2]> = req_header_pairs.into_iter().map(|(k, v)| [k, v]).collect();
+        let req_hdr_arr: Vec<[String; 2]> =
+            req_header_pairs.into_iter().map(|(k, v)| [k, v]).collect();
         event.full_url = Some(full_url);
         event.req_headers = Some(req_hdr_arr);
         event.req_body = Some(String::from_utf8_lossy(&body_bytes).into_owned());
@@ -290,7 +310,9 @@ async fn forward(
     }
     let _ = tx.send(event);
 
-    Ok(Response::builder().status(status as u16).body(Full::new(resp_bytes))?)
+    Ok(Response::builder()
+        .status(status as u16)
+        .body(Full::new(resp_bytes))?)
 }
 
 /// HTTP/1 client handshake over an already-connected (optionally TLS) stream: send `req`, return

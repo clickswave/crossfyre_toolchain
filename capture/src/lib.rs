@@ -15,7 +15,7 @@ pub mod flow;
 pub mod reduce;
 
 pub use flow::serve_mitm_flow;
-pub use reduce::{TraceEvent, body_field_names, redact_url};
+pub use reduce::{body_field_names, redact_url, TraceEvent};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -48,7 +48,18 @@ pub struct SessionCa {
 pub fn ca_params() -> Result<rcgen::CertificateParams, BoxErr> {
     use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyUsagePurpose};
     let mut params = CertificateParams::new(Vec::<String>::new())?;
-    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    // Path-length 0: this CA signs leaf certificates for the flows we intercept
+    // and nothing else. It has no reason to be able to mint further CAs.
+    params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    // Bound the lifetime. rcgen's defaults are 1975 to 4096, so the certificate
+    // the user installs in their OS trust store was, in effect, permanent. If
+    // the key is ever recovered from the device, that is indefinite transparent
+    // interception of every site for that user, long after they have stopped
+    // using the tracer and forgotten the certificate is there. A short life
+    // means a stale trust anchor expires on its own and becomes visible.
+    let now = std::time::SystemTime::now();
+    params.not_before = now.into();
+    params.not_after = (now + std::time::Duration::from_secs(30 * 24 * 60 * 60)).into();
     params.key_usages = vec![
         KeyUsagePurpose::KeyCertSign,
         KeyUsagePurpose::CrlSign,
@@ -223,7 +234,10 @@ pub struct CaptureCfg {
 
 impl std::fmt::Debug for CaptureCfg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CaptureCfg").field("full", &self.full).field("gate", &self.gate.is_some()).finish()
+        f.debug_struct("CaptureCfg")
+            .field("full", &self.full)
+            .field("gate", &self.gate.is_some())
+            .finish()
     }
 }
 
