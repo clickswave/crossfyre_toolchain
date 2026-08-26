@@ -410,6 +410,10 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
             .json(&serde_json::json!({
                 "operation_id": op_id,
                 "node_id": node_id,
+                // Authenticates the claim. Every other node-facing route already
+                // presents this; without it any caller past the authority gate
+                // could claim another tenant's queued operations.
+                "api_key": api_key,
             }))
             .send()
             .await;
