@@ -15,7 +15,7 @@ pub mod flow;
 pub mod reduce;
 
 pub use flow::serve_mitm_flow;
-pub use reduce::{body_field_names, redact_url, TraceEvent};
+pub use reduce::{TraceEvent, body_field_names, redact_url};
 
 use std::collections::HashMap;
 use std::error::Error;

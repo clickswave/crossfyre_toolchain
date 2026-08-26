@@ -20,8 +20,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_rustls::TlsConnector;
 
-use crate::reduce::{body_field_names, redact_url, TraceEvent};
-use crate::{mitm_acceptor, CaptureCfg, EditedRequest, Egress, InterceptDecision, SessionCa};
+use crate::reduce::{TraceEvent, body_field_names, redact_url};
+use crate::{CaptureCfg, EditedRequest, Egress, InterceptDecision, SessionCa, mitm_acceptor};
 
 type BoxErr = Box<dyn Error + Send + Sync>;
 
