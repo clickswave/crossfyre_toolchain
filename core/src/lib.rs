@@ -2877,3 +2877,91 @@ fn write_origin_root_cert() -> std::io::Result<std::path::PathBuf> {
     std::fs::write(&path, ORIGIN_ROOT)?;
     Ok(path)
 }
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    /// C-2: the node config holds the broker seed, the broker JWT and the
+    /// account key. It used to be written at the process umask, which in
+    /// practice meant 0644, next to an auth.toml that was correctly 0600.
+    #[cfg(unix)]
+    #[test]
+    fn a_secret_file_is_written_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cfx-sec-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let p = dir.join("secret.toml");
+        write_secret_file(&p, "nats_nkey_seed = \"S...\"").unwrap();
+        let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "written {mode:o}, expected 600");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Overwriting an existing wide-open file must also tighten it: `mode` on
+    /// OpenOptions only applies at creation.
+    #[cfg(unix)]
+    #[test]
+    fn rewriting_an_existing_file_tightens_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cfx-sec2-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let p = dir.join("secret.toml");
+        fs::write(&p, "old").unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+        write_secret_file(&p, "new").unwrap();
+        let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "left {mode:o} on an existing file");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Installs written before this existed still have 0644 configs on disk, and
+    /// a normal start does not rewrite the file, so load-time repair is the only
+    /// thing that fixes them.
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_wide_open_config_is_repaired_on_load() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cfx-sec3-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let p = dir.join("node.toml");
+        fs::write(&p, "api_key = \"x\"").unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+        repair_secret_file_mode(&p);
+        let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "repair left {mode:o}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// H-2: shell_exec and .cfx run control-plane input in this process's
+    /// privileges, and the node runs as root on a default install. Server-side
+    /// authorization cannot protect the host from a compromised control plane or
+    /// stolen broker credentials, so the node has to consent too, and a config
+    /// that never mentions the flag must not consent by accident.
+    #[test]
+    fn remote_exec_is_off_when_the_config_does_not_mention_it() {
+        let cfg: Config = toml::from_str(
+            r#"
+            api_key = "k"
+            node_id = "n"
+            api_url = "https://example.invalid"
+            "#,
+        )
+        .expect("a config without remote_exec must still parse");
+        assert!(!cfg.remote_exec, "remote execution defaulted ON");
+    }
+
+    #[test]
+    fn remote_exec_is_honoured_when_explicitly_enabled() {
+        let cfg: Config = toml::from_str(
+            r#"
+            api_key = "k"
+            node_id = "n"
+            api_url = "https://example.invalid"
+            remote_exec = true
+            "#,
+        )
+        .expect("parse");
+        assert!(cfg.remote_exec, "an explicit opt-in was ignored");
+    }
+}
