@@ -67,7 +67,7 @@ pub async fn handle(env: OpEnv) {
         Ok(stream) => {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
             let (reader, mut writer) = stream.into_split();
-            let mut req_str = serde_json::to_string(&scout_req).unwrap();
+            let mut req_str = dguard::encode(&scout_req);
             req_str.push('\n');
             let _ = writer.write_all(req_str.as_bytes()).await;
 

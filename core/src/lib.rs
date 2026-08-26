@@ -501,6 +501,19 @@ pub struct Config {
     /// Stored verbatim from the dashboard so we can re-read it across runs.
     #[serde(default)]
     network: Option<NetworkConfig>,
+    /// Whether this node will run commands the control plane sends it:
+    /// `shell_exec` (`sh -c`) and `.cfx` extension code.
+    ///
+    /// Off unless the operator turns it on. Both are authorized server-side
+    /// before dispatch, but that is a decision made entirely on the control
+    /// plane: a node that never opts in cannot be turned into a shell by
+    /// anything that reaches the control plane, including stolen broker
+    /// credentials. The node runs as root on a default install, so this is the
+    /// difference between compromising the platform and compromising the host.
+    ///
+    /// Set `remote_exec = true` in `nodes.d/<node-id>.toml` to allow it.
+    #[serde(default)]
+    pub remote_exec: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -663,6 +676,65 @@ impl NodePaths {
 pub fn nodes_dir(base: &std::path::Path) -> std::path::PathBuf {
     base.join("nodes.d")
 }
+
+/// Write a file that holds a credential, owner-readable only.
+///
+/// The node config carries `nats_nkey_seed`, `nats_user_jwt` and `api_key`, so it
+/// needs the treatment `auth.toml` already gets in [`crate::auth`]. It used to be
+/// written at the process umask, which in practice meant 0644: three secrets
+/// readable by every local account, next to an `auth.toml` that was correctly
+/// 0600.
+///
+/// The permissions are set before the bytes land where possible, so there is no
+/// window in which the file exists with the secret in it and the wider mode.
+pub fn write_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(contents.as_bytes())?;
+        // `mode` only applies when the file is created, so an existing file keeps
+        // whatever it had. Tighten it explicitly.
+        let _ = fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents)
+    }
+}
+
+/// Tighten a credential file that an earlier build left world-readable.
+///
+/// Installs created before [`write_secret_file`] existed still have 0644 configs
+/// on disk, and rewriting the file is not part of a normal start. This runs on
+/// load so those installs are repaired without operator action, and says so once
+/// rather than silently, because the secrets in it should be treated as having
+/// been exposed.
+#[cfg(unix)]
+pub fn repair_secret_file_mode(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(meta) = fs::metadata(path) else { return };
+    let mode = meta.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 && fs::set_permissions(path, fs::Permissions::from_mode(0o600)).is_ok() {
+        eprintln!(
+            "[security] {} was mode {:o} (group/other readable) and holds node \
+             credentials; tightened to 600. Rotate this node's key if the host \
+             has other accounts: `crossfyre node revoke`.",
+            path.display(),
+            mode
+        );
+    }
+}
+
+#[cfg(not(unix))]
+pub fn repair_secret_file_mode(_path: &std::path::Path) {}
 
 /// Validate the `~/.config/crossfyre` layout before booting: the config root
 /// must exist and contain a `nodes.d` directory. Returns the list of
@@ -1379,10 +1451,13 @@ pub async fn run_init(
         nats_user_jwt,
         extensions: selected_extensions.clone(),
         network: network.clone(),
+        // Opt-in: see Config::remote_exec. A fresh node will not run control-plane
+        // commands until its operator says so.
+        remote_exec: false,
     };
     let config_path = &paths.config;
     let config_toml = toml::to_string(&config)?;
-    fs::write(config_path, config_toml)?;
+    write_secret_file(config_path, &config_toml)?;
     end();
     section("Configure");
     ok(&format!(
@@ -1628,7 +1703,7 @@ pub async fn refresh_node_state(
 
     // Persist so next restart also has fresh creds if refresh fails.
     let config_toml = toml::to_string(&config)?;
-    fs::write(config_path, config_toml)?;
+    write_secret_file(config_path, &config_toml)?;
     // Daemon often runs as root via sudo - the file we just wrote is now
     // root-owned. Hand it back to the invoking user so non-sudo tools can
     // still read it.
@@ -1764,6 +1839,8 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
     }
 
     // Load config
+    // Repair installs written before the config was mode-restricted.
+    repair_secret_file_mode(&config_path);
     let config_str = fs::read_to_string(&config_path)?;
     let mut config: Config = toml::from_str(&config_str)?;
 
@@ -2368,6 +2445,27 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                             Some("shell_exec") => {
                                 let command = cmd["command"].as_str().unwrap_or("").to_string();
                                 let command_id = cmd["command_id"].as_str().unwrap_or("").to_string();
+                                // Node-side consent, which is not the same thing as
+                                // the server-side authorization that already ran.
+                                // That check lives entirely on the control plane, so
+                                // it cannot protect the host from a compromised
+                                // control plane or from stolen broker credentials.
+                                // This one can. See Config::remote_exec.
+                                if !config.remote_exec {
+                                    println!("[shell] refused, remote_exec is off: {command}");
+                                    let resp = serde_json::json!({
+                                        "type": "shell_result",
+                                        "command_id": command_id,
+                                        "node_id": &node_id,
+                                        "ok": false,
+                                        "error": "remote execution is disabled on this node; \
+                                                  set remote_exec = true in its config to allow it",
+                                    });
+                                    let _ = publisher
+                                        .publish(status_subject.clone(), resp.to_string().into())
+                                        .await;
+                                    continue;
+                                }
                                 println!("[shell] exec: {command}");
                                 let run = tokio::task::spawn_blocking(move || {
                                     std::process::Command::new("sh").arg("-c").arg(&command).output()
@@ -2470,6 +2568,24 @@ pub async fn run_daemon(force: bool, paths: &NodePaths) -> Result<(), Box<dyn st
                                 let job_id = cmd["job_id"].as_str().unwrap_or("unknown").to_string();
                                 let script = cmd["script"].as_str().unwrap_or("").to_string();
                                 let raw_targets = cmd["targets"].as_array();
+
+                                // Same consent gate as shell_exec: a .cfx job is
+                                // arbitrary Python from the control plane, run in
+                                // this process's privileges. See Config::remote_exec.
+                                if !config.remote_exec {
+                                    println!("[execute] refused, remote_exec is off: job_id={job_id}");
+                                    let resp = serde_json::json!({
+                                        "type": "job_failed",
+                                        "job_id": job_id,
+                                        "node_id": &node_id,
+                                        "error": "remote execution is disabled on this node; \
+                                                  set remote_exec = true in its config to allow it",
+                                    });
+                                    let _ = publisher
+                                        .publish(status_subject.clone(), resp.to_string().into())
+                                        .await;
+                                    continue;
+                                }
 
                                 let targets: Vec<(String, String)> = raw_targets
                                     .map(|arr| {

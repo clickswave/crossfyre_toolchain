@@ -584,6 +584,7 @@ dependencies = [
  "base64 0.21.7",
  "cfx_capture",
  "clap",
+ "dguard",
  "dialoguer 0.12.0",
  "dirs 6.0.0",
  "futures-util",
@@ -890,6 +891,7 @@ dependencies = [
  "boring2",
  "cfx_tui",
  "clap",
+ "dguard",
  "rand 0.8.7",
  "ratatui",
  "regex",
@@ -1198,6 +1200,13 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "dguard"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2521,6 +2530,7 @@ dependencies = [
  "clap",
  "crossterm",
  "csv",
+ "dguard",
  "dialoguer 0.11.0",
  "dirs 5.0.1",
  "rand 0.9.5",
@@ -3261,6 +3271,7 @@ dependencies = [
  "clap",
  "crossterm",
  "csv",
+ "dguard",
  "dialoguer 0.11.0",
  "dirs 5.0.1",
  "rand 0.9.5",
@@ -3993,6 +4004,7 @@ dependencies = [
  "base64 0.22.1",
  "cfx_tui",
  "clap",
+ "dguard",
  "md5",
  "ratatui",
  "regex",
@@ -5376,6 +5388,7 @@ dependencies = [
  "cfx_tui",
  "clap",
  "crossterm",
+ "dguard",
  "dialoguer 0.11.0",
  "dirs 5.0.1",
  "hickory-resolver",

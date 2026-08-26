@@ -17,6 +17,7 @@ authors = ["Clickswave <team@clickswave.org>"]
 tuning = ["cfx_tui/tuning"]
 
 [dependencies]
+dguard = { path = "../dguard" }
 adaptive = { path = "../adaptive" }
 tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time"] }
 clap = { version = "4.5.42", features = ["derive"] }

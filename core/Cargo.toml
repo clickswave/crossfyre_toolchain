@@ -11,6 +11,7 @@ name = "cfx_core"
 path = "src/lib.rs"
 
 [dependencies]
+dguard = { path = "../dguard" }
 adaptive = { path = "../adaptive" }
 async-nats = "0.50.0"
 # Direct handle so run_daemon can install a rustls CryptoProvider before the
