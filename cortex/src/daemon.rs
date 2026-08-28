@@ -19,14 +19,19 @@ fn default_response() -> String {
 }
 
 pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
-    println!("Cortex daemon listening on port {port}");
+    // Loopback unless an operator opts out: this channel has no per-request
+    // credential of its own, so the bind address is the boundary.
+    let addr = dguard::bind_addr(port);
+    let gate = dguard::Gate::from_env();
+    let listener = TcpListener::bind(addr).await?;
+    gate.announce("Cortex", addr);
 
     loop {
         let (stream, addr) = listener.accept().await?;
         let _ = stream.set_nodelay(true);
+        let gate_clone = gate.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream).await {
+            if let Err(e) = handle_connection(stream, gate_clone).await {
                 eprintln!("Connection error from {addr}: {e}");
             }
         });
@@ -35,6 +40,7 @@ pub async fn run(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 
 async fn handle_connection(
     stream: TcpStream,
+    gate: dguard::Gate,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -44,6 +50,22 @@ async fn handle_connection(
         if line.is_empty() {
             continue;
         }
+        // The bind address is the primary boundary. This is the second one, for
+        // deployments that used CFX_DAEMON_BIND to move the listener off loopback;
+        // with no token configured it is a no-op.
+        if !gate.allows(
+            serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .as_ref()
+                .and_then(|v| v.get("token"))
+                .and_then(|t| t.as_str()),
+        ) {
+            let _ = writer
+                .write_all(b"{\"status\":\"error\",\"error\":\"unauthorized\"}\n")
+                .await;
+            continue;
+        }
+
         let req: DaemonRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {

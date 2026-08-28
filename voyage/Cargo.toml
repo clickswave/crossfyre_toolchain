@@ -20,6 +20,7 @@ tuning = ["cfx_tui/tuning"]
 impersonate = ["transport/impersonate"]
 
 [dependencies]
+dguard = { path = "../dguard" }
 adaptive = { path = "../adaptive" }
 transport = { path = "../transport" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time"] }

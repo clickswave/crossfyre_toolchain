@@ -1,0 +1,23 @@
+[package]
+name = "cfx_capture"
+version = "0.0.1"
+edition = "2024"
+description = "Shared traffic-capture core (session CA, per-SNI MITM leaves, egress, per-flow inspect+forward, privacy-safe reduction) for the Web Tracer family: desktop proxy and mobile VpnService netstack."
+
+[dependencies]
+rustls = { version = "0.23", features = ["aws_lc_rs"] }
+tokio-rustls = "0.26"
+rcgen = "0.13"
+tokio = { version = "1.49.0", features = ["net", "io-util", "rt", "macros", "sync"] }
+hyper = { version = "1", features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+webpki-roots = "0.26"
+log = "0.4"
+
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["net", "io-util", "rt", "rt-multi-thread", "macros", "sync", "time"] }
+rustls-pemfile = "2"

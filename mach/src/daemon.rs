@@ -172,8 +172,12 @@ fn default_follow_redirects() -> bool {
 // ---------------------------------------------------------------------------
 
 pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
-    println!("Mach daemon listening on port {port}");
+    // Loopback unless an operator opts out: this channel has no per-request
+    // credential of its own, so the bind address is the boundary.
+    let addr = dguard::bind_addr(port);
+    let gate = dguard::Gate::from_env();
+    let listener = TcpListener::bind(addr).await?;
+    gate.announce("Mach", addr);
 
     let db = Arc::new(db);
     let probe_client = Arc::new(transport::build_client(transport::ClientConfig {
@@ -241,12 +245,19 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
     loop {
         let (stream, addr) = listener.accept().await?;
         let _ = stream.set_nodelay(true);
+        let gate_clone = gate.clone();
         let db_clone = Arc::clone(&db);
         let client_clone = Arc::clone(&probe_client);
         let client_noredir_clone = Arc::clone(&probe_client_noredirect);
         tokio::spawn(async move {
-            if let Err(e) =
-                handle_connection(stream, db_clone, client_clone, client_noredir_clone).await
+            if let Err(e) = handle_connection(
+                stream,
+                gate_clone,
+                db_clone,
+                client_clone,
+                client_noredir_clone,
+            )
+            .await
             {
                 eprintln!("Connection error from {addr}: {e}");
             }
@@ -260,6 +271,7 @@ pub async fn run(port: u16, db: MachDb) -> Result<(), Box<dyn std::error::Error>
 
 async fn handle_connection(
     stream: TcpStream,
+    gate: dguard::Gate,
     db: Arc<MachDb>,
     probe_client: Arc<Client>,
     probe_client_noredirect: Arc<Client>,
@@ -270,6 +282,22 @@ async fn handle_connection(
     while let Some(line) = lines.next_line().await? {
         let line = line.trim().to_string();
         if line.is_empty() {
+            continue;
+        }
+
+        // The bind address is the primary boundary. This is the second one, for
+        // deployments that used CFX_DAEMON_BIND to move the listener off loopback;
+        // with no token configured it is a no-op.
+        if !gate.allows(
+            serde_json::from_str::<serde_json::Value>(&line)
+                .ok()
+                .as_ref()
+                .and_then(|v| v.get("token"))
+                .and_then(|t| t.as_str()),
+        ) {
+            let _ = writer
+                .write_all(b"{\"status\":\"error\",\"error\":\"unauthorized\"}\n")
+                .await;
             continue;
         }
 
@@ -645,6 +673,13 @@ async fn prepare_scan(
     db: &Arc<MachDb>,
     isolate: Option<&str>,
 ) -> Result<(Scanner, usize, i64), Box<dyn std::error::Error + Send + Sync>> {
+    // Every scan path reaches here, so this is the one place the wordlist has to
+    // be contained. `wordlist` is a filesystem path from the request and the
+    // scanner emits one request per line to a target the same request names,
+    // which made an arbitrary file readable one line at a time by anyone who
+    // could reach this daemon.
+    dguard::resolve_wordlist(&params.wordlist)?;
+
     let http_method = parse_method(&params.method);
 
     let mut endpoint = params.endpoint.clone();

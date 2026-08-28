@@ -75,7 +75,7 @@ pub async fn handle(env: OpEnv) {
                 #[allow(deprecated)]
                 let _ = stream.set_linger(Some(std::time::Duration::ZERO));
                 let (reader, mut writer) = stream.into_split();
-                let mut req_str = serde_json::to_string(&pulse_req).unwrap();
+                let mut req_str = dguard::encode(&pulse_req);
                 req_str.push('\n');
                 if log_sample {
                     println!(
@@ -307,7 +307,7 @@ pub async fn handle(env: OpEnv) {
             #[allow(deprecated)]
             let _ = stream.set_linger(Some(std::time::Duration::ZERO));
             let (reader, mut writer) = stream.into_split();
-            let mut req_str = serde_json::to_string(&pulse_req).unwrap();
+            let mut req_str = dguard::encode(&pulse_req);
             req_str.push('\n');
             let _ = writer.write_all(req_str.as_bytes()).await;
 
