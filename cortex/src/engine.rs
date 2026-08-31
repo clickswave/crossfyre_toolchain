@@ -590,7 +590,10 @@ mod tests {
             id.user_agent
         );
 
-        announce_as(&mut id, Some("Crossfyre-FreeTools/1.0 (+https://crossfyre.io/scanning)"));
+        announce_as(
+            &mut id,
+            Some("Crossfyre-FreeTools/1.0 (+https://crossfyre.io/scanning)"),
+        );
         assert_eq!(
             id.user_agent,
             "Crossfyre-FreeTools/1.0 (+https://crossfyre.io/scanning)"
@@ -599,8 +602,14 @@ mod tests {
         // sec-ch-ua is not honest, just differently dressed.
         for (k, _) in &id.headers {
             let lk = k.to_ascii_lowercase();
-            assert!(!lk.starts_with("sec-ch-ua"), "left a browser hint header: {k}");
-            assert!(!lk.starts_with("sec-fetch"), "left a browser hint header: {k}");
+            assert!(
+                !lk.starts_with("sec-ch-ua"),
+                "left a browser hint header: {k}"
+            );
+            assert!(
+                !lk.starts_with("sec-fetch"),
+                "left a browser hint header: {k}"
+            );
             assert_ne!(lk, "upgrade-insecure-requests");
         }
     }

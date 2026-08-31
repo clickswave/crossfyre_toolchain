@@ -9,9 +9,19 @@
 //! published, so being wrong is expensive. A healthy domain must come back clean.
 
 // The crate is a binary, so the module is included directly rather than imported.
+//
+// That has a consequence worth stating: an INCLUDED module is compiled fresh
+// into this test binary, so dead-code analysis sees only what this file happens
+// to touch. Every fingerprint accessor and most of `Report` is read by the
+// voyage binary and by `core`'s takeover op, neither of which exists in this
+// compilation unit, so clippy reports them as dead here and is wrong to. The
+// allow is scoped to the included modules alone rather than the whole file, so
+// genuinely dead code in the tests themselves is still caught.
+#[allow(dead_code)]
 #[path = "../src/takeover.rs"]
 mod takeover;
 
+#[allow(dead_code)]
 #[path = "../src/libs/dns.rs"]
 mod dns;
 
@@ -52,7 +62,11 @@ async fn a_name_that_does_not_exist_is_not_reported_as_dangling() {
         no_fetch,
     )
     .await;
-    assert!(!r.is_finding(), "flagged a plain NXDOMAIN host: {}", r.detail);
+    assert!(
+        !r.is_finding(),
+        "flagged a plain NXDOMAIN host: {}",
+        r.detail
+    );
     assert_eq!(r.verdict, takeover::Verdict::Clean);
 }
 
@@ -70,5 +84,27 @@ async fn a_cname_to_a_live_provider_is_claimed_not_dangling() {
         takeover::Verdict::DanglingNxdomain,
         "live host reported as dangling: {}",
         r.detail
+    );
+
+    // The report has to identify what it looked at, not just reach a verdict.
+    // A checker that returns "clean" without echoing the host and the chain it
+    // walked is impossible to audit when it is eventually wrong about someone
+    // else's domain, and this is published output.
+    assert_eq!(r.host, "docs.github.com", "report lost the host it checked");
+    assert!(
+        !r.chain.is_empty(),
+        "docs.github.com is a CNAME, so the walked chain must be recorded; got {:?}",
+        r.chain
+    );
+
+    // The chain must actually terminate somewhere recognisable rather than
+    // being an artefact: either we named the provider, or the last hop is a
+    // real name we can print.
+    let last = r.chain.last().expect("chain non-empty");
+    assert!(
+        r.service.is_some() || last.contains('.'),
+        "chain ended somewhere unusable: service={:?} chain={:?}",
+        r.service,
+        r.chain
     );
 }

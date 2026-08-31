@@ -348,8 +348,8 @@ pub async fn run_stream(params: CrawlParams, tx: mpsc::UnboundedSender<CrawlEven
         accept_invalid_certs: true,
         cookie_store: true,
         resolve: Vec::new(),
-            ..Default::default()
-        }) {
+        ..Default::default()
+    }) {
         Ok(c) => c,
         Err(e) => {
             let _ = tx.send(CrawlEvent::error(format!("client build failed: {e}")));

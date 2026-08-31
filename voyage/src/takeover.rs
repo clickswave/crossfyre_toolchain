@@ -67,7 +67,14 @@ pub struct Fingerprint {
     pub bodies: &'static [&'static str],
     /// Whether an NXDOMAIN on the CNAME target is expected for this provider
     /// when the resource is gone. Informational: an NXDOMAIN is reported for
-    /// any provider, known or not.
+    /// any provider, known or not, so `check` never reads this.
+    ///
+    /// It is not decoration. The corpus test asserts every fingerprint has at
+    /// least one usable signal (`nxdomain || !bodies.is_empty()`), which catches
+    /// an entry that would otherwise sit in the table and never match anything.
+    /// Only the test reads it, hence the allow: clippy is right that the shipped
+    /// binary does not.
+    #[allow(dead_code)]
     pub nxdomain: bool,
     pub status: Status,
 }
@@ -80,7 +87,12 @@ pub struct Fingerprint {
 pub const FINGERPRINTS: &[Fingerprint] = &[
     Fingerprint {
         service: "AWS S3",
-        cnames: &["s3.amazonaws.com", "s3-website", "s3.dualstack", "amazonaws.com"],
+        cnames: &[
+            "s3.amazonaws.com",
+            "s3-website",
+            "s3.dualstack",
+            "amazonaws.com",
+        ],
         bodies: &["NoSuchBucket", "The specified bucket does not exist"],
         nxdomain: false,
         status: Status::Vulnerable,
@@ -102,10 +114,7 @@ pub const FINGERPRINTS: &[Fingerprint] = &[
     Fingerprint {
         service: "Heroku",
         cnames: &["herokuapp.com", "herokudns.com", "herokussl.com"],
-        bodies: &[
-            "No such app",
-            "herokucdn.com/error-pages/no-such-app.html",
-        ],
+        bodies: &["No such app", "herokucdn.com/error-pages/no-such-app.html"],
         nxdomain: false,
         status: Status::Vulnerable,
     },
@@ -269,10 +278,7 @@ pub const FINGERPRINTS: &[Fingerprint] = &[
     Fingerprint {
         service: "Campaign Monitor",
         cnames: &["createsend.com", "createsend.net"],
-        bodies: &[
-            "Trying to access your account?",
-            "double-check the URL",
-        ],
+        bodies: &["Trying to access your account?", "double-check the URL"],
         nxdomain: false,
         status: Status::Vulnerable,
     },
@@ -387,14 +393,19 @@ pub const FINGERPRINTS: &[Fingerprint] = &[
     Fingerprint {
         service: "Aftership",
         cnames: &["aftership.com"],
-        bodies: &["Oops.</h2><p class=\"text-muted text-tight\">The page you're looking for doesn't exist."],
+        bodies: &[
+            "Oops.</h2><p class=\"text-muted text-tight\">The page you're looking for doesn't exist.",
+        ],
         nxdomain: false,
         status: Status::Vulnerable,
     },
     Fingerprint {
         service: "Big Cartel",
         cnames: &["bigcartel.com"],
-        bodies: &["<h1>Oops! We could&#8217;t find that page.</h1>", "Oops! We couldn"],
+        bodies: &[
+            "<h1>Oops! We could&#8217;t find that page.</h1>",
+            "Oops! We couldn",
+        ],
         nxdomain: false,
         status: Status::Vulnerable,
     },
@@ -647,9 +658,11 @@ impl Report {
 /// Match a CNAME target against the fingerprint list.
 fn fingerprint_for(target: &str) -> Option<&'static Fingerprint> {
     let t = target.trim_end_matches('.').to_lowercase();
-    FINGERPRINTS
-        .iter()
-        .find(|fp| fp.cnames.iter().any(|c| t == *c || t.ends_with(&format!(".{c}"))))
+    FINGERPRINTS.iter().find(|fp| {
+        fp.cnames
+            .iter()
+            .any(|c| t == *c || t.ends_with(&format!(".{c}")))
+    })
 }
 
 /// Walk the CNAME chain for `host`, following at most `MAX_HOPS` links.
@@ -841,8 +854,16 @@ mod tests {
                 f.service
             );
             for c in f.cnames {
-                assert!(!c.starts_with('.'), "{}: cname '{c}' should not start with a dot", f.service);
-                assert!(!c.ends_with('.'), "{}: cname '{c}' should not end with a dot", f.service);
+                assert!(
+                    !c.starts_with('.'),
+                    "{}: cname '{c}' should not start with a dot",
+                    f.service
+                );
+                assert!(
+                    !c.ends_with('.'),
+                    "{}: cname '{c}' should not end with a dot",
+                    f.service
+                );
             }
         }
     }
@@ -859,7 +880,10 @@ mod tests {
         };
         assert_eq!(base.severity(), "high");
 
-        let edge = Report { status: Some(Status::EdgeCase), ..base.clone() };
+        let edge = Report {
+            status: Some(Status::EdgeCase),
+            ..base.clone()
+        };
         assert_eq!(edge.severity(), "medium");
 
         // An NXDOMAIN dangle is high even with no provider identified: the
@@ -872,7 +896,10 @@ mod tests {
         };
         assert_eq!(nx.severity(), "high");
 
-        let clean = Report { verdict: Verdict::Clean, ..base.clone() };
+        let clean = Report {
+            verdict: Verdict::Clean,
+            ..base.clone()
+        };
         assert_eq!(clean.severity(), "info");
         assert!(!clean.is_finding());
     }

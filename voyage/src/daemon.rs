@@ -808,12 +808,9 @@ async fn handle_stream_takeover(
             reqwest::redirect::Policy::limited(3)
         });
     if params.block_internal {
-        builder = builder.dns_resolver(std::sync::Arc::new(
-            transport::guard::PublicOnlyResolver,
-        ));
+        builder = builder.dns_resolver(std::sync::Arc::new(transport::guard::PublicOnlyResolver));
     }
-    let client = match builder.build()
-    {
+    let client = match builder.build() {
         Ok(c) => c,
         Err(e) => {
             write_json(
@@ -926,7 +923,9 @@ async fn handle_stream_takeover(
                         let Ok(resp) = client.get(format!("{scheme}://{h}/")).send().await else {
                             continue;
                         };
-                        let Ok(body) = resp.text().await else { continue };
+                        let Ok(body) = resp.text().await else {
+                            continue;
+                        };
                         let mut body = body;
                         body.truncate(
                             body.char_indices()

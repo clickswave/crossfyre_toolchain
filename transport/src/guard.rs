@@ -88,7 +88,11 @@ async fn resolve_public(host: String) -> Result<Vec<SocketAddr>, String> {
         .map_err(|e| format!("could not resolve {host}: {e}"))?
         .collect();
 
-    let public: Vec<SocketAddr> = addrs.iter().copied().filter(|a| !is_internal(&a.ip())).collect();
+    let public: Vec<SocketAddr> = addrs
+        .iter()
+        .copied()
+        .filter(|a| !is_internal(&a.ip()))
+        .collect();
 
     if public.is_empty() {
         // Generic on purpose. The precise reason is a useful oracle for mapping
@@ -145,9 +149,9 @@ mod tests {
             // The one an SSRF is usually aiming for.
             "169.254.169.254",
             "0.0.0.0",
-            "100.64.0.1",   // CGNAT
-            "198.18.0.1",   // benchmarking
-            "240.0.0.1",    // reserved
+            "100.64.0.1", // CGNAT
+            "198.18.0.1", // benchmarking
+            "240.0.0.1",  // reserved
             "255.255.255.255",
         ] {
             assert!(is_internal(&v4(s)), "{s} should be blocked");
@@ -156,7 +160,13 @@ mod tests {
 
     #[test]
     fn allows_ordinary_public_addresses() {
-        for s in ["1.1.1.1", "8.8.8.8", "93.184.216.34", "172.32.0.1", "100.128.0.1"] {
+        for s in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "93.184.216.34",
+            "172.32.0.1",
+            "100.128.0.1",
+        ] {
             assert!(!is_internal(&v4(s)), "{s} should be allowed");
         }
     }
@@ -191,7 +201,7 @@ mod tests {
 
 #[cfg(test)]
 mod client_tests {
-    use crate::{ClientConfig, Redirect, build_client};
+    use crate::{build_client, ClientConfig, Redirect};
 
     /// End-to-end through a real built client: the guard must stop the request
     /// at resolution, not merely exist as a filter function.
