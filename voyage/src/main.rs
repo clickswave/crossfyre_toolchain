@@ -11,6 +11,7 @@ mod daemon;
 mod libs;
 mod scanner;
 mod scanners;
+mod takeover;
 
 /// Mirrors the toolchain config at ~/.config/crossfyre/config.toml
 #[derive(Debug, Deserialize)]

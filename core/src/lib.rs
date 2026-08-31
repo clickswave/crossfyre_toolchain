@@ -456,6 +456,8 @@ async fn run_operation(cmd: serde_json::Value, ctx: OpCtx) {
         ops::web_crawl::handle(env).await;
     } else if op_type.starts_with("subdomain-enum-") {
         ops::subdomain_enum::handle(env).await;
+    } else if op_type.starts_with("takeover-") {
+        ops::takeover::handle(env).await;
     } else if op_type.starts_with("origin-discovery-") {
         ops::origin_discovery::handle(env).await;
     } else if op_type.starts_with("network-scan-") {

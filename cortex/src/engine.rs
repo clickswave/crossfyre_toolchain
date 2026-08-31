@@ -38,6 +38,43 @@ pub struct ScanParams {
     /// Only run passive header checks (no template requests).
     #[serde(default)]
     pub passive_only: bool,
+    /// Announce ourselves under this exact User-Agent instead of presenting as a
+    /// browser.
+    ///
+    /// `evasive: false` is NOT enough for this. Both `Fast` and `Evasive` resolve
+    /// to a real desktop-Chrome identity, because the flag chooses whether to
+    /// BLEND (rotate profiles per target), not whether to be honest. Every mode
+    /// therefore sends a Chrome User-Agent, which is the correct default for a
+    /// scan a customer authorised on their own property and the wrong one for
+    /// anything that reaches a host whose owner never asked.
+    ///
+    /// The public free tools set this. Presenting as a browser while probing a
+    /// stranger is what turns a defensible service into an indefensible one, so
+    /// there has to be a way to say plainly who is calling. Setting it also drops
+    /// the browser hint headers, since a named scanner claiming Sec-Fetch-User
+    /// and sec-ch-ua is not honest, just differently dressed.
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    /// Refuse to connect to private / reserved addresses.
+    ///
+    /// Off by default: scanning a customer's own internal network from a node
+    /// inside it is the product working. The public free tools turn it on,
+    /// because there an anonymous stranger picks the destination and the hop is
+    /// ours. Enforced in `transport` at the resolver, so it also covers redirect
+    /// hops and DNS rebinding.
+    #[serde(default)]
+    pub block_internal: bool,
+    /// Template-id allowlist. Empty = every template the severity filter admits.
+    ///
+    /// The severity filter alone cannot express "run the exposure pack and
+    /// nothing else", because severity cuts across categories: a public tool
+    /// that promises to look for exposed files must not also fire an SQLi
+    /// probe at a stranger's host just because both are `high`. Naming the
+    /// templates is the only selection that is precise enough to defend in an
+    /// abuse ticket, so the free tools pass this and the caller decides the
+    /// blast radius rather than the engine.
+    #[serde(default)]
+    pub only: Vec<String>,
     /// Optional request auth (headers + cookie) resolved from a credential by the
     /// node, so scanning (and later authorization testing) runs authenticated.
     #[serde(default)]
@@ -75,6 +112,38 @@ pub(crate) struct BaseResp {
     pub(crate) headers: Vec<(String, String)>,
     /// First chunk of the body, for WAF/anti-bot challenge detection.
     pub(crate) body_prefix: String,
+}
+
+/// Replace a resolved identity with an honest, announced one.
+///
+/// No-op when `ua` is absent or blank, which is every existing workflow.
+///
+/// When set, this drops the browser-hint headers along with the User-Agent.
+/// Keeping `sec-ch-ua` and the `Sec-Fetch-*` set alongside a scanner name would
+/// be a client claiming to be two different things at once, which is worse than
+/// either alone: it reads as evasion that forgot to change its User-Agent.
+fn announce_as(ident: &mut adaptive::identity::Identity, ua: Option<&str>) {
+    let Some(ua) = ua.map(str::trim).filter(|u| !u.is_empty()) else {
+        return;
+    };
+    ident.user_agent = ua.to_string();
+    ident.headers.retain(|(k, _)| {
+        let k = k.to_ascii_lowercase();
+        !(k.starts_with("sec-ch-ua")
+            || k.starts_with("sec-fetch")
+            || k == "upgrade-insecure-requests")
+    });
+}
+
+/// Whether this scan should present a browser TLS/HTTP2 fingerprint.
+///
+/// An announced User-Agent forces emulation off regardless of posture, because
+/// under the impersonate backend the emulation profile owns the fingerprint AND
+/// replaces the header map. A browser signature shipping under a scanner's name
+/// is the contradiction this exists to prevent.
+fn should_emulate(ua: Option<&str>, mode: &adaptive::identity::Mode) -> bool {
+    let announced = ua.map(str::trim).is_some_and(|u| !u.is_empty());
+    !announced && !matches!(mode, adaptive::identity::Mode::Fast)
 }
 
 pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
@@ -147,8 +216,9 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
             user_agent: Some(ua),
             browser_headers,
             extra_headers,
-            emulate: !matches!(mode, adaptive::identity::Mode::Fast),
+            emulate: should_emulate(params.user_agent.as_deref(), &mode),
             resolve: Vec::new(),
+            block_internal: params.block_internal,
         })
     };
 
@@ -173,7 +243,8 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
         } else {
             format!("{}#{}", params.target, rotations)
         };
-        let ident = adaptive::identity::resolve(&mode, Some(seed.as_str()));
+        let mut ident = adaptive::identity::resolve(&mode, Some(seed.as_str()));
+        announce_as(&mut ident, params.user_agent.as_deref());
         let client = match build_client(&ident, clearance.as_ref()) {
             Ok(c) => c,
             Err(e) => {
@@ -299,6 +370,11 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
     let sev_filter: Vec<String> = params.severity.iter().map(|s| s.to_lowercase()).collect();
     let allow = |sev: &str| sev_filter.is_empty() || sev_filter.iter().any(|s| s == sev);
 
+    // Template-id allowlist, applied on top of the severity filter. Both must
+    // admit a template for it to run.
+    let only: Vec<String> = params.only.iter().map(|s| s.to_lowercase()).collect();
+    let allow_id = |id: &str| only.is_empty() || only.iter().any(|s| s == &id.to_lowercase());
+
     let mut found: i64 = 0;
 
     // --- Passive header checks on the base response (deterministic) ---
@@ -311,7 +387,7 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
         false
     } else if let Some(resp) = base_resp {
         for (name, template, severity, description) in header_checks(&resp) {
-            if allow(severity) {
+            if allow(severity) && allow_id(template) {
                 found += 1;
                 let _ = tx.send(json!({
                     "type": "finding",
@@ -344,7 +420,13 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
             .as_deref()
             .map(template::load_dir)
             .unwrap_or_default();
-        let total = template::BUILTIN.len() + external.len();
+        // Count only what will actually run, or a filtered scan reports progress
+        // against a denominator it can never reach and the UI sticks at 20%.
+        let total = template::BUILTIN
+            .iter()
+            .chain(external.iter())
+            .filter(|t| allow_id(&t.id))
+            .count();
         let mut done = 0usize;
 
         // OAST client for out-of-band (interactsh) templates; None disables OOB.
@@ -356,6 +438,12 @@ pub async fn run(params: ScanParams, tx: mpsc::UnboundedSender<Value>) {
             .or_else(crate::oast::OastClient::from_env);
 
         for tmpl in template::BUILTIN.iter().chain(external.iter()) {
+            // Skipped before the progress counter, because `total` above counts
+            // only id-allowed templates. The severity filter stays inside the
+            // loop, where it has always been counted as work done.
+            if !allow_id(&tmpl.id) {
+                continue;
+            }
             let sev = if tmpl.info.severity.is_empty() {
                 "info".to_string()
             } else {
@@ -484,4 +572,82 @@ pub(crate) async fn fetch_base(client: &Client, base: &str) -> Option<BaseResp> 
 
 fn normalize_base(t: &str) -> Option<String> {
     transport::url::normalize_target(t).map(|tgt| tgt.base())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use adaptive::identity::Mode;
+
+    #[test]
+    fn announced_ua_replaces_the_browser_identity() {
+        let mut id = adaptive::identity::resolve(&Mode::Fast, None);
+        // Baseline: EVERY posture resolves to a real browser, which is exactly
+        // why an explicit announce is needed and `evasive: false` is not enough.
+        assert!(
+            id.user_agent.contains("Mozilla"),
+            "expected a browser UA by default, got {}",
+            id.user_agent
+        );
+
+        announce_as(&mut id, Some("Crossfyre-FreeTools/1.0 (+https://crossfyre.io/scanning)"));
+        assert_eq!(
+            id.user_agent,
+            "Crossfyre-FreeTools/1.0 (+https://crossfyre.io/scanning)"
+        );
+        // The browser-hint headers must go with it. A scanner claiming
+        // sec-ch-ua is not honest, just differently dressed.
+        for (k, _) in &id.headers {
+            let lk = k.to_ascii_lowercase();
+            assert!(!lk.starts_with("sec-ch-ua"), "left a browser hint header: {k}");
+            assert!(!lk.starts_with("sec-fetch"), "left a browser hint header: {k}");
+            assert_ne!(lk, "upgrade-insecure-requests");
+        }
+    }
+
+    #[test]
+    fn announce_is_a_noop_when_unset() {
+        let before = adaptive::identity::resolve(&Mode::Evasive, None);
+        for ua in [None, Some(""), Some("   ")] {
+            let mut id = adaptive::identity::resolve(&Mode::Evasive, None);
+            announce_as(&mut id, ua);
+            assert_eq!(id.user_agent, before.user_agent);
+            assert_eq!(id.headers.len(), before.headers.len());
+        }
+    }
+
+    #[test]
+    fn announcing_forces_emulation_off() {
+        // An announced UA wins over every posture. Without this, a config that
+        // set `identify` would resolve to Mode::Identify and silently turn a
+        // browser TLS fingerprint back on underneath our own name.
+        for mode in [Mode::Evasive, Mode::Fast, Mode::Identify("t".into())] {
+            assert!(
+                !should_emulate(Some("Crossfyre-FreeTools/1.0"), &mode),
+                "announced UA must never emulate ({mode:?})"
+            );
+        }
+        // Unannounced behaviour is unchanged: Fast never emulates, others do.
+        assert!(!should_emulate(None, &Mode::Fast));
+        assert!(should_emulate(None, &Mode::Evasive));
+        assert!(should_emulate(Some("  "), &Mode::Identify("t".into())));
+    }
+
+    #[test]
+    fn template_allowlist_matches_exactly_not_by_substring() {
+        // `only` names templates. A substring match would let "git" pull in
+        // every git-adjacent template and quietly widen a tool's blast radius,
+        // which is the failure this allowlist exists to prevent.
+        let only: Vec<String> = vec!["git-config-exposure".into()];
+        let allow_id = |id: &str| only.is_empty() || only.iter().any(|s| s == &id.to_lowercase());
+        assert!(allow_id("git-config-exposure"));
+        assert!(allow_id("GIT-CONFIG-EXPOSURE"));
+        assert!(!allow_id("git-head-exposure"));
+        assert!(!allow_id("path-traversal-lfi"));
+
+        // Empty means unrestricted, which is what every existing workflow sends.
+        let none: Vec<String> = vec![];
+        let allow_all = |id: &str| none.is_empty() || none.iter().any(|s| s == &id.to_lowercase());
+        assert!(allow_all("anything"));
+    }
 }

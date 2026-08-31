@@ -74,7 +74,8 @@ pub fn build_client(
         accept_invalid_certs: true,
         cookie_store: true,
         resolve: Vec::new(),
-    })
+            ..Default::default()
+        })
     .ok()
 }
 
@@ -101,7 +102,8 @@ pub fn build_client_no_redirect(
         accept_invalid_certs: true,
         cookie_store: true,
         resolve: Vec::new(),
-    })
+            ..Default::default()
+        })
     .ok()
 }
 

@@ -7,6 +7,7 @@ pub mod network_scan;
 pub mod origin_discovery;
 pub mod service_enum;
 pub mod subdomain_enum;
+pub mod takeover;
 pub mod vuln_scan;
 pub mod web_crawl;
 

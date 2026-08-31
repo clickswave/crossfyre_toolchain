@@ -99,6 +99,24 @@ pub async fn handle(env: OpEnv) {
             "follow_redirects": data["follow_redirects"].as_bool().unwrap_or(true),
             "severity": sev_arr,
             "templates_dir": data["templates_dir"].clone(),
+            // Template-id allowlist. Empty/absent = every template the severity
+            // filter admits, which is the behaviour every existing workflow got.
+            // The public free tools set it so a checker that advertises one thing
+            // cannot fire an unrelated probe at a stranger's host.
+            // `as_array().unwrap_or_default()` rather than a bare clone: an absent
+            // key clones to JSON null, and serde's `default` only fills a MISSING
+            // field, so null would fail to deserialize into Vec<String>.
+            "only": data["only"].as_array().cloned().unwrap_or_default(),
+            // Passive header checks only, no template requests at all.
+            "passive_only": data["passive_only"].as_bool().unwrap_or(false),
+            // Announce ourselves under this exact User-Agent instead of
+            // presenting as a browser, and drop emulation with it. Empty leaves
+            // the engine's own posture, which is what every existing workflow
+            // gets. The public free tools set it.
+            "user_agent": data["user_agent"].as_str().unwrap_or(""),
+            // Refuse private / reserved destinations at connect time. Absent =
+            // false, which is the behaviour every existing workflow gets.
+            "block_internal": data["block_internal"].as_bool().unwrap_or(false),
         })
     };
 
